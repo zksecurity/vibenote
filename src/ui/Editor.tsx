@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import * as Y from 'yjs';
+import { marked } from 'marked';
 import type { NoteDoc } from '../storage/local';
 
 interface Props {
@@ -38,12 +39,17 @@ export function Editor({ doc, onChange }: Props) {
     });
   };
 
+  const html = useMemo(() => marked.parse(text), [text]);
+
   return (
-    <textarea
-      value={text}
-      onChange={(e) => onInput(e.target.value)}
-      spellCheck={false}
-    />
+    <>
+      <textarea
+        value={text}
+        onChange={(e) => onInput(e.target.value)}
+        spellCheck={false}
+      />
+      <div className="preview" dangerouslySetInnerHTML={{ __html: html }} />
+    </>
   );
 }
 
