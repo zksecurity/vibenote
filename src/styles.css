@@ -39,6 +39,9 @@ body { background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, sans
   overflow:auto;
 }
 
+.modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; }
+.modal { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:20px; display:flex; flex-direction:column; gap:10px; min-width:260px; }
+
 @media (max-width: 800px) {
   .app { grid-template-columns: 1fr; }
   .sidebar { display:none; }
