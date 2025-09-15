@@ -4,11 +4,12 @@ import { repoExists } from '../sync/git-sync';
 interface Props {
   defaultOwner: string;
   defaultRepo?: string;
+  mode: 'onboard' | 'manage';
   onSubmit: (cfg: { owner: string; repo: string; branch: string }) => void;
   onCancel: () => void;
 }
 
-export function RepoConfigModal({ defaultOwner, defaultRepo, onSubmit, onCancel }: Props) {
+export function RepoConfigModal({ defaultOwner, defaultRepo, mode, onSubmit, onCancel }: Props) {
   const [repo, setRepo] = useState(defaultRepo || 'notes');
   const [exists, setExists] = useState<boolean | null>(null);
   const [checking, setChecking] = useState(false);
@@ -43,10 +44,14 @@ export function RepoConfigModal({ defaultOwner, defaultRepo, onSubmit, onCancel 
   return (
     <div className="modal-backdrop" onClick={onCancel}>
       <form className="modal" onSubmit={submit} onClick={(e) => e.stopPropagation()}>
-        <h3>Create your notes repo (optional)</h3>
+        <h3>{mode === 'onboard' ? 'Set up your notes repository' : 'Change notes repository'}</h3>
         <div style={{ color: 'var(--muted)' }}>
-          We recommend a private repository for your notes.
-          Enter a name to create or connect a repo under your account. You can skip and continue offline.
+          {mode === 'onboard'
+            ? (
+              <>We recommend a private repository for your notes. Enter a name to create a new repo under your account or connect to an existing one. You can skip now and continue offline; connect any time from the header.</>
+            ) : (
+              <>Choose the repository to connect. Type a name to connect to an existing repo or create a new private one.</>
+            )}
         </div>
         <div className="toolbar" style={{ gap: 8 }}>
           <input className="input" value={defaultOwner} disabled />
@@ -59,11 +64,25 @@ export function RepoConfigModal({ defaultOwner, defaultRepo, onSubmit, onCancel 
           />
         </div>
         <div style={{ color:'var(--muted)', minHeight: 20 }}>
-          {checking ? 'Checking repository…' : exists === true ? 'Repository exists — connect to it' : exists === false ? 'Will create a new private repository' : ''}
+          {checking
+            ? 'Checking repository…'
+            : (defaultRepo && repo.trim() === defaultRepo)
+              ? 'Currently connected'
+              : exists === true
+                ? 'Repository exists — connect to it'
+                : exists === false
+                  ? 'Will create a new private repository'
+                  : ''}
         </div>
         <div className="toolbar" style={{ justifyContent: 'flex-end' }}>
-          <button type="button" className="btn" onClick={onCancel}>Skip</button>
-          <button type="submit" className="btn primary">{exists ? 'Connect repository' : 'Create repository'}</button>
+          <button type="button" className="btn" onClick={onCancel}>{mode === 'onboard' ? 'Skip' : 'Cancel'}</button>
+          <button
+            type="submit"
+            className="btn primary"
+            disabled={Boolean(defaultRepo && repo.trim() === defaultRepo) || !repo.trim()}
+          >
+            {(defaultRepo && repo.trim() === defaultRepo) ? 'Already connected' : (exists ? (mode === 'onboard' ? 'Connect repository' : 'Switch to repository') : (mode === 'onboard' ? 'Create repository' : 'Create and connect'))}
+          </button>
         </div>
       </form>
     </div>

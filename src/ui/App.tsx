@@ -22,6 +22,7 @@ export function App() {
   const [user, setUser] = useState<{ login: string; name?: string; avatar_url?: string } | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [toast, setToast] = useState<{ text: string; href?: string } | null>(null);
+  const [repoModalMode, setRepoModalMode] = useState<'onboard' | 'manage'>('manage');
 
   useEffect(() => {
     setNotes(store.listNotes());
@@ -101,6 +102,7 @@ export function App() {
       const u = await fetchCurrentUser();
       setOwnerLogin(u?.login ?? null);
     }
+    setRepoModalMode('manage');
     setShowConfig(true);
   };
 
@@ -264,6 +266,7 @@ export function App() {
         <RepoConfigModal
           defaultOwner={ownerLogin}
           defaultRepo={remoteCfg?.repo}
+          mode={repoModalMode}
           onSubmit={onConfigSubmit}
           onCancel={() => setShowConfig(false)}
         />
@@ -278,6 +281,7 @@ export function App() {
               fetchCurrentUser().then((u) => {
                 setOwnerLogin(u?.login ?? null);
                 setUser(u);
+                setRepoModalMode('onboard');
                 setShowConfig(true);
               });
             }
