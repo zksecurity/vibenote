@@ -119,6 +119,30 @@ function toBase64(input: string): string {
   return btoa(binary);
 }
 
+export async function deleteFiles(
+  files: { path: string; sha: string }[],
+  message: string
+): Promise<string | null> {
+  if (!remote || files.length === 0) return null;
+  let commitSha: string | null = null;
+  for (const f of files) {
+    const url = `https://api.github.com/repos/${remote.owner}/${remote.repo}/contents/${encodeApiPath(f.path)}`;
+    const res = await fetch(url, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({
+        message,
+        sha: f.sha,
+        branch: remote.branch,
+      }),
+    });
+    if (!res.ok) throw new Error('Delete failed');
+    const data = await res.json();
+    commitSha = data.commit?.sha || commitSha;
+  }
+  return commitSha;
+}
+
 function fromBase64(b64: string): string {
   const binary = atob(b64);
   const len = binary.length;

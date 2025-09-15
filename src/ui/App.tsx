@@ -3,7 +3,7 @@ import { NoteList } from './NoteList';
 import { Editor } from './Editor';
 import { LocalStore, type NoteMeta, type NoteDoc } from '../storage/local';
 import { getStoredToken, requestDeviceCode, fetchCurrentUser, clearToken } from '../auth/github';
-import { configureRemote, getRemoteConfig, pullNote, commitBatch, ensureRepoExists, repoExists, clearRemoteConfig, listNoteFiles } from '../sync/git-sync';
+import { configureRemote, getRemoteConfig, pullNote, commitBatch, ensureRepoExists, repoExists, clearRemoteConfig, listNoteFiles, deleteFiles } from '../sync/git-sync';
 import { RepoConfigModal } from './RepoConfigModal';
 import { DeviceCodeModal } from './DeviceCodeModal';
 
@@ -177,20 +177,32 @@ export function App() {
       }
       // Gather changed files by comparing local text to remote HEAD
       const files: { path: string; text: string; baseSha?: string }[] = [];
+      const toDelete: { path: string; sha: string }[] = [];
+      const remoteEntries = await listNoteFiles();
+      const remoteMap = new Map(remoteEntries.map(e => [e.path, e.sha] as const));
+      const localPaths = new Set<string>();
       for (const n of store.listNotes()) {
         const local = store.loadNote(n.id);
         if (!local) continue;
+        localPaths.add(local.path);
         const remote = await pullNote(local.path);
         if (!remote || remote.text !== local.text) {
           files.push({ path: local.path, text: local.text, baseSha: remote?.sha });
         }
       }
-      if (files.length === 0) {
+      // Anything on remote not present locally should be deleted
+      for (const e of remoteEntries) {
+        if (!localPaths.has(e.path)) {
+          toDelete.push({ path: e.path, sha: e.sha });
+        }
+      }
+      if (files.length === 0 && toDelete.length === 0) {
         setSyncMsg('Up to date');
         return;
       }
-      const commitSha = await commitBatch(files, 'gitnote: update notes');
-      setSyncMsg(commitSha ? 'Synced ✔' : 'Nothing to commit');
+      const commitSha1 = files.length ? await commitBatch(files, 'gitnote: update notes') : null;
+      const commitSha2 = toDelete.length ? await deleteFiles(toDelete, 'gitnote: delete removed notes') : null;
+      setSyncMsg(commitSha1 || commitSha2 ? 'Synced ✔' : 'Nothing to commit');
     } catch (err) {
       console.error(err);
       setSyncMsg('Sync failed');
