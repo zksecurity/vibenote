@@ -3,7 +3,7 @@ import { NoteList } from './NoteList';
 import { Editor } from './Editor';
 import { LocalStore, type NoteMeta, type NoteDoc } from '../storage/local';
 import { getStoredToken, requestDeviceCode, fetchCurrentUser, clearToken } from '../auth/github';
-import { configureRemote, getRemoteConfig, pullNote, commitBatch, ensureRepoExists, repoExists, clearRemoteConfig } from '../sync/git-sync';
+import { configureRemote, getRemoteConfig, pullNote, commitBatch, ensureRepoExists, repoExists, clearRemoteConfig, listNoteFiles } from '../sync/git-sync';
 import { RepoConfigModal } from './RepoConfigModal';
 import { DeviceCodeModal } from './DeviceCodeModal';
 
@@ -82,6 +82,17 @@ export function App() {
         setSyncMsg('Repository created and initialized');
         setToast({ text: 'Repository ready', href: `https://github.com/${cfg.owner}/${cfg.repo}` });
       } else {
+        // Existing repo: pull notes from remote and replace local state
+        const entries = await listNoteFiles();
+        const files: { path: string; text: string; sha?: string }[] = [];
+        for (const e of entries) {
+          const rf = await pullNote(e.path);
+          if (rf) files.push({ path: rf.path, text: rf.text, sha: rf.sha });
+        }
+        // Replace local storage with remote files
+        store.replaceWithRemote(files);
+        setNotes(store.listNotes());
+        setActiveId(store.listNotes()[0]?.id ?? null);
         setSyncMsg('Connected to repository');
       }
     } catch (e) {

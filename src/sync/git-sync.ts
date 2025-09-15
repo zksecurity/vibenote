@@ -91,6 +91,21 @@ export async function commitBatch(
   return commitSha;
 }
 
+// List Markdown files under the configured notesDir at HEAD
+export async function listNoteFiles(): Promise<{ path: string; sha: string }[]> {
+  if (!remote) return [];
+  const dir = remote.notesDir.replace(/(^\/+|\/+?$)/g, '');
+  const url = `https://api.github.com/repos/${remote.owner}/${remote.repo}/contents/${dir}?ref=${remote.branch}`;
+  const res = await fetch(url, { headers: authHeaders() });
+  if (res.status === 404) return [];
+  if (!res.ok) throw new Error('Failed to list notes directory');
+  const data = await res.json();
+  if (!Array.isArray(data)) return [];
+  return data
+    .filter((e: any) => e.type === 'file' && typeof e.path === 'string' && /\.md$/i.test(e.name))
+    .map((e: any) => ({ path: e.path as string, sha: e.sha as string }));
+}
+
 // --- base64 helpers that safely handle UTF-8 ---
 function toBase64(input: string): string {
   const encoder = new TextEncoder();

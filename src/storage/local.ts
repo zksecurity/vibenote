@@ -73,6 +73,28 @@ export class LocalStore {
     this.index = idx;
   }
 
+  // Replace the entire local store with files from remote
+  replaceWithRemote(files: { path: string; text: string; sha?: string }[]) {
+    // Clear existing notes
+    const prev = this.loadIndex();
+    for (const n of prev) {
+      localStorage.removeItem(k(`note:${n.id}`));
+    }
+    // Build new index/docs
+    const now = Date.now();
+    const index: NoteMeta[] = [];
+    for (const f of files) {
+      const id = crypto.randomUUID();
+      const title = unslugify(basename(f.path).replace(/\.md$/i, ''));
+      const meta: NoteMeta = { id, path: f.path, title, updatedAt: now };
+      const doc: NoteDoc = { ...meta, text: f.text, lastRemoteSha: f.sha };
+      index.push(meta);
+      localStorage.setItem(k(`note:${id}`), JSON.stringify(doc));
+    }
+    localStorage.setItem(k('index'), JSON.stringify(index));
+    this.index = index;
+  }
+
   // --- internals ---
   private loadIndex(): NoteMeta[] {
     const raw = localStorage.getItem(k('index'));
@@ -93,3 +115,12 @@ function slugify(s: string) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 }
 
+function basename(p: string) {
+  const i = p.lastIndexOf('/');
+  return i >= 0 ? p.slice(i + 1) : p;
+}
+
+function unslugify(s: string) {
+  const words = s.replace(/[-_]+/g, ' ').trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
