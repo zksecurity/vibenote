@@ -9,30 +9,9 @@ GitNote is a lightweight, mobile‑friendly, offline‑first note editor that tr
 
 See DESIGN.md for a detailed architecture and sync/merge logic.
 
-## Quick start
+## Development
 
-1. Install dependencies
-
-```
-npm install
-```
-
-2. Start dev server
-
-```
-npm run dev
-```
-
-3. Open http://localhost:5173
- 
-4. Configure GitHub OAuth device flow
-
-Create `.env` with your GitHub OAuth App client id (server‑side only):
-
-```
-cp .env.example .env
-# Edit .env and set GITHUB_CLIENT_ID
-```
+See `AGENTS.md` for local setup, environment variables, and serverless API instructions.
 
 ## Project layout
 
@@ -54,27 +33,9 @@ This is an MVP scaffold meant to be easy to iterate on by another LLM agent. The
 
 Production‑grade items (auth, real Git push/pull, better editor, y-websocket, presence) are described and planned in DESIGN.md.
 
-## Deploying to Vercel
+## Deploying
 
-- Framework: Vite (React). Build outputs to `dist/`. A `vercel.json` is included so Vercel uses `npm run build` and serves `dist/`.
-- Connect this repo to Vercel and select the Vite framework (auto‑detected).
-- Set env var `VITE_GITHUB_CLIENT_ID` in Vercel:
-  - Project Settings → Environment Variables
-  - Add for both Preview and Production
-  - Key: `VITE_GITHUB_CLIENT_ID`, Value: your GitHub OAuth App Client ID
-
-### Preview deployments
-
-- When linked to GitHub, Vercel creates preview deployments for every PR automatically.
-- Ensure the `VITE_GITHUB_CLIENT_ID` variable is defined for the Preview environment.
-- If you need different credentials per environment, add separate values for Development/Preview/Production in Vercel.
-
-### First deploy
-
-1. Import the repo in Vercel.
-2. Confirm build command (`npm run build`) and output dir (`dist`).
-3. Add `VITE_GITHUB_CLIENT_ID` env var.
-4. Deploy. You should see the app at the assigned URL.
+Vercel deployment instructions and preview setup are documented in `AGENTS.md`.
 
 ## GitHub OAuth (Device Flow)
 
@@ -91,7 +52,7 @@ Endpoints provided by the app (Vercel functions):
 - `POST /api/github/device-code` → calls GitHub device code API
 - `POST /api/github/device-token` → polls for access token
 
-Local development: run `vercel dev` so these endpoints are available at `/api/*`, or test on a Vercel Preview deployment.
+For local development of these endpoints, see `AGENTS.md` (using `vercel dev`).
 
 ## Auth Modes
 
