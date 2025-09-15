@@ -26,7 +26,18 @@ Deploying to Vercel
 
 Commit & PR Conventions
 
-- Keep commit messages concise; no mandatory prefixes like `feat(...)`.
+- Commit messages: short, high‑level, no function names.
+  - Aim for 50–65 chars in the subject.
+  - Summarize the user‑visible change or intent, not the mechanics.
+  - Avoid prefixes like `feat(...)` and internal details (e.g., file or function names).
+  - Examples:
+    - Good: "Shorten device flow and improve mobile modal"
+    - Good: "Sync removes deleted notes"
+    - Good: "Import notes from connected repo"
+    - Avoid: "Add deleteFiles() and use in App.tsx"
+    - Avoid: "Refactor RepoConfigModal.tsx for CTA"
+  - Body (optional): one or two bullets if extra context helps reviewers.
+
 - Group related changes; avoid mega‑commits unless it’s a cohesive feature.
 - Open small PRs; rely on Vercel Preview URLs for review.
 
