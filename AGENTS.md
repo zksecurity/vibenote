@@ -56,3 +56,11 @@ Security Notes
 
 - Treat access tokens as secrets; never log them or send to third‑party services.
 - Device Flow tokens are bearer tokens; store only client‑side and clear on sign‑out.
+
+Coding Guidelines
+
+- Formatting: use Prettier (repo includes `.prettierrc`).
+- Variables: prefer `let` over `const`, except for global constants, functions, or other module‑level constant objects.
+- Types: use `type` aliases instead of `interface`.
+- Exports: collect all exports at the top of the file (named exports), avoid inline `export` sprinkled through implementations.
+- Type safety: use strong types; do not use `any`; avoid `as` casts; avoid non‑null assertions (`!`). If narrowing is required, use proper type guards.
