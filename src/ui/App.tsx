@@ -243,29 +243,38 @@ export function App() {
           <strong>GitNote</strong>
           <span style={{ color: 'var(--muted)' }}>— Offline‑first Markdown + Git</span>
           <span style={{ marginLeft: 'auto', display:'flex', gap:8, alignItems:'center' }}>
-            {/* 1) Sync Now */}
-            <button className="btn" onClick={onSyncNow} disabled={syncing}>{syncing ? 'Syncing…' : 'Sync Now'}</button>
-            {/* 2) Repo status */}
-            {remoteCfg ? (
-              <button className="btn" title="Change repository" onClick={ensureOwnerAndOpen} style={{ display:'flex', gap:6, alignItems:'center' }}>
-                <GitHubIcon />
-                <span>{remoteCfg.owner}/{remoteCfg.repo}</span>
-              </button>
+            {!token ? (
+              // Initial state: only highlight Connect GitHub
+              <button className="btn primary" onClick={onConnect}>Connect GitHub</button>
             ) : (
-              <button className="btn primary" onClick={ensureOwnerAndOpen}>
-                Connect repository
-              </button>
-            )}
-            {/* 3) Account / Connect GitHub */}
-            {token && user ? (
-              <button className="btn account-btn" onClick={() => setMenuOpen((v) => !v)} style={{ display:'flex', gap:8, alignItems:'center' }}>
-                {user.avatar_url && (
-                  <img src={user.avatar_url} alt={user.login} style={{ width:20, height:20, borderRadius:'50%' }} />
+              <>
+                {/* 1) Sync Now (only when a repository is connected) */}
+                {remoteCfg && (
+                  <button className="btn" onClick={onSyncNow} disabled={syncing}>{syncing ? 'Syncing…' : 'Sync Now'}</button>
                 )}
-                <span>{user.login}</span>
-              </button>
-            ) : (
-              <button className="btn" onClick={onConnect}>Connect GitHub</button>
+                {/* 2) Repo status */}
+                {remoteCfg ? (
+                  <button className="btn" title="Change repository" onClick={ensureOwnerAndOpen} style={{ display:'flex', gap:6, alignItems:'center' }}>
+                    <GitHubIcon />
+                    <span>{remoteCfg.owner}/{remoteCfg.repo}</span>
+                  </button>
+                ) : (
+                  <button className="btn primary" onClick={ensureOwnerAndOpen}>
+                    Connect repository
+                  </button>
+                )}
+                {/* 3) Account */}
+                {user ? (
+                  <button className="btn account-btn" onClick={() => setMenuOpen((v) => !v)} style={{ display:'flex', gap:8, alignItems:'center' }}>
+                    {user.avatar_url && (
+                      <img src={user.avatar_url} alt={user.login} style={{ width:20, height:20, borderRadius:'50%' }} />
+                    )}
+                    <span>{user.login}</span>
+                  </button>
+                ) : (
+                  <button className="btn" onClick={onConnect}>Connect GitHub</button>
+                )}
+              </>
             )}
           </span>
         </div>
