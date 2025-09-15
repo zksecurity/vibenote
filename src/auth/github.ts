@@ -42,16 +42,6 @@ export async function pollForToken(device: DeviceCodeResponse): Promise<string |
 }
 
 const TOKEN_KEY = 'vibenote:gh-token';
-const OLD_TOKEN_KEY = 'gitnote:gh-token';
-
-function migrateTokenKey() {
-  if (localStorage.getItem(TOKEN_KEY)) return;
-  const old = localStorage.getItem(OLD_TOKEN_KEY);
-  if (old) {
-    localStorage.setItem(TOKEN_KEY, old);
-    localStorage.removeItem(OLD_TOKEN_KEY);
-  }
-}
 
 export async function connectToGitHub(): Promise<string | null> {
   // Legacy helper kept for compatibility. Prefer using requestDeviceCode + pollForToken
@@ -67,13 +57,11 @@ export async function connectToGitHub(): Promise<string | null> {
 }
 
 export function getStoredToken(): string | null {
-  migrateTokenKey();
   return localStorage.getItem(TOKEN_KEY);
 }
 
 export function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(OLD_TOKEN_KEY);
 }
 
 export async function fetchCurrentUser(): Promise<{ login: string; name?: string; avatar_url?: string } | null> {

@@ -18,17 +18,17 @@ export class LocalStore {
   private notesDir = '';
 
   constructor() {
-    // One-time namespace migration from 'gitnote:*' → 'vibenote:*'
-    migrateNamespace();
     this.index = this.loadIndex();
     if (this.index.length === 0) {
       // Seed with a welcome note
-      const id = this.createNote('Welcome', `# Welcome to GitNote\n\nStart editing…`);
+      const id = this.createNote('Welcome', `# Welcome to VibeNote\n\nStart editing…`);
       this.index = this.loadIndex();
     }
   }
 
-  listNotes(): NoteMeta[] { return this.index.slice().sort((a,b)=>b.updatedAt-a.updatedAt); }
+  listNotes(): NoteMeta[] {
+    return this.index.slice().sort((a, b) => b.updatedAt - a.updatedAt);
+  }
 
   loadNote(id: string): NoteDoc | null {
     const raw = localStorage.getItem(k(`note:${id}`));
@@ -71,7 +71,7 @@ export class LocalStore {
   }
 
   deleteNote(id: string) {
-    const idx = this.loadIndex().filter(n => n.id !== id);
+    const idx = this.loadIndex().filter((n) => n.id !== id);
     localStorage.setItem(k('index'), JSON.stringify(idx));
     localStorage.removeItem(k(`note:${id}`));
     this.index = idx;
@@ -87,7 +87,7 @@ export class LocalStore {
     }
     for (const key of toRemove) localStorage.removeItem(key);
     // Seed welcome note
-    const id = this.createNote('Welcome', `# Welcome to GitNote\n\nStart editing…`);
+    const id = this.createNote('Welcome', `# Welcome to VibeNote\n\nStart editing…`);
     this.index = this.loadIndex();
     return id;
   }
@@ -118,12 +118,16 @@ export class LocalStore {
   private loadIndex(): NoteMeta[] {
     const raw = localStorage.getItem(k('index'));
     if (!raw) return [];
-    try { return JSON.parse(raw) as NoteMeta[]; } catch { return []; }
+    try {
+      return JSON.parse(raw) as NoteMeta[];
+    } catch {
+      return [];
+    }
   }
 
   private touchIndex(id: string, patch: Partial<NoteMeta>) {
     const idx = this.loadIndex();
-    const i = idx.findIndex(n => n.id === id);
+    const i = idx.findIndex((n) => n.id === id);
     if (i >= 0) idx[i] = { ...idx[i], ...patch } as NoteMeta;
     localStorage.setItem(k('index'), JSON.stringify(idx));
     this.index = idx;
@@ -146,30 +150,9 @@ function ensureValidTitle(title: string): string {
   return t;
 }
 
-function migrateNamespace() {
-  // If new namespace already present, do nothing
-  if (localStorage.getItem(`${NS}:index`)) return;
-  const oldNS = 'gitnote';
-  const oldIndexKey = `${oldNS}:index`;
-  const raw = localStorage.getItem(oldIndexKey);
-  if (!raw) return;
-  try {
-    const oldIndex = JSON.parse(raw) as NoteMeta[];
-    // Copy index
-    localStorage.setItem(`${NS}:index`, JSON.stringify(oldIndex));
-    // Copy each note doc
-    for (const n of oldIndex) {
-      const docKey = `${oldNS}:note:${n.id}`;
-      const doc = localStorage.getItem(docKey);
-      if (doc) localStorage.setItem(`${NS}:note:${n.id}`, doc);
-    }
-    // Best-effort cleanup of old keys
-    localStorage.removeItem(oldIndexKey);
-    for (const n of oldIndex) localStorage.removeItem(`${oldNS}:note:${n.id}`);
-  } catch {}
-}
+// namespace migration removed
 
 function joinPath(dir: string, file: string) {
   if (!dir) return file;
-  return `${dir.replace(/\/+$/,'')}/${file.replace(/^\/+/, '')}`;
+  return `${dir.replace(/\/+$/, '')}/${file.replace(/^\/+/, '')}`;
 }
