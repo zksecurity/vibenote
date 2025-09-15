@@ -37,6 +37,16 @@ export function getRemoteConfig(): RemoteConfig | null {
   return remote ?? loadConfig();
 }
 
+export function clearRemoteConfig() {
+  remote = null;
+  localStorage.removeItem('gitnote:config');
+}
+
+export async function repoExists(owner: string, repo: string): Promise<boolean> {
+  const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, { headers: authHeaders() });
+  return res.ok;
+}
+
 function authHeaders() {
   const token = getStoredToken();
   return {
@@ -52,7 +62,7 @@ export async function pullNote(path: string): Promise<RemoteFile | null> {
   if (res.status === 404) return null;
   if (!res.ok) throw new Error('Failed to fetch note');
   const data = await res.json();
-  const content = atob((data.content as string).replace(/\n/g, ''));
+  const content = fromBase64((data.content as string).replace(/\n/g, ''));
   return { path, text: content, sha: data.sha };
 }
 
@@ -69,7 +79,7 @@ export async function commitBatch(
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({
         message,
-        content: btoa(f.text),
+        content: toBase64(f.text),
         sha: f.baseSha,
         branch: remote.branch,
       }),
@@ -79,4 +89,35 @@ export async function commitBatch(
     commitSha = data.commit?.sha || commitSha;
   }
   return commitSha;
+}
+
+// --- base64 helpers that safely handle UTF-8 ---
+function toBase64(input: string): string {
+  const encoder = new TextEncoder();
+  const bytes = encoder.encode(input);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+function fromBase64(b64: string): string {
+  const binary = atob(b64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+  const decoder = new TextDecoder();
+  return decoder.decode(bytes);
+}
+
+export async function ensureRepoExists(owner: string, repo: string, isPrivate = true): Promise<boolean> {
+  const token = getStoredToken();
+  if (!token) return false;
+  const exists = await repoExists(owner, repo);
+  if (exists) return true;
+  const res = await fetch(`https://api.github.com/user/repos`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ name: repo, private: isPrivate, auto_init: true }),
+  });
+  return res.ok;
 }

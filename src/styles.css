@@ -8,15 +8,15 @@
 }
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
-body { background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, sans-serif; }
+body { background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
 
 .app { display: grid; grid-template-columns: 280px 1fr; height: 100%; }
 .sidebar { border-right: 1px solid var(--border); background: var(--panel); padding: 12px; overflow: auto; }
 .header { display:flex; align-items:center; gap:8px; padding: 10px 12px; border-bottom:1px solid var(--border); }
 .content { display:flex; flex-direction:column; height:100%; }
-.toolbar { display:flex; gap:8px; align-items:center; }
-.input, .select { background:#0d1017; color:var(--text); border:1px solid var(--border); border-radius:6px; padding:6px 8px; }
-.btn { background:#0d1017; color:var(--text); border:1px solid var(--border); border-radius:6px; padding:6px 10px; cursor:pointer; }
+.toolbar { display:flex; gap:10px; align-items:center; }
+.input, .select { background:#0d1017; color:var(--text); border:1px solid var(--border); border-radius:8px; padding:10px 12px; font-size:16px; }
+.btn { background:#0d1017; color:var(--text); border:1px solid var(--border); border-radius:8px; padding:10px 14px; cursor:pointer; font-size:16px; }
 .btn.primary { border-color: var(--accent); color: var(--accent); }
 .note-list { display:flex; flex-direction:column; gap:6px; margin-top:10px; }
 .note-item { padding:6px 8px; border:1px solid var(--border); border-radius:6px; cursor:pointer; }
@@ -33,14 +33,14 @@ body { background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, sans
 }
 .editor textarea {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-  font-size:14px;
+  font-size:16px;
 }
 .editor .preview {
   overflow:auto;
 }
 
 .modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; }
-.modal { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:20px; display:flex; flex-direction:column; gap:10px; min-width:280px; max-width: 520px; width: calc(100% - 32px); }
+.modal { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:24px; display:flex; flex-direction:column; gap:12px; min-width:280px; max-width: 560px; width: calc(100% - 32px); }
 
 @media (max-width: 800px) {
   .app { grid-template-columns: 1fr; }

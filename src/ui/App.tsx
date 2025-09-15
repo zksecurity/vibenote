@@ -2,8 +2,8 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { NoteList } from './NoteList';
 import { Editor } from './Editor';
 import { LocalStore, type NoteMeta, type NoteDoc } from '../storage/local';
-import { getStoredToken, requestDeviceCode } from '../auth/github';
-import { configureRemote, getRemoteConfig, pullNote, commitBatch } from '../sync/git-sync';
+import { getStoredToken, requestDeviceCode, fetchCurrentUser, clearToken } from '../auth/github';
+import { configureRemote, getRemoteConfig, pullNote, commitBatch, ensureRepoExists, repoExists, clearRemoteConfig } from '../sync/git-sync';
 import { RepoConfigModal } from './RepoConfigModal';
 import { DeviceCodeModal } from './DeviceCodeModal';
 
@@ -17,6 +17,11 @@ export function App() {
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [device, setDevice] = useState<import('../auth/github').DeviceCodeResponse | null>(null);
+  const [ownerLogin, setOwnerLogin] = useState<string | null>(null);
+  const [remoteCfg, setRemoteCfg] = useState(getRemoteConfig());
+  const [user, setUser] = useState<{ login: string; name?: string; avatar_url?: string } | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [toast, setToast] = useState<{ text: string; href?: string } | null>(null);
 
   useEffect(() => {
     setNotes(store.listNotes());
@@ -54,9 +59,93 @@ export function App() {
     }
   };
 
-  const onConfigSubmit = (cfg: { owner: string; repo: string; branch: string }) => {
-    configureRemote({ ...cfg, notesDir: 'notes' });
-    setShowConfig(false);
+  const onConfigSubmit = async (cfg: { owner: string; repo: string; branch: string }) => {
+    try {
+      setSyncMsg(null);
+      setSyncing(true);
+      const existed = await repoExists(cfg.owner, cfg.repo);
+      await ensureRepoExists(cfg.owner, cfg.repo, true);
+      configureRemote({ ...cfg, notesDir: 'notes' });
+      setRemoteCfg(getRemoteConfig());
+      // Seed initial notes if newly created
+      if (!existed) {
+        const files: { path: string; text: string; baseSha?: string }[] = [];
+        for (const n of store.listNotes()) {
+          const local = store.loadNote(n.id);
+          if (!local) continue;
+          files.push({ path: local.path, text: local.text });
+        }
+        if (files.length > 0) {
+          await commitBatch(files, 'gitnote: initialize notes');
+        }
+        setSyncMsg('Repository created and initialized');
+        setToast({ text: 'Repository ready', href: `https://github.com/${cfg.owner}/${cfg.repo}` });
+      } else {
+        setSyncMsg('Connected to repository');
+      }
+    } catch (e) {
+      console.error(e);
+      setSyncMsg('Failed to configure repository');
+    } finally {
+      setShowConfig(false);
+      setSyncing(false);
+    }
+  };
+
+  const ensureOwnerAndOpen = async () => {
+    if (!token) {
+      await onConnect();
+      return;
+    }
+    if (!ownerLogin) {
+      const u = await fetchCurrentUser();
+      setOwnerLogin(u?.login ?? null);
+    }
+    setShowConfig(true);
+  };
+
+  const GitHubIcon = () => (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+      <path d="M8 0C3.58 0 0 3.58 0 8a8 8 0 0 0 5.47 7.59c.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.01.08-2.11 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.91.08 2.11.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+    </svg>
+  );
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 4000);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.account-menu') && !target.closest('.account-btn')) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('click', onDoc);
+    return () => document.removeEventListener('click', onDoc);
+  }, []);
+
+  // Restore user/account info on reload when a token is present
+  useEffect(() => {
+    if (!token) return;
+    (async () => {
+      const u = await fetchCurrentUser();
+      setUser(u);
+      setOwnerLogin(u?.login ?? null);
+    })();
+  }, [token]);
+
+  const onSignOut = () => {
+    clearToken();
+    clearRemoteConfig();
+    setToken(null);
+    setUser(null);
+    setOwnerLogin(null);
+    setRemoteCfg(null);
+    setMenuOpen(false);
+    setSyncMsg('Signed out');
   };
 
   const onSyncNow = async () => {
@@ -113,13 +202,30 @@ export function App() {
           <strong>GitNote</strong>
           <span style={{ color: 'var(--muted)' }}>— Offline‑first Markdown + Git</span>
           <span style={{ marginLeft: 'auto', display:'flex', gap:8, alignItems:'center' }}>
-            {token ? (
-              <span style={{ color: 'var(--muted)' }}>GitHub connected</span>
+            {/* 1) Sync Now */}
+            <button className="btn" onClick={onSyncNow} disabled={syncing}>{syncing ? 'Syncing…' : 'Sync Now'}</button>
+            {/* 2) Repo status */}
+            {remoteCfg ? (
+              <button className="btn" title="Change repository" onClick={ensureOwnerAndOpen} style={{ display:'flex', gap:6, alignItems:'center' }}>
+                <GitHubIcon />
+                <span>{remoteCfg.owner}/{remoteCfg.repo}</span>
+              </button>
+            ) : (
+              <button className="btn primary" onClick={ensureOwnerAndOpen}>
+                Connect repository
+              </button>
+            )}
+            {/* 3) Account / Connect GitHub */}
+            {token && user ? (
+              <button className="btn account-btn" onClick={() => setMenuOpen((v) => !v)} style={{ display:'flex', gap:8, alignItems:'center' }}>
+                {user.avatar_url && (
+                  <img src={user.avatar_url} alt={user.login} style={{ width:20, height:20, borderRadius:'50%' }} />
+                )}
+                <span>{user.login}</span>
+              </button>
             ) : (
               <button className="btn" onClick={onConnect}>Connect GitHub</button>
             )}
-            <button className="btn" onClick={() => setShowConfig(true)}>Repo</button>
-            <button className="btn primary" onClick={onSyncNow} disabled={syncing}>{syncing ? 'Syncing…' : 'Sync Now'}</button>
           </span>
         </div>
         <div className="editor">
@@ -139,9 +245,25 @@ export function App() {
             <span>{syncMsg}</span>
           </div>
         )}
+        {menuOpen && user && (
+          <div className="account-menu" style={{ position:'absolute', top:50, right:12, background:'var(--panel)', border:'1px solid var(--border)', borderRadius:8, padding:8, zIndex:10 }}>
+            <div style={{ padding:'6px 8px', color:'var(--muted)' }}>{user.name || user.login}</div>
+            <button className="btn" onClick={onSignOut}>Sign out</button>
+          </div>
+        )}
+        {toast && (
+          <div className="toast" style={{ position:'fixed', bottom:16, right:16, background:'var(--panel)', border:'1px solid var(--border)', borderRadius:8, padding:'10px 12px', display:'flex', gap:8, alignItems:'center' }}>
+            <span>{toast.text}</span>
+            {toast.href && (
+              <a className="btn" href={toast.href} target="_blank" rel="noreferrer">Open</a>
+            )}
+          </div>
+        )}
       </section>
-      {showConfig && (
+      {showConfig && ownerLogin && (
         <RepoConfigModal
+          defaultOwner={ownerLogin}
+          defaultRepo={remoteCfg?.repo}
           onSubmit={onConfigSubmit}
           onCancel={() => setShowConfig(false)}
         />
@@ -153,7 +275,11 @@ export function App() {
             if (t) {
               localStorage.setItem('gitnote:gh-token', t);
               setToken(t);
-              setShowConfig(true);
+              fetchCurrentUser().then((u) => {
+                setOwnerLogin(u?.login ?? null);
+                setUser(u);
+                setShowConfig(true);
+              });
             }
             setDevice(null);
           }}

@@ -61,3 +61,17 @@ export function getStoredToken(): string | null {
 export function clearToken() {
   localStorage.removeItem('gitnote:gh-token');
 }
+
+export async function fetchCurrentUser(): Promise<{ login: string; name?: string; avatar_url?: string } | null> {
+  const token = getStoredToken();
+  if (!token) return null;
+  const res = await fetch('https://api.github.com/user', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github+json',
+    },
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return { login: data.login as string, name: data.name as string | undefined, avatar_url: data.avatar_url as string | undefined };
+}
