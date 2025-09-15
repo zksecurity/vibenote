@@ -44,8 +44,15 @@ body { background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, -app
 
 @media (max-width: 800px) {
   .app { grid-template-columns: 1fr; }
-  .sidebar { display:none; }
+  .sidebar { display:none; position: fixed; top:0; bottom:0; left:0; width: 86vw; max-width: 340px; z-index: 20; box-shadow: 0 0 0 1px var(--border), 0 10px 30px rgba(0,0,0,0.5); }
+  .sidebar.open { display:block; }
   .editor { flex-direction:column; }
+}
+
+.only-mobile { display:none; }
+.sidebar-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 19; }
+@media (max-width: 800px) {
+  .only-mobile { display: inline-flex; }
 }
 
 /* Mobile-first modals: full-screen on narrow viewports */

@@ -12,6 +12,7 @@ export function App() {
   const [notes, setNotes] = useState<NoteMeta[]>(store.listNotes());
   const [activeId, setActiveId] = useState<string | null>(notes[0]?.id ?? null);
   const [doc, setDoc] = useState<NoteDoc | null>(activeId ? store.loadNote(activeId) : null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [token, setToken] = useState<string | null>(getStoredToken());
   const [showConfig, setShowConfig] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -36,6 +37,7 @@ export function App() {
     const id = store.createNote();
     setNotes(store.listNotes());
     setActiveId(id);
+    setSidebarOpen(false);
   };
 
   const onRename = (id: string, title: string) => {
@@ -226,14 +228,14 @@ export function App() {
 
   return (
     <div className="app">
-      <aside className="sidebar">
+      <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
         <div className="toolbar">
           <button className="btn primary" onClick={onCreate}>New</button>
         </div>
         <NoteList
           notes={notes}
           activeId={activeId}
-          onSelect={setActiveId}
+          onSelect={(id) => { setActiveId(id); setSidebarOpen(false); }}
           onRename={onRename}
           onDelete={onDelete}
         />
@@ -241,6 +243,7 @@ export function App() {
       <section className="content">
         <div className="header">
           <strong>GitNote</strong>
+          <button className="btn only-mobile" style={{ marginLeft: 8 }} onClick={() => setSidebarOpen(true)}>Notes</button>
           <span style={{ marginLeft: 'auto', display:'flex', gap:8, alignItems:'center' }}>
             {!token ? (
               // Initial state: only highlight Connect GitHub
@@ -309,6 +312,7 @@ export function App() {
           </div>
         )}
       </section>
+      {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
       {showConfig && ownerLogin && (
         <RepoConfigModal
           defaultOwner={ownerLogin}
