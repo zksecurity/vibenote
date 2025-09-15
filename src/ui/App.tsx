@@ -163,6 +163,9 @@ export function App() {
     setOwnerLogin(null);
     setRemoteCfg(null);
     setMenuOpen(false);
+    const id = store.resetToWelcome();
+    setNotes(store.listNotes());
+    setActiveId(id);
     setSyncMsg('Signed out');
   };
 

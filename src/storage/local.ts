@@ -75,6 +75,21 @@ export class LocalStore {
     this.index = idx;
   }
 
+  // Reset local notes to the initial welcome state (used on sign out)
+  resetToWelcome(): string {
+    const toRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key) continue;
+      if (key === k('index') || key.startsWith(k('note:'))) toRemove.push(key);
+    }
+    for (const key of toRemove) localStorage.removeItem(key);
+    // Seed welcome note
+    const id = this.createNote('Welcome', `# Welcome to GitNote\n\nStart editing…`);
+    this.index = this.loadIndex();
+    return id;
+  }
+
   // Replace the entire local store with files from remote
   replaceWithRemote(files: { path: string; text: string; sha?: string }[]) {
     // Clear existing notes
