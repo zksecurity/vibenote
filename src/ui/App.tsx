@@ -138,6 +138,12 @@ export function App() {
     </svg>
   );
 
+  const NotesIcon = () => (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+      <path d="M3 2.5h10c.28 0 .5.22.5.5v10c0 .28-.22.5-.5.5H3a.5.5 0 0 1-.5-.5V3c0-.28.22-.5.5-.5Zm1.5 2A.5.5 0 0 0 4 5h8a.5.5 0 0 0 0-1H4Zm0 3A.5.5 0 0 0 4 8h8a.5.5 0 0 0 0-1H4Zm0 3a.5.5 0 0 0-.5.5c0 .28.22.5.5.5h8a.5.5 0 0 0 0-1H4Z"/>
+    </svg>
+  );
+
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 4000);
@@ -243,7 +249,9 @@ export function App() {
       <section className="content">
         <div className="header">
           <strong>GitNote</strong>
-          <button className="btn only-mobile" style={{ marginLeft: 8 }} onClick={() => setSidebarOpen(true)}>Notes</button>
+          <button className="btn only-mobile" style={{ marginLeft: 8 }} onClick={() => setSidebarOpen(true)} aria-label="Open notes" title="Notes">
+            <NotesIcon />
+          </button>
           <span style={{ marginLeft: 'auto', display:'flex', gap:8, alignItems:'center' }}>
             {!token ? (
               // Initial state: only highlight Connect GitHub
