@@ -84,6 +84,14 @@ export function App() {
         if (files.length > 0) {
           await commitBatch(files, 'gitnote: initialize notes');
         }
+        // Ensure README exists with a short intro and keep it out of notes
+        try {
+          const existingReadme = await pullNote('README.md');
+          const readmeText = `# GitNote\n\nThis repository was initialized by GitNote.\n\n- Notes are plain Markdown files at the repository root.\n- Edit and sync notes with the GitNote app.\n`;
+          await commitBatch([
+            { path: 'README.md', text: readmeText, baseSha: existingReadme?.sha },
+          ], 'gitnote: add README');
+        } catch {}
         setSyncMsg('Repository created and initialized');
         setToast({ text: 'Repository ready', href: `https://github.com/${cfg.owner}/${cfg.repo}` });
       } else {

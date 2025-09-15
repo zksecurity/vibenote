@@ -107,7 +107,13 @@ export async function listNoteFiles(): Promise<{ path: string; sha: string }[]> 
   const data = await res.json();
   if (!Array.isArray(data)) return [];
   return data
-    .filter((e: any) => e.type === 'file' && typeof e.path === 'string' && /\.md$/i.test(e.name))
+    .filter((e: any) => {
+      if (e.type !== 'file' || typeof e.path !== 'string') return false;
+      const name: string = e.name || '';
+      if (!/\.md$/i.test(name)) return false;
+      if (name.toLowerCase() === 'readme.md') return false; // not a note
+      return true;
+    })
     .map((e: any) => ({ path: e.path as string, sha: e.sha as string }));
 }
 
