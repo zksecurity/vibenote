@@ -98,8 +98,9 @@ export async function commitBatch(
 // List Markdown files under the configured notesDir at HEAD
 export async function listNoteFiles(): Promise<{ path: string; sha: string }[]> {
   if (!remote) return [];
-  const dir = remote.notesDir.replace(/(^\/+|\/+?$)/g, '');
-  const url = `https://api.github.com/repos/${remote.owner}/${remote.repo}/contents/${encodeApiPath(dir)}?ref=${encodeURIComponent(remote.branch)}`;
+  const dir = (remote.notesDir || '').replace(/(^\/+|\/+?$)/g, '');
+  const base = `https://api.github.com/repos/${remote.owner}/${remote.repo}/contents`;
+  const url = `${base}${dir ? '/' + encodeApiPath(dir) : ''}?ref=${encodeURIComponent(remote.branch)}`;
   const res = await fetch(url, { headers: authHeaders() });
   if (res.status === 404) return [];
   if (!res.ok) throw new Error('Failed to list notes directory');

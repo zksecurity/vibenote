@@ -71,7 +71,7 @@ export function App() {
       setSyncing(true);
       const existed = await repoExists(cfg.owner, cfg.repo);
       await ensureRepoExists(cfg.owner, cfg.repo, true);
-      configureRemote({ ...cfg, notesDir: 'notes' });
+      configureRemote({ ...cfg, notesDir: '' });
       setRemoteCfg(getRemoteConfig());
       // Seed initial notes if newly created
       if (!existed) {

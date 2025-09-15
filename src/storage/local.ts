@@ -15,10 +15,11 @@ const k = (s: string) => `${NS}:${s}`;
 
 export class LocalStore {
   private index: NoteMeta[];
-  private notesDir = 'notes';
+  private notesDir = '';
 
   constructor() {
     this.index = this.loadIndex();
+    this.migrateLegacyNotesDir();
     if (this.index.length === 0) {
       // Seed with a welcome note
       const id = this.createNote('Welcome', `# Welcome to GitNote\n\nStart editing…`);
@@ -46,7 +47,7 @@ export class LocalStore {
   createNote(title = 'Untitled', text = ''): string {
     const id = crypto.randomUUID();
     const safe = ensureValidTitle(title || 'Untitled');
-    const path = `${this.notesDir}/${safe}.md`;
+    const path = joinPath(this.notesDir, `${safe}.md`);
     const meta: NoteMeta = { id, path, title, updatedAt: Date.now() };
     const doc: NoteDoc = { ...meta, text };
     const idx = this.loadIndex();
@@ -61,7 +62,7 @@ export class LocalStore {
     const doc = this.loadNote(id);
     if (!doc) return;
     const safe = ensureValidTitle(title || 'Untitled');
-    const path = `${this.notesDir}/${safe}.md`;
+    const path = joinPath(this.notesDir, `${safe}.md`);
     const updatedAt = Date.now();
     const next: NoteDoc = { ...doc, title: safe, path, updatedAt };
     localStorage.setItem(k(`note:${id}`), JSON.stringify(next));
@@ -111,6 +112,32 @@ export class LocalStore {
     localStorage.setItem(k('index'), JSON.stringify(idx));
     this.index = idx;
   }
+
+  private migrateLegacyNotesDir() {
+    const idx = this.loadIndex();
+    let changed = false;
+    for (let i = 0; i < idx.length; i++) {
+      const meta = idx[i];
+      if (meta.path.startsWith('notes/')) {
+        const newPath = basename(meta.path);
+        if (newPath !== meta.path) {
+          const doc = this.loadNote(meta.id);
+          const updatedAt = Date.now();
+          const nextMeta: NoteMeta = { ...meta, path: newPath, updatedAt };
+          idx[i] = nextMeta;
+          if (doc) {
+            const nextDoc: NoteDoc = { ...doc, path: newPath, updatedAt };
+            localStorage.setItem(k(`note:${meta.id}`), JSON.stringify(nextDoc));
+          }
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      localStorage.setItem(k('index'), JSON.stringify(idx));
+      this.index = idx;
+    }
+  }
 }
 
 function basename(p: string) {
@@ -127,4 +154,9 @@ function ensureValidTitle(title: string): string {
     throw new Error('Invalid title: contains illegal characters');
   }
   return t;
+}
+
+function joinPath(dir: string, file: string) {
+  if (!dir) return file;
+  return `${dir.replace(/\/+$/,'')}/${file.replace(/^\/+/, '')}`;
 }
