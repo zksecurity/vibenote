@@ -10,7 +10,7 @@ export interface NoteDoc extends NoteMeta {
   lastRemoteSha?: string;
 }
 
-const NS = 'gitnote';
+const NS = 'vibenote';
 const k = (s: string) => `${NS}:${s}`;
 
 export class LocalStore {
@@ -18,6 +18,8 @@ export class LocalStore {
   private notesDir = '';
 
   constructor() {
+    // One-time namespace migration from 'gitnote:*' → 'vibenote:*'
+    migrateNamespace();
     this.index = this.loadIndex();
     if (this.index.length === 0) {
       // Seed with a welcome note
@@ -142,6 +144,29 @@ function ensureValidTitle(title: string): string {
     throw new Error('Invalid title: contains illegal characters');
   }
   return t;
+}
+
+function migrateNamespace() {
+  // If new namespace already present, do nothing
+  if (localStorage.getItem(`${NS}:index`)) return;
+  const oldNS = 'gitnote';
+  const oldIndexKey = `${oldNS}:index`;
+  const raw = localStorage.getItem(oldIndexKey);
+  if (!raw) return;
+  try {
+    const oldIndex = JSON.parse(raw) as NoteMeta[];
+    // Copy index
+    localStorage.setItem(`${NS}:index`, JSON.stringify(oldIndex));
+    // Copy each note doc
+    for (const n of oldIndex) {
+      const docKey = `${oldNS}:note:${n.id}`;
+      const doc = localStorage.getItem(docKey);
+      if (doc) localStorage.setItem(`${NS}:note:${n.id}`, doc);
+    }
+    // Best-effort cleanup of old keys
+    localStorage.removeItem(oldIndexKey);
+    for (const n of oldIndex) localStorage.removeItem(`${oldNS}:note:${n.id}`);
+  } catch {}
 }
 
 function joinPath(dir: string, file: string) {

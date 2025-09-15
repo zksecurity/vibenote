@@ -335,7 +335,7 @@ export function App() {
           device={device}
           onDone={(t) => {
             if (t) {
-              localStorage.setItem('gitnote:gh-token', t);
+              localStorage.setItem('vibenote:gh-token', t);
               setToken(t);
               fetchCurrentUser().then((u) => {
                 setOwnerLogin(u?.login ?? null);

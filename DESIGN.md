@@ -119,11 +119,11 @@ Implementation options:
 
 ## Local Storage Format (MVP)
 
-Key namespace: `gitnote:*`
+Key namespace: `vibenote:*`
 
-- `gitnote:config` – JSON: `{ owner, repo, branch, token, notesDir }`
-- `gitnote:index` – JSON list: `[{ id, path, title, updatedAt }]`
-- `gitnote:note:<id>` – JSON: `{ id, path, title, text, updatedAt, lastRemoteSha }`
+- `vibenote:config` – JSON: `{ owner, repo, branch, token, notesDir }`
+- `vibenote:index` – JSON list: `[{ id, path, title, updatedAt }]`
+- `vibenote:note:<id>` – JSON: `{ id, path, title, text, updatedAt, lastRemoteSha }`
 
 We avoid storing Y.js updates to keep it simple; instead, we reconstruct `Y.Text` from `text` on open. Later we can store Y updates in `y-indexeddb` for faster loads.
 

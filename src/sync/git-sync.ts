@@ -19,7 +19,17 @@ export interface RemoteFile {
 let remote: RemoteConfig | null = loadConfig();
 
 function loadConfig(): RemoteConfig | null {
-  const raw = localStorage.getItem('gitnote:config');
+  const NEW_KEY = 'vibenote:config';
+  const OLD_KEY = 'gitnote:config';
+  let raw = localStorage.getItem(NEW_KEY);
+  if (!raw) {
+    const old = localStorage.getItem(OLD_KEY);
+    if (old) {
+      localStorage.setItem(NEW_KEY, old);
+      localStorage.removeItem(OLD_KEY);
+      raw = old;
+    }
+  }
   if (!raw) return null;
   try {
     return JSON.parse(raw) as RemoteConfig;
@@ -30,7 +40,8 @@ function loadConfig(): RemoteConfig | null {
 
 export function configureRemote(cfg: RemoteConfig) {
   remote = cfg;
-  localStorage.setItem('gitnote:config', JSON.stringify(cfg));
+  localStorage.setItem('vibenote:config', JSON.stringify(cfg));
+  localStorage.removeItem('gitnote:config');
 }
 
 export function getRemoteConfig(): RemoteConfig | null {
@@ -39,6 +50,7 @@ export function getRemoteConfig(): RemoteConfig | null {
 
 export function clearRemoteConfig() {
   remote = null;
+  localStorage.removeItem('vibenote:config');
   localStorage.removeItem('gitnote:config');
 }
 
