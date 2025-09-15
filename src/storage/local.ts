@@ -45,7 +45,8 @@ export class LocalStore {
 
   createNote(title = 'Untitled', text = ''): string {
     const id = crypto.randomUUID();
-    const path = `${this.notesDir}/${slugify(title || 'untitled')}.md`;
+    const safe = ensureValidTitle(title || 'Untitled');
+    const path = `${this.notesDir}/${safe}.md`;
     const meta: NoteMeta = { id, path, title, updatedAt: Date.now() };
     const doc: NoteDoc = { ...meta, text };
     const idx = this.loadIndex();
@@ -59,11 +60,12 @@ export class LocalStore {
   renameNote(id: string, title: string) {
     const doc = this.loadNote(id);
     if (!doc) return;
-    const path = `${this.notesDir}/${slugify(title || 'untitled')}.md`;
+    const safe = ensureValidTitle(title || 'Untitled');
+    const path = `${this.notesDir}/${safe}.md`;
     const updatedAt = Date.now();
-    const next: NoteDoc = { ...doc, title, path, updatedAt };
+    const next: NoteDoc = { ...doc, title: safe, path, updatedAt };
     localStorage.setItem(k(`note:${id}`), JSON.stringify(next));
-    this.touchIndex(id, { title, path, updatedAt });
+    this.touchIndex(id, { title: safe, path, updatedAt });
   }
 
   deleteNote(id: string) {
@@ -85,7 +87,7 @@ export class LocalStore {
     const index: NoteMeta[] = [];
     for (const f of files) {
       const id = crypto.randomUUID();
-      const title = unslugify(basename(f.path).replace(/\.md$/i, ''));
+      const title = basename(f.path).replace(/\.md$/i, '');
       const meta: NoteMeta = { id, path: f.path, title, updatedAt: now };
       const doc: NoteDoc = { ...meta, text: f.text, lastRemoteSha: f.sha };
       index.push(meta);
@@ -111,16 +113,18 @@ export class LocalStore {
   }
 }
 
-function slugify(s: string) {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-}
-
 function basename(p: string) {
   const i = p.lastIndexOf('/');
   return i >= 0 ? p.slice(i + 1) : p;
 }
 
-function unslugify(s: string) {
-  const words = s.replace(/[-_]+/g, ' ').trim();
-  return words.charAt(0).toUpperCase() + words.slice(1);
+function ensureValidTitle(title: string): string {
+  const t = title.trim();
+  if (!t) return 'Untitled';
+  if (t === '.' || t === '..') return 'Untitled';
+  if (/[\/\0]/.test(t)) {
+    // Disallow slash and null; simplest guard for path traversal
+    throw new Error('Invalid title: contains illegal characters');
+  }
+  return t;
 }

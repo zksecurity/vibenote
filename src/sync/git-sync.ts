@@ -55,9 +55,13 @@ function authHeaders() {
   };
 }
 
+function encodeApiPath(path: string): string {
+  return path.split('/').map(encodeURIComponent).join('/');
+}
+
 export async function pullNote(path: string): Promise<RemoteFile | null> {
   if (!remote) return null;
-  const url = `https://api.github.com/repos/${remote.owner}/${remote.repo}/contents/${path}?ref=${remote.branch}`;
+  const url = `https://api.github.com/repos/${remote.owner}/${remote.repo}/contents/${encodeApiPath(path)}?ref=${encodeURIComponent(remote.branch)}`;
   const res = await fetch(url, { headers: authHeaders() });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error('Failed to fetch note');
@@ -73,7 +77,7 @@ export async function commitBatch(
   if (!remote || files.length === 0) return null;
   let commitSha: string | null = null;
   for (const f of files) {
-    const url = `https://api.github.com/repos/${remote.owner}/${remote.repo}/contents/${f.path}`;
+    const url = `https://api.github.com/repos/${remote.owner}/${remote.repo}/contents/${encodeApiPath(f.path)}`;
     const res = await fetch(url, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
@@ -95,7 +99,7 @@ export async function commitBatch(
 export async function listNoteFiles(): Promise<{ path: string; sha: string }[]> {
   if (!remote) return [];
   const dir = remote.notesDir.replace(/(^\/+|\/+?$)/g, '');
-  const url = `https://api.github.com/repos/${remote.owner}/${remote.repo}/contents/${dir}?ref=${remote.branch}`;
+  const url = `https://api.github.com/repos/${remote.owner}/${remote.repo}/contents/${encodeApiPath(dir)}?ref=${encodeURIComponent(remote.branch)}`;
   const res = await fetch(url, { headers: authHeaders() });
   if (res.status === 404) return [];
   if (!res.ok) throw new Error('Failed to list notes directory');

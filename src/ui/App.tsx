@@ -39,8 +39,13 @@ export function App() {
   };
 
   const onRename = (id: string, title: string) => {
-    store.renameNote(id, title);
-    setNotes(store.listNotes());
+    try {
+      store.renameNote(id, title);
+      setNotes(store.listNotes());
+    } catch (e) {
+      console.error(e);
+      setSyncMsg('Invalid title. Avoid / and control characters.');
+    }
   };
 
   const onDelete = (id: string) => {
