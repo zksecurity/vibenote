@@ -241,7 +241,6 @@ export function App() {
       <section className="content">
         <div className="header">
           <strong>GitNote</strong>
-          <span style={{ color: 'var(--muted)' }}>— Offline‑first Markdown + Git</span>
           <span style={{ marginLeft: 'auto', display:'flex', gap:8, alignItems:'center' }}>
             {!token ? (
               // Initial state: only highlight Connect GitHub
