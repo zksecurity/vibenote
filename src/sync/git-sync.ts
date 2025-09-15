@@ -43,7 +43,9 @@ export function clearRemoteConfig() {
 }
 
 export async function repoExists(owner: string, repo: string): Promise<boolean> {
-  const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, { headers: authHeaders() });
+  const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+    headers: authHeaders(),
+  });
   return res.ok;
 }
 
@@ -61,7 +63,9 @@ function encodeApiPath(path: string): string {
 
 export async function pullNote(path: string): Promise<RemoteFile | null> {
   if (!remote) return null;
-  const url = `https://api.github.com/repos/${remote.owner}/${remote.repo}/contents/${encodeApiPath(path)}?ref=${encodeURIComponent(remote.branch)}`;
+  const url = `https://api.github.com/repos/${remote.owner}/${remote.repo}/contents/${encodeApiPath(
+    path
+  )}?ref=${encodeURIComponent(remote.branch)}`;
   const res = await fetch(url, { headers: authHeaders() });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error('Failed to fetch note');
@@ -77,7 +81,9 @@ export async function commitBatch(
   if (!remote || files.length === 0) return null;
   let commitSha: string | null = null;
   for (const f of files) {
-    const url = `https://api.github.com/repos/${remote.owner}/${remote.repo}/contents/${encodeApiPath(f.path)}`;
+    const url = `https://api.github.com/repos/${remote.owner}/${
+      remote.repo
+    }/contents/${encodeApiPath(f.path)}`;
     const res = await fetch(url, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
@@ -100,7 +106,9 @@ export async function listNoteFiles(): Promise<{ path: string; sha: string }[]> 
   if (!remote) return [];
   const dir = (remote.notesDir || '').replace(/(^\/+|\/+?$)/g, '');
   const base = `https://api.github.com/repos/${remote.owner}/${remote.repo}/contents`;
-  const url = `${base}${dir ? '/' + encodeApiPath(dir) : ''}?ref=${encodeURIComponent(remote.branch)}`;
+  const url = `${base}${dir ? '/' + encodeApiPath(dir) : ''}?ref=${encodeURIComponent(
+    remote.branch
+  )}`;
   const res = await fetch(url, { headers: authHeaders() });
   if (res.status === 404) return [];
   if (!res.ok) throw new Error('Failed to list notes directory');
@@ -122,7 +130,7 @@ function toBase64(input: string): string {
   const encoder = new TextEncoder();
   const bytes = encoder.encode(input);
   let binary = '';
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  for (let byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary);
 }
 
@@ -133,7 +141,9 @@ export async function deleteFiles(
   if (!remote || files.length === 0) return null;
   let commitSha: string | null = null;
   for (const f of files) {
-    const url = `https://api.github.com/repos/${remote.owner}/${remote.repo}/contents/${encodeApiPath(f.path)}`;
+    const url = `https://api.github.com/repos/${remote.owner}/${
+      remote.repo
+    }/contents/${encodeApiPath(f.path)}`;
     const res = await fetch(url, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
@@ -159,7 +169,11 @@ function fromBase64(b64: string): string {
   return decoder.decode(bytes);
 }
 
-export async function ensureRepoExists(owner: string, repo: string, isPrivate = true): Promise<boolean> {
+export async function ensureRepoExists(
+  owner: string,
+  repo: string,
+  isPrivate = true
+): Promise<boolean> {
   const token = getStoredToken();
   if (!token) return false;
   const exists = await repoExists(owner, repo);
