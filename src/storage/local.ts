@@ -1,6 +1,6 @@
 export interface NoteMeta {
   id: string;
-  path: string; // notes/<slug>.md
+  path: string; // path to note file (e.g., "Title.md")
   title: string;
   updatedAt: number;
 }
@@ -19,7 +19,6 @@ export class LocalStore {
 
   constructor() {
     this.index = this.loadIndex();
-    this.migrateLegacyNotesDir();
     if (this.index.length === 0) {
       // Seed with a welcome note
       const id = this.createNote('Welcome', `# Welcome to GitNote\n\nStart editing…`);
@@ -111,32 +110,6 @@ export class LocalStore {
     if (i >= 0) idx[i] = { ...idx[i], ...patch } as NoteMeta;
     localStorage.setItem(k('index'), JSON.stringify(idx));
     this.index = idx;
-  }
-
-  private migrateLegacyNotesDir() {
-    const idx = this.loadIndex();
-    let changed = false;
-    for (let i = 0; i < idx.length; i++) {
-      const meta = idx[i];
-      if (meta.path.startsWith('notes/')) {
-        const newPath = basename(meta.path);
-        if (newPath !== meta.path) {
-          const doc = this.loadNote(meta.id);
-          const updatedAt = Date.now();
-          const nextMeta: NoteMeta = { ...meta, path: newPath, updatedAt };
-          idx[i] = nextMeta;
-          if (doc) {
-            const nextDoc: NoteDoc = { ...doc, path: newPath, updatedAt };
-            localStorage.setItem(k(`note:${meta.id}`), JSON.stringify(nextDoc));
-          }
-          changed = true;
-        }
-      }
-    }
-    if (changed) {
-      localStorage.setItem(k('index'), JSON.stringify(idx));
-      this.index = idx;
-    }
   }
 }
 
