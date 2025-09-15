@@ -1,6 +1,6 @@
-# GitNote
+# VibeNote
 
-GitNote is a lightweight, mobile‑friendly, offline‑first note editor that treats a Git repository as its database. It lets you browse repos like a notebook and edit Markdown notes. Notes are stored as regular Markdown files in Git, so they remain portable and reviewable.
+VibeNote is a lightweight, mobile‑friendly, offline‑first note editor that treats a Git repository as its database. It lets you browse repos like a notebook and edit Markdown notes. Notes are stored as regular Markdown files in Git, so they remain portable and reviewable.
 
 - Frontend only (no persistent server required)
 - Offline‑first via in‑browser storage + optimistic UI
@@ -76,7 +76,7 @@ For local development of these endpoints, see `AGENTS.md` (using `vercel dev`).
 
 The header has a “Sync Now” button that:
 - Compares all local notes to remote files in the configured repo/branch
-- Commits changed or new files via GitHub Contents API with message `gitnote: update notes`
+- Commits changed or new files via GitHub Contents API with message `vibenote: update notes`
 
 To use it:
 1. Click “Connect GitHub” and authorize.

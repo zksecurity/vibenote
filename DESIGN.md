@@ -1,4 +1,4 @@
-# GitNote – Design
+# VibeNote – Design
 
 This document captures the core architecture, sync logic, and decisions so another LLM can continue the work confidently.
 
@@ -95,7 +95,7 @@ Goal: least‑privilege access limited to user‑selected repositories, cleaner 
    - For each dirty note:
      - Fetch remote md (HEAD) via Git API (if online).
      - Merge local vs remote using Y.Text as above.
-     - If the merged text differs from remote, create a commit with message `gitnote: update <note>`.
+  - If the merged text differs from remote, create a commit with message `vibenote: update <note>`.
    - Push commit(s) via Git API.
    - Update local last synced sha / etag per note.
 

@@ -1,4 +1,4 @@
-GitNote – Agent Guide
+VibeNote – Agent Guide
 
 Read both README.md and DESIGN.md for product and architecture context. This document captures developer‑focused setup, deployment, and conventions.
 

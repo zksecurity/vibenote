@@ -84,15 +84,15 @@ export function App() {
           files.push({ path: local.path, text: local.text });
         }
         if (files.length > 0) {
-          await commitBatch(files, 'gitnote: initialize notes');
+          await commitBatch(files, 'vibenote: initialize notes');
         }
         // Ensure README exists with a short intro and keep it out of notes
         try {
           const existingReadme = await pullNote('README.md');
-          const readmeText = `# GitNote\n\nThis repository was initialized by GitNote.\n\n- Notes are plain Markdown files at the repository root.\n- Edit and sync notes with the GitNote app.\n`;
+          const readmeText = `# VibeNote\n\nThis repository was initialized by VibeNote.\n\n- Notes are plain Markdown files at the repository root.\n- Edit and sync notes with the VibeNote app.\n`;
           await commitBatch([
             { path: 'README.md', text: readmeText, baseSha: existingReadme?.sha },
-          ], 'gitnote: add README');
+          ], 'vibenote: add README');
         } catch {}
         setSyncMsg('Repository created and initialized');
         setToast({ text: 'Repository ready', href: `https://github.com/${cfg.owner}/${cfg.repo}` });
@@ -219,8 +219,8 @@ export function App() {
         setSyncMsg('Up to date');
         return;
       }
-      const commitSha1 = files.length ? await commitBatch(files, 'gitnote: update notes') : null;
-      const commitSha2 = toDelete.length ? await deleteFiles(toDelete, 'gitnote: delete removed notes') : null;
+      const commitSha1 = files.length ? await commitBatch(files, 'vibenote: update notes') : null;
+      const commitSha2 = toDelete.length ? await deleteFiles(toDelete, 'vibenote: delete removed notes') : null;
       setSyncMsg(commitSha1 || commitSha2 ? 'Synced ✔' : 'Nothing to commit');
     } catch (err) {
       console.error(err);
@@ -248,7 +248,7 @@ export function App() {
       </aside>
       <section className="content">
         <div className="header">
-          <strong>GitNote</strong>
+          <strong>VibeNote</strong>
           <button className="btn only-mobile" style={{ marginLeft: 8 }} onClick={() => setSidebarOpen(true)} aria-label="Open notes" title="Notes">
             <NotesIcon />
           </button>
