@@ -33,6 +33,10 @@ export function configureRemote(cfg: RemoteConfig) {
   localStorage.setItem('gitnote:config', JSON.stringify(cfg));
 }
 
+export function getRemoteConfig(): RemoteConfig | null {
+  return remote ?? loadConfig();
+}
+
 function authHeaders() {
   const token = getStoredToken();
   return {
@@ -76,4 +80,3 @@ export async function commitBatch(
   }
   return commitSha;
 }
-

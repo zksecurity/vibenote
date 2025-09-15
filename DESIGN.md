@@ -33,6 +33,44 @@ This document captures the core architecture, sync logic, and decisions so anoth
 - MVP: bearer token input stored in local storage (a GitHub Personal Access Token). No server.
 - Future: GitHub OAuth (PKCE) with client‑side token storage; or small server to handle OAuth code exchange.
 
+## GitHub App (Future Option)
+
+Goal: least‑privilege access limited to user‑selected repositories, cleaner consent for private notes, and short‑lived tokens.
+
+- Why a GitHub App:
+  - Users select specific repositories at install time (or “all repos”).
+  - Permissions are fine‑grained (e.g., Repository contents: Read & write, Metadata: Read).
+  - Installation access tokens are short‑lived and scoped to the selected repos only.
+
+- Proposed permissions (initial):
+  - Repository contents: Read & write
+  - Metadata: Read
+  - Avoid Administration (repo creation) to keep consent light; ask users to create a repo manually when needed.
+
+- Backend responsibilities (tiny service or Vercel Functions):
+  - Sign an app JWT using the app’s private key.
+  - Exchange for an installation access token for a given installation (and optional repo).
+  - Optionally proxy GitHub Contents API (read/write) using the installation token to avoid exposing it to the client.
+
+- Client flow (GitHub App mode):
+  1) User installs the GitHub App and selects one or more repos.
+  2) Client stores minimal identifiers (installation id, owner/repo) — no long‑lived user tokens.
+  3) For sync, client calls backend: `POST /api/app/token { installationId, owner, repo }` or directly `POST /api/contents` with the desired operation; backend uses short‑lived installation token.
+
+- Migration strategy:
+  - Keep OAuth Device Flow as “Quick start”.
+  - Add an “Advanced: GitHub App” option in repo settings.
+  - If App mode is selected, disable user tokens and route all sync via backend using installation tokens.
+  - Document that private repos remain the default for personal notes; App mode still supports private repos with least privilege.
+
+- Webhooks (optional):
+  - Subscribe to push events for selected repos to signal the client that new commits exist, enabling smarter pull/merge prompts.
+
+- Security notes:
+  - Installation tokens are short‑lived; backend should not persist them beyond request handling.
+  - The app’s private key stays on the server; clients never see it.
+  - Rate limits: prefer per‑installation tokens and batch writes where possible.
+
 ## CRDT merge with plain text
 
 - Local state: a `Y.Doc` with one `Y.Text` per note (keyed by note id/path).
@@ -120,3 +158,4 @@ We avoid storing Y.js updates to keep it simple; instead, we reconstruct `Y.Text
 - [ ] Presence & collaboration (y-webrtc or y-websocket)
 - [ ] Repository browser (folders, images)
 - [ ] Webhooks (optional small server) to hint at remote updates
+ - [ ] GitHub App mode (selected repos, least‑privilege permissions, short‑lived installation tokens)
