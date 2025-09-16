@@ -54,7 +54,7 @@ describe('mergeMarkdown - basics', () => {
 
   it('merges appended sections from both sides', () => {
     let base = `# Title\n\nIntro paragraph line 1.\n\nIntro paragraph line 2.`;
-    let oursAppended = `## Local Subheading\n\nLocal paragraph.`;
+    let oursAppended = `## Local Subheading\n\nLocal paragraph.\n\nAnother local paragraph.`;
     let theirsAppended = `## Remote Subheading\n\nRemote paragraph.`;
     checkMerge({
       base,
