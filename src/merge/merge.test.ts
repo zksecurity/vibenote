@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mergeMarkdown } from '../src/merge/merge';
+import { mergeMarkdown } from './merge';
 
 type MergeResult = {
   base: string;

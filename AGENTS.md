@@ -46,7 +46,6 @@ UI/UX Conventions
 
 - Mobile‑first: modals full‑screen on small screens; larger tap targets.
 - Avoid `alert()`; prefer in‑app modals/toasts for flow steps and messages.
-- Header actions order: 1) Sync Now 2) Repo status/pill 3) Account (or Connect GitHub).
 
 Auth Modes
 
@@ -69,6 +68,10 @@ Coding Guidelines
 Type Checking
 
 - Run `npm run check` to perform a full TypeScript type check. Ensure the codebase type checks cleanly after changes.
+
+Testing
+
+- Unit tests are stored next to the source code they are testing, in .test.ts files. No separate /tests folder.
 
 Agent Conventions
 
