@@ -208,6 +208,8 @@ export function App() {
     } finally {
       setSyncing(false);
       setNotes(store.listNotes());
+      // Ensure the active editor reflects merged/pulled text
+      setDoc(activeId ? store.loadNote(activeId) : null);
     }
   };
 

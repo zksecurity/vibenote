@@ -20,6 +20,18 @@ export function Editor({ doc, onChange }: Props) {
     setText(doc.text);
   }, [doc.id]);
 
+  // Reflect external updates to the same note (e.g., after sync)
+  useEffect(() => {
+    const current = ytext.toString();
+    if (current !== doc.text) {
+      ydoc.transact(() => {
+        ytext.delete(0, ytext.length);
+        ytext.insert(0, doc.text);
+      });
+      setText(doc.text);
+    }
+  }, [doc.text, ydoc, ytext]);
+
   // Subscribe to CRDT changes
   useEffect(() => {
     const sub = () => {
@@ -52,4 +64,3 @@ export function Editor({ doc, onChange }: Props) {
     </>
   );
 }
-
