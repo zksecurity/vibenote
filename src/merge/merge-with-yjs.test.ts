@@ -22,12 +22,12 @@ describe('Yjs merge - additional cases', () => {
     expect(out).toBe('0189');
   });
 
-  it('conflicting replacements at same span prefer theirs (no concat)', () => {
+  it('conflicting replacements at same span prefer ours (no concat)', () => {
     let base = 'one two three';
     let ours = 'one TWO three';
     let theirs = 'one deux three';
     let out = mergeMarkdown(base, ours, theirs);
-    expect(out).toBe('one deux three');
+    expect(out).toBe('one TWO three');
   });
 
   it('orders concurrent inserts at start: theirs before ours', () => {
