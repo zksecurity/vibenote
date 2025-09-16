@@ -1,20 +1,35 @@
 // Pure merge logic for three-way Markdown/text merges.
 // No GitHub or storage dependencies. Browser-friendly.
-
 import DiffMatchPatch from 'diff-match-patch';
+
+// For debugging: in devtools, access __lastMerge to see the last merge inputs/outputs.
+
+export type MergeResult = {
+  base: string;
+  ours: string;
+  theirs: string;
+  result: string;
+};
 
 export function mergeMarkdown(base: string, ours: string, theirs: string): string {
   const bBlocks = splitIntoBlocks(base);
   const oBlocks = splitIntoBlocks(ours);
   const tBlocks = splitIntoBlocks(theirs);
+  let result: string;
   if (bBlocks.length === oBlocks.length && bBlocks.length === tBlocks.length) {
     let out: string[] = [];
     for (let i = 0; i < bBlocks.length; i++) {
       out.push(mergeBlock(bBlocks[i]!.content, oBlocks[i]!.content, tBlocks[i]!.content));
     }
-    return out.join('\n');
+    result = out.join('\n');
+  } else {
+    result = mergeBlock(base, ours, theirs);
   }
-  return mergeBlock(base, ours, theirs);
+  const last: MergeResult = { base, ours, theirs, result };
+  try {
+    (globalThis as any).__lastMerge = last;
+  } catch {}
+  return result;
 }
 
 function splitIntoBlocks(input: string): { type: 'code' | 'text'; content: string }[] {
