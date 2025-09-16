@@ -3,7 +3,7 @@ import { NoteList } from './NoteList';
 import { Editor } from './Editor';
 import { LocalStore, type NoteMeta, type NoteDoc } from '../storage/local';
 import { getStoredToken, requestDeviceCode, fetchCurrentUser, clearToken } from '../auth/github';
-import { configureRemote, getRemoteConfig, pullNote, commitBatch, ensureRepoExists, repoExists, clearRemoteConfig, listNoteFiles, deleteFiles } from '../sync/git-sync';
+import { configureRemote, getRemoteConfig, pullNote, commitBatch, ensureRepoExists, repoExists, clearRemoteConfig, listNoteFiles, deleteFiles, syncBidirectional } from '../sync/git-sync';
 import { RepoConfigModal } from './RepoConfigModal';
 import { DeviceCodeModal } from './DeviceCodeModal';
 
@@ -194,40 +194,19 @@ export function App() {
         setSyncMsg('Connect GitHub and configure repo first');
         return;
       }
-      // Gather changed files by comparing local text to remote HEAD
-      const files: { path: string; text: string; baseSha?: string }[] = [];
-      const toDelete: { path: string; sha: string }[] = [];
-      const remoteEntries = await listNoteFiles();
-      const remoteMap = new Map(remoteEntries.map(e => [e.path, e.sha] as const));
-      const localPaths = new Set<string>();
-      for (const n of store.listNotes()) {
-        const local = store.loadNote(n.id);
-        if (!local) continue;
-        localPaths.add(local.path);
-        const remote = await pullNote(local.path);
-        if (!remote || remote.text !== local.text) {
-          files.push({ path: local.path, text: local.text, baseSha: remote?.sha });
-        }
-      }
-      // Anything on remote not present locally should be deleted
-      for (const e of remoteEntries) {
-        if (!localPaths.has(e.path)) {
-          toDelete.push({ path: e.path, sha: e.sha });
-        }
-      }
-      if (files.length === 0 && toDelete.length === 0) {
-        setSyncMsg('Up to date');
-        return;
-      }
-      const commitSha1 = files.length ? await commitBatch(files, 'vibenote: update notes') : null;
-      const commitSha2 = toDelete.length ? await deleteFiles(toDelete, 'vibenote: delete removed notes') : null;
-      setSyncMsg(commitSha1 || commitSha2 ? 'Synced ✔' : 'Nothing to commit');
+      const summary = await syncBidirectional(store);
+      const parts: string[] = [];
+      if (summary.pulled) parts.push(`pulled ${summary.pulled}`);
+      if (summary.merged) parts.push(`merged ${summary.merged}`);
+      if (summary.pushed) parts.push(`pushed ${summary.pushed}`);
+      if (summary.deletedRemote) parts.push(`deleted remote ${summary.deletedRemote}`);
+      if (summary.deletedLocal) parts.push(`deleted local ${summary.deletedLocal}`);
+      setSyncMsg(parts.length ? `Synced: ${parts.join(', ')}` : 'Up to date');
     } catch (err) {
       console.error(err);
       setSyncMsg('Sync failed');
     } finally {
       setSyncing(false);
-      // Refresh list timestamps from storage
       setNotes(store.listNotes());
     }
   };

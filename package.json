@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --port 3000",
     "dev:api": "vercel dev",
     "build": "tsc -b && vite build",
     "preview": "vite preview"
@@ -13,11 +13,13 @@
     "marked": "^11.2.0",
     "react": "18.2.0",
     "react-dom": "18.2.0",
+    "diff-match-patch": "^1.0.5",
     "yjs": "^13.6.18"
   },
   "devDependencies": {
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
+    "@types/diff-match-patch": "^1.0.36",
     "typescript": "^5.5.4",
     "vite": "^5.4.0"
   }
