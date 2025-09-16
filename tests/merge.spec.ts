@@ -36,9 +36,7 @@ it('merges non-overlapping line edits', () => {
     base: 'line1\nline2\nline3',
     ours: 'line1\nline2 local\nline3',
     theirs: 'line1 remote\nline2\nline3',
-    // Current merge keeps both sides and preserves our added line; it also appends
-    // any ours-only lines not present in the result (here 'line1' from base form).
-    result: 'line1 remote\nline2 local\nline3\nline1',
+    result: 'line1 remote\nline2 local\nline3',
   });
 });
 
@@ -47,7 +45,7 @@ it('preserves both when same line changed differently', () => {
     base: 'title: Hello',
     ours: 'title: Hello Local',
     theirs: 'title: Hello Remote',
-    result: 'title: Hello Remote Local\ntitle: Hello Local',
+    result: 'title: Hello Remote Local',
   });
 });
 

@@ -75,15 +75,7 @@ function mergeBlock(base: string, ours: string, theirs: string): string {
     }
     return [ours, extras.length ? extras.join('\n') : ''].filter(Boolean).join('\n');
   }
-  // Safety: if both sides changed, ensure we preserve our changed lines
-  if (ours !== base && theirs !== base) {
-    const resSet = new Set(result.split(/\r?\n/));
-    const add: string[] = [];
-    for (const l of ours.split(/\r?\n/)) {
-      if (!resSet.has(l)) add.push(l);
-    }
-    if (add.length) result = [result, add.join('\n')].filter(Boolean).join('\n');
-  }
+  // If patches applied cleanly, trust the patch result to preserve locality
   return result;
 }
 
