@@ -10,6 +10,7 @@ Development Setup
 - Run API (serverless): `npm run dev:api` (Vercel functions on `http://localhost:3000`)
 - Env: copy `.env.example` → `.env` and set `GITHUB_CLIENT_ID` (GitHub OAuth App Client ID)
 - Proxy: Vite proxies `/api/*` → `http://localhost:3000` (see `vite.config.ts`)
+- Node runs TypeScript directly (2025+): use `node path/to/file.ts` for quick scripts; no ts-node/tsx needed.
 
 Local Auth (Device Flow)
 
