@@ -1,0 +1,75 @@
+// Pure merge logic for three-way Markdown/text merges.
+// No GitHub or storage dependencies. Browser-friendly.
+
+import DiffMatchPatch from 'diff-match-patch';
+
+export function mergeMarkdown(base: string, ours: string, theirs: string): string {
+  const bBlocks = splitIntoBlocks(base);
+  const oBlocks = splitIntoBlocks(ours);
+  const tBlocks = splitIntoBlocks(theirs);
+  if (bBlocks.length === oBlocks.length && bBlocks.length === tBlocks.length) {
+    let out: string[] = [];
+    for (let i = 0; i < bBlocks.length; i++) {
+      out.push(mergeBlock(bBlocks[i]!.content, oBlocks[i]!.content, tBlocks[i]!.content));
+    }
+    return out.join('\n');
+  }
+  return mergeBlock(base, ours, theirs);
+}
+
+function splitIntoBlocks(input: string): { type: 'code' | 'text'; content: string }[] {
+  const lines = input.split(/\r?\n/);
+  const out: { type: 'code' | 'text'; content: string }[] = [];
+  let inFence = false;
+  let buf: string[] = [];
+  let bufType: 'code' | 'text' = 'text';
+  for (const ln of lines) {
+    const isFence = /^```/.test(ln);
+    if (isFence) {
+      if (!inFence) {
+        if (buf.length) out.push({ type: bufType, content: buf.join('\n') });
+        buf = [ln];
+        bufType = 'code';
+        inFence = true;
+      } else {
+        buf.push(ln);
+        out.push({ type: 'code', content: buf.join('\n') });
+        buf = [];
+        bufType = 'text';
+        inFence = false;
+      }
+      continue;
+    }
+    buf.push(ln);
+  }
+  if (buf.length) out.push({ type: bufType, content: buf.join('\n') });
+  return out;
+}
+
+function mergeBlock(base: string, ours: string, theirs: string): string {
+  const dmp = new DiffMatchPatch();
+  // Apply patches for base->theirs onto ours
+  const patches = dmp.patch_make(base, theirs);
+  let [result, applied] = dmp.patch_apply(patches, ours);
+  if (applied.some((ok: boolean) => !ok)) {
+    // Conservative union: keep ours, append any lines present in theirs but not in ours
+    const oursLines = new Set(ours.split(/\r?\n/));
+    const extras: string[] = [];
+    for (const l of theirs.split(/\r?\n/)) {
+      if (!oursLines.has(l)) extras.push(l);
+    }
+    return [ours, extras.length ? extras.join('\n') : ''].filter(Boolean).join('\n');
+  }
+  // Safety: if both sides changed, ensure we preserve our changed lines
+  if (ours !== base && theirs !== base) {
+    const resSet = new Set(result.split(/\r?\n/));
+    const add: string[] = [];
+    for (const l of ours.split(/\r?\n/)) {
+      if (!resSet.has(l)) add.push(l);
+    }
+    if (add.length) result = [result, add.join('\n')].filter(Boolean).join('\n');
+  }
+  return result;
+}
+
+export const __test = { splitIntoBlocks, mergeBlock };

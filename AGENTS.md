@@ -27,6 +27,7 @@ Deploying to Vercel
 Commit & PR Conventions
 
 - Commit messages: short, high‑level, no function names.
+
   - Aim for 50–65 chars in the subject.
   - Summarize the user‑visible change or intent, not the mechanics.
   - Avoid prefixes like `feat(...)` and internal details (e.g., file or function names).
@@ -63,4 +64,13 @@ Coding Guidelines
 - Variables: prefer `let` over `const`, except for global constants, functions, or other module‑level constant objects.
 - Types: use `type` aliases instead of `interface`.
 - Exports: collect all exports at the top of the file (named exports), avoid inline `export` sprinkled through implementations.
-- Type safety: use strong types; do not use `any`; avoid `as` casts; avoid non‑null assertions (`!`). If narrowing is required, use proper type guards.
+- Type safety: use strong types; do not use `any`; avoid `as` casts; avoid non‑null assertions (`!`), except if it's obvious from the surrounding code that the value cannot be nullish. If narrowing is required, use proper type guards.
+
+Type Checking
+
+- Run `npm run check` to perform a full TypeScript type check. Ensure the codebase type checks cleanly after changes.
+
+Agent Conventions
+
+- When you make a change that is either trivial or that you already confirmed to be successful by running tests (i.e., it doesn't require manual testing/quality control from the UI), then commit the change right away.
+- When we introduce new conventions or useful workflows, record them in this AGENTS.md so future work is consistent.

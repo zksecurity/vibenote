@@ -7,7 +7,9 @@
     "dev": "vite --port 3000",
     "dev:api": "vercel dev",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check": "tsc -b",
+    "test": "vitest run"
   },
   "dependencies": {
     "marked": "^11.2.0",
@@ -20,6 +22,7 @@
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
     "@types/diff-match-patch": "^1.0.36",
+    "vitest": "^2.1.2",
     "typescript": "^5.5.4",
     "vite": "^5.4.0"
   }

@@ -5,7 +5,7 @@ import { getStoredToken } from '../auth/github';
 import type { NoteDoc, NoteMeta } from '../storage/local';
 import type { LocalStore } from '../storage/local';
 import { listTombstones, type Tombstone, removeTombstones, findByPath, markSynced, updateNoteText, moveNotePath } from '../storage/local';
-import DiffMatchPatch from 'diff-match-patch';
+import { mergeMarkdown } from '../merge/merge';
 
 export interface RemoteConfig {
   owner: string;
@@ -228,91 +228,10 @@ export async function ensureRepoExists(
   return res.ok;
 }
 
-// --- Merge helpers ---
-
 function hashText(text: string): string {
   let h = 5381;
   for (let i = 0; i < text.length; i++) h = ((h << 5) + h) ^ text.charCodeAt(i);
   return (h >>> 0).toString(16);
-}
-
-function splitIntoBlocks(input: string): { type: 'code' | 'text'; content: string }[] {
-  // Split by fenced code blocks to avoid token merging inside code fences
-  const lines = input.split(/\r?\n/);
-  const out: { type: 'code' | 'text'; content: string }[] = [];
-  let inFence = false;
-  let buf: string[] = [];
-  let bufType: 'code' | 'text' = 'text';
-  for (const ln of lines) {
-    const isFence = /^```/.test(ln);
-    if (isFence) {
-      if (!inFence) {
-        if (buf.length) out.push({ type: bufType, content: buf.join('\n') });
-        buf = [ln];
-        bufType = 'code';
-        inFence = true;
-      } else {
-        buf.push(ln);
-        out.push({ type: 'code', content: buf.join('\n') });
-        buf = [];
-        bufType = 'text';
-        inFence = false;
-      }
-      continue;
-    }
-    buf.push(ln);
-  }
-  if (buf.length) out.push({ type: bufType, content: buf.join('\n') });
-  return out;
-}
-
-function mergeBlock(base: string, local: string, remoteTxt: string, granular: 'line' | 'token'): string {
-  // First try applying remote patches to local using base as the origin
-  const dmp = new DiffMatchPatch();
-  if (granular === 'token') {
-    // Tokenize by words and punctuation for paragraphs
-    const tok = (s: string) => s.replace(/\s+/g, ' ').trim();
-    const pb = dmp.patch_make(tok(base), tok(remoteTxt));
-    const [res, _] = dmp.patch_apply(pb, tok(local));
-    return res.replace(/\s+/g, ' ').trim();
-  }
-  // line-based merge: operate directly on text
-  const patches = dmp.patch_make(base, remoteTxt);
-  const [result, applied] = dmp.patch_apply(patches, local);
-  if (applied.some((ok: boolean) => !ok)) {
-    // If some patches failed, fall back to conservative union:
-    // keep local, but append remote-only additions that aren't in local.
-    // This ensures a single merged note and preserves information.
-    const remoteLines = remoteTxt.split(/\r?\n/);
-    const localSet = new Set(local.split(/\r?\n/));
-    let extras: string[] = [];
-    for (const l of remoteLines) {
-      if (!localSet.has(l)) extras.push(l);
-    }
-    const joined = [local, extras.length ? extras.join('\n') : ''].filter(Boolean).join('\n');
-    return joined;
-  }
-  return result;
-}
-
-export function mergeMarkdown(base: string, local: string, remoteTxt: string): string {
-  const bBlocks = splitIntoBlocks(base);
-  const lBlocks = splitIntoBlocks(local);
-  const rBlocks = splitIntoBlocks(remoteTxt);
-  // Align blocks by sequence; if structure differs, fallback to line merge for whole doc
-  if (bBlocks.length === lBlocks.length && bBlocks.length === rBlocks.length) {
-    let out: string[] = [];
-    for (const [i, b] of bBlocks.entries()) {
-      const l = lBlocks[i];
-      const r = rBlocks[i];
-      if (!l || !r) return mergeBlock(base, local, remoteTxt, 'line');
-      const merged = mergeBlock(b.content, l.content, r.content, b.type === 'text' ? 'line' : 'line');
-      out.push(merged);
-    }
-    return out.join('\n');
-  }
-  // fallback
-  return mergeBlock(base, local, remoteTxt, 'line');
 }
 
 export async function syncBidirectional(store: LocalStore): Promise<SyncSummary> {
