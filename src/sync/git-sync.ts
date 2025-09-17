@@ -243,17 +243,15 @@ export async function syncBidirectional(store: LocalStore): Promise<SyncSummary>
 
   const entries = await listNoteFiles();
   const remoteMap = new Map<string, string>(entries.map((e) => [e.path, e.sha] as const));
-  const renameSources = new Set(
-    listTombstones()
-      .filter((t) => t.type === 'rename')
-      .map((t) => t.from)
-  );
+  const pending = listTombstones();
+  const renameSources = new Set(pending.filter((t) => t.type === 'rename').map((t) => t.from));
+  const deleteSources = new Set(pending.filter((t) => t.type === 'delete').map((t) => t.path));
 
   // Process remote files: pull new or changed, merge when both changed
   for (const e of entries) {
     const local = findByPath(e.path);
     if (!local) {
-      if (renameSources.has(e.path)) continue;
+      if (renameSources.has(e.path) || deleteSources.has(e.path)) continue;
       // New remote file → pull
       const rf = await pullNote(e.path);
       if (!rf) continue;
@@ -342,16 +340,54 @@ export async function syncBidirectional(store: LocalStore): Promise<SyncSummary>
         removeTombstones((x) => x.type === 'delete' && x.path === t.path && x.deletedAt === t.deletedAt);
       }
     } else if (t.type === 'rename') {
-      const sha = remoteMap.get(t.from);
-      // The note has been moved locally; we keep new path locally already
-      if (sha && (!t.lastRemoteSha || t.lastRemoteSha === sha)) {
-        // safe to delete old path
-        await deleteFiles([{ path: t.from, sha }], 'vibenote: delete old path after rename');
+      const remoteSha = remoteMap.get(t.from);
+      if (!remoteSha && !t.lastRemoteSha) {
+        // Nothing tracked for this rename: remote already missing
+        removeTombstones((x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt);
+        continue;
+      }
+      let shaToDelete = remoteSha;
+      if (!shaToDelete) {
+        const remoteFile = await pullNote(t.from);
+        if (!remoteFile) {
+          removeTombstones((x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt);
+          continue;
+        }
+        shaToDelete = remoteFile.sha;
+        remoteMap.set(t.from, shaToDelete);
+      }
+      if (!t.lastRemoteSha || t.lastRemoteSha === shaToDelete) {
+        await deleteFiles([{ path: t.from, sha: shaToDelete }], 'vibenote: delete old path after rename');
         deletedRemote++;
+        remoteMap.delete(t.from);
+        removeTombstones((x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt);
+        continue;
+      }
+
+      const existing = findByPath(t.from);
+      const remoteFile = await pullNote(t.from);
+      if (remoteFile) {
+        if (existing) {
+          if ((existing.doc.text || '') !== remoteFile.text) {
+            updateNoteText(existing.id, remoteFile.text);
+          }
+          markSynced(existing.id, { remoteSha: remoteFile.sha, syncedHash: hashText(remoteFile.text) });
+        } else {
+          const title = basename(t.from).replace(/\.md$/i, '');
+          const newId = store.createNote(title, remoteFile.text);
+          moveNotePath(newId, t.from);
+          markSynced(newId, { remoteSha: remoteFile.sha, syncedHash: hashText(remoteFile.text) });
+          pulled++;
+        }
       }
       removeTombstones((x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt);
     }
   }
 
   return { pulled, pushed, deletedRemote, deletedLocal, merged };
+}
+
+function basename(p: string) {
+  const i = p.lastIndexOf('/');
+  return i >= 0 ? p.slice(i + 1) : p;
 }

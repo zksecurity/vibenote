@@ -15,13 +15,18 @@ export interface NoteDoc extends NoteMeta {
 const NS = 'vibenote';
 const k = (s: string) => `${NS}:${s}`;
 
+type LocalStoreOptions = {
+  seedWelcome?: boolean;
+};
+
 export class LocalStore {
   private index: NoteMeta[];
   private notesDir = '';
 
-  constructor() {
+  constructor(opts: LocalStoreOptions = {}) {
     this.index = this.loadIndex();
-    if (this.index.length === 0) {
+    const shouldSeed = opts.seedWelcome ?? true;
+    if (shouldSeed && this.index.length === 0) {
       // Seed with a welcome note
       const id = this.createNote('Welcome', `# Welcome to VibeNote\n\nStart editing…`);
       this.index = this.loadIndex();
