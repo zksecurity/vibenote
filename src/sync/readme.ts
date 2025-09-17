@@ -5,7 +5,7 @@ const README_BODY = `Welcome! This repository is managed by [VibeNote](https://v
 - Your notes live here as regular Markdown files.
 - Open [vibenote.dev](https://vibenote.dev) to edit Markdown in a mobile-friendly note-taking app.
 - You can also edit notes directly in your editor and push to GitHub.
-- VibeNote will sync automatically to the \`main\` branch whenever you're online.
+- VibeNote will sync automatically to the ${'`main`'} branch whenever you're online.
 `;
 
 function buildReadme(repoName: string): string {
