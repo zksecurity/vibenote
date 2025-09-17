@@ -69,10 +69,15 @@ export class LocalStore {
     const path = joinPath(this.notesDir, `${safe}.md`);
     const updatedAt = Date.now();
     const next: NoteDoc = { ...doc, title: safe, path, updatedAt };
+    const pathChanged = fromPath !== path;
+    if (pathChanged) {
+      delete next.lastRemoteSha;
+      delete next.lastSyncedHash;
+    }
     localStorage.setItem(k(`note:${id}`), JSON.stringify(next));
     this.touchIndex(id, { title: safe, path, updatedAt });
-    if (fromPath !== path) {
-      recordRenameTombstone({ from: fromPath, to: path, lastRemoteSha: doc.lastRemoteSha, renamedAt: Date.now() });
+    if (pathChanged) {
+      recordRenameTombstone({ from: fromPath, to: path, lastRemoteSha: doc.lastRemoteSha, renamedAt: updatedAt });
     }
   }
 

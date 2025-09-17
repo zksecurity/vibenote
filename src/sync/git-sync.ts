@@ -243,11 +243,17 @@ export async function syncBidirectional(store: LocalStore): Promise<SyncSummary>
 
   const entries = await listNoteFiles();
   const remoteMap = new Map<string, string>(entries.map((e) => [e.path, e.sha] as const));
+  const renameSources = new Set(
+    listTombstones()
+      .filter((t) => t.type === 'rename')
+      .map((t) => t.from)
+  );
 
   // Process remote files: pull new or changed, merge when both changed
   for (const e of entries) {
     const local = findByPath(e.path);
     if (!local) {
+      if (renameSources.has(e.path)) continue;
       // New remote file → pull
       const rf = await pullNote(e.path);
       if (!rf) continue;
