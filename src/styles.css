@@ -166,6 +166,49 @@ textarea {
   background: rgba(9, 105, 218, 0.1);
 }
 
+
+.sync-btn {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-color: transparent;
+  background: transparent;
+}
+
+.sync-btn:hover {
+  background: rgba(9, 105, 218, 0.1);
+}
+
+.sync-btn svg {
+  pointer-events: none;
+}
+
+.sync-btn.is-syncing {
+  background: rgba(9, 105, 218, 0.12);
+  border-color: transparent;
+}
+
+.sync-icon {
+  display: block;
+}
+
+.sync-icon.spinning {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .btn.ghost {
   background: transparent;
   border-color: transparent;
@@ -229,6 +272,9 @@ textarea {
   padding: 0;
   border-radius: 50%;
   box-shadow: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .account-btn img,

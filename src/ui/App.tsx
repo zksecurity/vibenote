@@ -165,6 +165,23 @@ export function App() {
     </svg>
   );
 
+  const SyncIcon = ({ spinning }: { spinning: boolean }) => (
+    <svg
+      className={`sync-icon ${spinning ? 'spinning' : ''}`}
+      width="20"
+      height="20"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      aria-hidden
+    >
+      <path d="M2.5 8a5.5 5.5 0 0 1 9-3.9" strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M13.5 8a5.5 5.5 0 0 1-9 3.9" strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M11.5 2.5 13.5 5l-3 .5" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M4.5 13.5 2.5 11l3-.5" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 4000);
@@ -255,8 +272,14 @@ export function App() {
           ) : (
             <>
               {remoteCfg && (
-                <button className="btn secondary" onClick={onSyncNow} disabled={syncing}>
-                  {syncing ? 'Syncing…' : 'Sync now'}
+                <button
+                  className={`btn secondary sync-btn ${syncing ? 'is-syncing' : ''}`}
+                  onClick={onSyncNow}
+                  disabled={syncing}
+                  aria-label={syncing ? 'Syncing' : 'Sync now'}
+                  title={syncing ? 'Syncing…' : 'Sync now'}
+                >
+                  <SyncIcon spinning={syncing} />
                 </button>
               )}
               {remoteCfg ? (
