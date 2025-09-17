@@ -71,18 +71,21 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px;
   padding: 12px clamp(16px, 4vw, 32px);
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   box-shadow: 0 1px 0 rgba(15, 23, 42, 0.06);
   min-height: var(--topbar-height);
+  flex-wrap: nowrap;
 }
 
 .topbar-left {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  min-width: 0;
+  flex: 0 0 auto;
 }
 
 .brand {
@@ -91,12 +94,55 @@ textarea {
   letter-spacing: -0.01em;
 }
 
+.repo-btn {
+  gap: 6px;
+  max-width: clamp(140px, 42vw, 240px);
+  min-width: 0;
+  overflow: hidden;
+  justify-content: flex-start;
+  height: 40px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.repo-btn svg {
+  flex-shrink: 0;
+}
+
+.repo-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  flex: 1 1 auto;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.repo-label span:last-child {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.repo-owner {
+  color: var(--muted);
+  flex-shrink: 0;
+  font-weight: 500;
+}
+
 .topbar-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .btn {
@@ -735,6 +781,44 @@ textarea:focus-visible {
     left: 18px;
     right: 18px;
     bottom: 18px;
+  }
+}
+
+@media (max-width: 640px) {
+  .topbar {
+    padding: 10px 16px;
+  }
+
+  .brand {
+    display: none;
+  }
+
+  .topbar-left {
+    gap: 6px;
+  }
+
+  .topbar-actions {
+    gap: 8px;
+    flex: 1 1 auto;
+  }
+
+  .repo-btn {
+    max-width: 52vw;
+  }
+
+  .topbar-actions .repo-btn {
+    order: -1;
+    margin-right: auto;
+  }
+}
+
+@media (max-width: 520px) {
+  .repo-btn .repo-owner {
+    display: none;
+  }
+
+  .repo-btn {
+    max-width: 60vw;
   }
 }
 

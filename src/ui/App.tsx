@@ -284,13 +284,14 @@ export function App() {
               )}
               {remoteCfg ? (
                 <button
-                  className="btn ghost"
+                  className="btn ghost repo-btn"
                   onClick={ensureOwnerAndOpen}
                   title="Change repository"
                 >
                   <GitHubIcon />
-                  <span>
-                    {remoteCfg.owner}/{remoteCfg.repo}
+                  <span className="repo-label">
+                    <span className="repo-owner">{remoteCfg.owner}/</span>
+                    <span>{remoteCfg.repo}</span>
                   </span>
                 </button>
               ) : (
