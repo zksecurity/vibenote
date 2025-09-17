@@ -223,11 +223,35 @@ textarea {
   border-color: transparent;
 }
 
-.account-btn img {
-  width: 28px;
-  height: 28px;
+.account-btn {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 50%;
+  box-shadow: none;
+}
+
+.account-btn img,
+.account-avatar-fallback {
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-subtle);
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.account-btn img {
+  object-fit: cover;
+  background: transparent;
+}
+
+.account-avatar-fallback {
+  font-size: 0.9rem;
 }
 
 .input,
@@ -509,7 +533,7 @@ textarea:focus-visible {
   position: fixed;
   top: calc(var(--topbar-height) + 12px);
   right: 16px;
-  width: min(260px, calc(100vw - 32px));
+  width: min(320px, calc(100vw - 32px));
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -527,20 +551,39 @@ textarea:focus-visible {
   align-items: center;
 }
 
-.account-menu-header img {
-  width: 44px;
-  height: 44px;
+.account-menu-avatar {
+  width: 48px;
+  height: 48px;
   border-radius: 50%;
   border: 1px solid var(--border);
+  background: var(--surface-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.account-menu-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.account-menu-avatar span {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--accent);
 }
 
 .account-name {
   font-weight: 600;
+  word-break: break-word;
 }
 
 .account-handle {
   font-size: 0.85rem;
   color: var(--muted);
+  word-break: break-word;
 }
 
 .toast {

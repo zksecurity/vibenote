@@ -276,9 +276,18 @@ export function App() {
                 </button>
               )}
               {user ? (
-                <button className="btn ghost account-btn" onClick={() => setMenuOpen((v) => !v)}>
-                  {user.avatar_url && <img src={user.avatar_url} alt={user.login} />}
-                  <span>{user.login}</span>
+                <button
+                  className="btn ghost account-btn"
+                  onClick={() => setMenuOpen((v) => !v)}
+                  aria-label="Account menu"
+                >
+                  {user.avatar_url ? (
+                    <img src={user.avatar_url} alt={user.login} />
+                  ) : (
+                    <span className="account-avatar-fallback" aria-hidden>
+                      {(user.name || user.login || '?').charAt(0).toUpperCase()}
+                    </span>
+                  )}
                 </button>
               ) : (
                 <button className="btn secondary" onClick={onConnect}>
@@ -348,7 +357,13 @@ export function App() {
       {menuOpen && user && (
         <div className="account-menu">
           <div className="account-menu-header">
-            {user.avatar_url && <img src={user.avatar_url} alt={user.login} />}
+            <div className="account-menu-avatar" aria-hidden>
+              {user.avatar_url ? (
+                <img src={user.avatar_url} alt="" />
+              ) : (
+                <span>{(user.name || user.login || '?').charAt(0).toUpperCase()}</span>
+              )}
+            </div>
             <div>
               <div className="account-name">{user.name || user.login}</div>
               <div className="account-handle">@{user.login}</div>
