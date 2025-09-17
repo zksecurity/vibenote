@@ -78,3 +78,4 @@ Agent Conventions
 
 - When you make a change that is either trivial or that you already confirmed to be successful by running tests (i.e., it doesn't require manual testing/quality control from the UI), then commit the change right away.
 - When we introduce new conventions or useful workflows, record them in this AGENTS.md so future work is consistent.
+- When touching shared modules, prefer listing exported/high-level APIs first and push low-level helpers toward the bottom so readers can grasp intent before implementation details.

@@ -18,33 +18,23 @@ export type MergeInputs = {
   theirs: string;
 };
 
-/** Apply a diff between ancestor and variant directly to shared text. */
-function applyVariantDirect(
-  ytext: Y.Text,
-  base: string,
-  variant: string,
-  options?: ApplyVariantOptions
-): void {
-  let diffs = options?.diffs ?? diffStructured(base, variant, options?.dmp);
-  applyDiffsToYText(ytext, diffs);
-}
-
-/** Apply precomputed diff tuples to a Yjs text instance. */
-function applyDiffsToYText(ytext: Y.Text, diffs: DMPDiff[]): void {
-  let pos = 0;
-  for (let diff of diffs) {
-    let [op, text] = diff;
-    if (op === 0) {
-      pos += text.length;
-      continue;
-    }
-    if (op === -1) {
-      ytext.delete(pos, text.length);
-      continue;
-    }
-    ytext.insert(pos, text);
-    pos += text.length;
-  }
+/** Merge local and remote variants against a shared ancestor using Yjs. */
+export function mergeWithYjs({ base, ours, theirs }: MergeInputs): string {
+  if (ours === theirs) return ours;
+  let doc = new Y.Doc();
+  let text = doc.getText('t');
+  text.insert(0, base);
+  // Precompute diff metadata for "theirs" so we can reuse both spans and edits.
+  let baseToTheirsDmp = new DiffMatchPatch();
+  let baseToTheirsDiffs = diffStructured(base, theirs, baseToTheirsDmp);
+  let theirsRanges = collectChangedRanges(baseToTheirsDiffs);
+  // Plan our edits relative to base using relative positions anchored in `text`
+  let ourOps = computeOurOps(text, base, ours);
+  // Apply "theirs" directly to the shared doc using the precomputed diff
+  applyVariantDirect(text, base, theirs, { dmp: baseToTheirsDmp, diffs: baseToTheirsDiffs });
+  // Then apply "ours" using relative positions (which survive prior edits)
+  applyOurOpsAfterTheirs(text, ourOps, theirsRanges);
+  return text.toString();
 }
 
 type InsertOp = {
@@ -71,21 +61,150 @@ type ApplyVariantOptions = {
   diffs?: DMPDiff[];
 };
 
-/** Check whether a string spans multiple logical lines after trimming. */
-function hasMultipleLogicalLines(text: string): boolean {
-  if (!text.includes('\n')) return false;
-  let trimmed = text.replace(/\n+$/, '');
-  return trimmed.includes('\n');
+/**
+ * Precompute local edits as relative positions that survive subsequent mutations
+ * so they can be replayed after remote changes while tracking replaced spans.
+ */
+function computeOurOps(
+  ytext: Y.Text,
+  base: string,
+  ours: string,
+  inputDmp?: DiffMatchPatch
+): OurOp[] {
+  let dmp = inputDmp ?? new DiffMatchPatch();
+  let diffs = diffStructured(base, ours, dmp);
+  let ops: OurOp[] = [];
+  let pos = 0;
+  for (let i = 0; i < diffs.length; i++) {
+    let [op, text] = diffs[i]!;
+    if (op === 0) {
+      pos += text.length;
+      continue;
+    }
+    // Detect a replacement where a delete is immediately followed by an insert.
+    let next = diffs[i + 1];
+    if (op === -1 && next && next[0] === 1) {
+      let insertText = next[1];
+      let delLen = text.length;
+      // Anchor at the right edge to keep the cursor stable after remote edits.
+      let rel = Y.createRelativePositionFromTypeIndex(ytext, pos + delLen, 1);
+      ops.push({ kind: 'insert', rel, text: insertText, replaceStart: pos, replaceLen: delLen });
+      // Skip the paired insert and advance past the deleted base span.
+      i += 1;
+      pos += delLen;
+      continue;
+    }
+    if (op === -1) {
+      let start = Y.createRelativePositionFromTypeIndex(ytext, pos, 1);
+      let end = Y.createRelativePositionFromTypeIndex(ytext, pos + text.length, 1);
+      // Keep deletions as start/end anchors so the eventual span stays bounded.
+      ops.push({ kind: 'delete', start, end });
+      pos += text.length;
+      continue;
+    }
+    // Standalone insertions anchor at the current base offset.
+    let rel = Y.createRelativePositionFromTypeIndex(ytext, pos, 1);
+    ops.push({ kind: 'insert', rel, text, replaceStart: pos, replaceLen: 0 });
+  }
+  return ops;
 }
 
-/** Push a diff tuple, coalescing adjacent operations of the same type. */
-function pushDiff(acc: DMPDiff[], op: number, text: string): void {
-  if (!text.length) return;
-  let last = acc[acc.length - 1];
-  if (last && last[0] === op) {
-    last[1] += text;
-  } else {
-    acc.push([op, text]);
+/** Apply a diff between ancestor and variant directly to shared text. */
+function applyVariantDirect(
+  ytext: Y.Text,
+  base: string,
+  variant: string,
+  options?: ApplyVariantOptions
+): void {
+  let diffs = options?.diffs ?? diffStructured(base, variant, options?.dmp);
+  applyDiffsToYText(ytext, diffs);
+}
+
+/** Replay local operations after remote edits, skipping conflicts when spans overlap. */
+function applyOurOpsAfterTheirs(merged: Y.Text, ops: OurOp[], theirsRanges: Range[]): void {
+  let doc = merged.doc;
+  if (!doc) return;
+  for (let op of ops) {
+    if (op.kind === 'insert') {
+      // If this insert is part of a replacement and the replaced base span intersects
+      // a span changed by "theirs", prefer "theirs" and skip our insert.
+      if (op.replaceLen > 0) {
+        let a = op.replaceStart;
+        let b = op.replaceStart + op.replaceLen;
+        let conflict = theirsRanges.some(range => rangesOverlap(a, b, range));
+        if (conflict) continue;
+      }
+      let abs = Y.createAbsolutePositionFromRelativePosition(op.rel, doc);
+      if (!abs || abs.type !== merged) continue;
+      let insertIndex = Math.max(0, Math.min(abs.index, merged.length));
+      if (op.replaceLen > 0) {
+        // Delete whatever survived inside the target span before re-inserting ours.
+        let from = Math.max(0, insertIndex - op.replaceLen);
+        let available = Math.max(0, Math.min(op.replaceLen, merged.length - from));
+        if (available > 0) merged.delete(from, available);
+        insertIndex = from;
+      }
+      merged.insert(insertIndex, op.text);
+      continue;
+    }
+    let a = Y.createAbsolutePositionFromRelativePosition(op.start, doc);
+    let b = Y.createAbsolutePositionFromRelativePosition(op.end, doc);
+    if (!a || !b || a.type !== merged || b.type !== merged) continue;
+    let from = Math.min(a.index, b.index);
+    let to = Math.max(a.index, b.index);
+    let len = Math.max(0, to - from);
+    if (len) merged.delete(from, len);
+  }
+}
+
+/** Identify ranges in the ancestor that were touched by the remote variant. */
+function computeChangedRanges(base: string, theirs: string, inputDmp?: DiffMatchPatch): Range[] {
+  let dmp = inputDmp ?? new DiffMatchPatch();
+  let diffs = diffStructured(base, theirs, dmp);
+  return collectChangedRanges(diffs);
+}
+
+/** Collect base ranges that were deleted when applying a diff. */
+function collectChangedRanges(diffs: DMPDiff[]): Range[] {
+  let ranges: Range[] = [];
+  let pos = 0;
+  for (let diff of diffs) {
+    let [op, text] = diff;
+    if (op === 0) {
+      pos += text.length;
+      continue;
+    }
+    if (op === -1) {
+      let len = text.length;
+      if (len) ranges.push({ start: pos, end: pos + len });
+      pos += len;
+      continue;
+    }
+    // insert: no base advancement
+  }
+  return ranges;
+}
+
+/** Check whether a replacement span overlaps a remote change range. */
+function rangesOverlap(aStart: number, aEnd: number, range: Range): boolean {
+  return Math.max(range.start, aStart) < Math.min(range.end, aEnd);
+}
+
+/** Apply precomputed diff tuples to a Yjs text instance. */
+function applyDiffsToYText(ytext: Y.Text, diffs: DMPDiff[]): void {
+  let pos = 0;
+  for (let diff of diffs) {
+    let [op, text] = diff;
+    if (op === 0) {
+      pos += text.length;
+      continue;
+    }
+    if (op === -1) {
+      ytext.delete(pos, text.length);
+      continue;
+    }
+    ytext.insert(pos, text);
+    pos += text.length;
   }
 }
 
@@ -164,141 +283,22 @@ function diffStructuredInternal(
   return merged;
 }
 
-/** Identify ranges in the ancestor that were touched by the remote variant. */
-function computeChangedRanges(base: string, theirs: string, inputDmp?: DiffMatchPatch): Range[] {
-  let dmp = inputDmp ?? new DiffMatchPatch();
-  let diffs = diffStructured(base, theirs, dmp);
-  return collectChangedRanges(diffs);
+/** Check whether a string spans multiple logical lines after trimming. */
+function hasMultipleLogicalLines(text: string): boolean {
+  if (!text.includes('\n')) return false;
+  let trimmed = text.replace(/\n+$/, '');
+  return trimmed.includes('\n');
 }
 
-/**
- * Precompute local edits as relative positions that survive subsequent mutations
- * so they can be replayed after remote changes while tracking replaced spans.
- */
-function computeOurOps(
-  ytext: Y.Text,
-  base: string,
-  ours: string,
-  inputDmp?: DiffMatchPatch
-): OurOp[] {
-  let dmp = inputDmp ?? new DiffMatchPatch();
-  let diffs = diffStructured(base, ours, dmp);
-  let ops: OurOp[] = [];
-  let pos = 0;
-  for (let i = 0; i < diffs.length; i++) {
-    let [op, text] = diffs[i]!;
-    if (op === 0) {
-      pos += text.length;
-      continue;
-    }
-    // Detect a replacement where a delete is immediately followed by an insert.
-    let next = diffs[i + 1];
-    if (op === -1 && next && next[0] === 1) {
-      let insertText = next[1];
-      let delLen = text.length;
-      // Anchor at the right edge to keep the cursor stable after remote edits.
-      let rel = Y.createRelativePositionFromTypeIndex(ytext, pos + delLen, 1);
-      ops.push({ kind: 'insert', rel, text: insertText, replaceStart: pos, replaceLen: delLen });
-      // Skip the paired insert and advance past the deleted base span.
-      i += 1;
-      pos += delLen;
-      continue;
-    }
-    if (op === -1) {
-      let start = Y.createRelativePositionFromTypeIndex(ytext, pos, 1);
-      let end = Y.createRelativePositionFromTypeIndex(ytext, pos + text.length, 1);
-      // Keep deletions as start/end anchors so the eventual span stays bounded.
-      ops.push({ kind: 'delete', start, end });
-      pos += text.length;
-      continue;
-    }
-    // Standalone insertions anchor at the current base offset.
-    let rel = Y.createRelativePositionFromTypeIndex(ytext, pos, 1);
-    ops.push({ kind: 'insert', rel, text, replaceStart: pos, replaceLen: 0 });
+/** Push a diff tuple, coalescing adjacent operations of the same type. */
+function pushDiff(acc: DMPDiff[], op: number, text: string): void {
+  if (!text.length) return;
+  let last = acc[acc.length - 1];
+  if (last && last[0] === op) {
+    last[1] += text;
+  } else {
+    acc.push([op, text]);
   }
-  return ops;
-}
-
-/** Collect base ranges that were deleted when applying a diff. */
-function collectChangedRanges(diffs: DMPDiff[]): Range[] {
-  let ranges: Range[] = [];
-  let pos = 0;
-  for (let diff of diffs) {
-    let [op, text] = diff;
-    if (op === 0) {
-      pos += text.length;
-      continue;
-    }
-    if (op === -1) {
-      let len = text.length;
-      if (len) ranges.push({ start: pos, end: pos + len });
-      pos += len;
-      continue;
-    }
-    // insert: no base advancement
-  }
-  return ranges;
-}
-
-/** Check whether a replacement span overlaps a remote change range. */
-function rangesOverlap(aStart: number, aEnd: number, range: Range): boolean {
-  return Math.max(range.start, aStart) < Math.min(range.end, aEnd);
-}
-
-/** Replay local operations after remote edits, skipping conflicts when spans overlap. */
-function applyOurOpsAfterTheirs(merged: Y.Text, ops: OurOp[], theirsRanges: Range[]): void {
-  let doc = merged.doc;
-  if (!doc) return;
-  for (let op of ops) {
-    if (op.kind === 'insert') {
-      // If this insert is part of a replacement and the replaced base span intersects
-      // a span changed by "theirs", prefer "theirs" and skip our insert.
-      if (op.replaceLen > 0) {
-        let a = op.replaceStart;
-        let b = op.replaceStart + op.replaceLen;
-        let conflict = theirsRanges.some(range => rangesOverlap(a, b, range));
-        if (conflict) continue;
-      }
-      let abs = Y.createAbsolutePositionFromRelativePosition(op.rel, doc);
-      if (!abs || abs.type !== merged) continue;
-      let insertIndex = Math.max(0, Math.min(abs.index, merged.length));
-      if (op.replaceLen > 0) {
-        // Delete whatever survived inside the target span before re-inserting ours.
-        let from = Math.max(0, insertIndex - op.replaceLen);
-        let available = Math.max(0, Math.min(op.replaceLen, merged.length - from));
-        if (available > 0) merged.delete(from, available);
-        insertIndex = from;
-      }
-      merged.insert(insertIndex, op.text);
-      continue;
-    }
-    let a = Y.createAbsolutePositionFromRelativePosition(op.start, doc);
-    let b = Y.createAbsolutePositionFromRelativePosition(op.end, doc);
-    if (!a || !b || a.type !== merged || b.type !== merged) continue;
-    let from = Math.min(a.index, b.index);
-    let to = Math.max(a.index, b.index);
-    let len = Math.max(0, to - from);
-    if (len) merged.delete(from, len);
-  }
-}
-
-/** Merge local and remote variants against a shared ancestor using Yjs. */
-export function mergeWithYjs({ base, ours, theirs }: MergeInputs): string {
-  if (ours === theirs) return ours;
-  let doc = new Y.Doc();
-  let text = doc.getText('t');
-  text.insert(0, base);
-  // Precompute diff metadata for "theirs" so we can reuse both spans and edits.
-  let baseToTheirsDmp = new DiffMatchPatch();
-  let baseToTheirsDiffs = diffStructured(base, theirs, baseToTheirsDmp);
-  let theirsRanges = collectChangedRanges(baseToTheirsDiffs);
-  // Plan our edits relative to base using relative positions anchored in `text`
-  let ourOps = computeOurOps(text, base, ours);
-  // Apply "theirs" directly to the shared doc using the precomputed diff
-  applyVariantDirect(text, base, theirs, { dmp: baseToTheirsDmp, diffs: baseToTheirsDiffs });
-  // Then apply "ours" using relative positions (which survive prior edits)
-  applyOurOpsAfterTheirs(text, ourOps, theirsRanges);
-  return text.toString();
 }
 
 export const __test = {
