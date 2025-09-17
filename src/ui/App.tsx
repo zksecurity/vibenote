@@ -3,7 +3,18 @@ import { NoteList } from './NoteList';
 import { Editor } from './Editor';
 import { LocalStore, type NoteMeta, type NoteDoc } from '../storage/local';
 import { getStoredToken, requestDeviceCode, fetchCurrentUser, clearToken } from '../auth/github';
-import { configureRemote, getRemoteConfig, pullNote, commitBatch, ensureRepoExists, repoExists, clearRemoteConfig, listNoteFiles, deleteFiles, syncBidirectional } from '../sync/git-sync';
+import {
+  configureRemote,
+  getRemoteConfig,
+  pullNote,
+  commitBatch,
+  ensureRepoExists,
+  repoExists,
+  clearRemoteConfig,
+  listNoteFiles,
+  syncBidirectional,
+} from '../sync/git-sync';
+import { ensureIntroReadme } from '../sync/readme';
 import { RepoConfigModal } from './RepoConfigModal';
 import { DeviceCodeModal } from './DeviceCodeModal';
 
@@ -20,7 +31,9 @@ export function App() {
   const [device, setDevice] = useState<import('../auth/github').DeviceCodeResponse | null>(null);
   const [ownerLogin, setOwnerLogin] = useState<string | null>(null);
   const [remoteCfg, setRemoteCfg] = useState(getRemoteConfig());
-  const [user, setUser] = useState<{ login: string; name?: string; avatar_url?: string } | null>(null);
+  const [user, setUser] = useState<{ login: string; name?: string; avatar_url?: string } | null>(
+    null
+  );
   const [menuOpen, setMenuOpen] = useState(false);
   const [toast, setToast] = useState<{ text: string; href?: string } | null>(null);
   const [repoModalMode, setRepoModalMode] = useState<'onboard' | 'manage'>('manage');
@@ -86,14 +99,7 @@ export function App() {
         if (files.length > 0) {
           await commitBatch(files, 'vibenote: initialize notes');
         }
-        // Ensure README exists with a short intro and keep it out of notes
-        try {
-          const existingReadme = await pullNote('README.md');
-          const readmeText = `# VibeNote\n\nThis repository was initialized by VibeNote.\n\n- Notes are plain Markdown files at the repository root.\n- Edit and sync notes with the VibeNote app.\n`;
-          await commitBatch([
-            { path: 'README.md', text: readmeText, baseSha: existingReadme?.sha },
-          ], 'vibenote: add README');
-        } catch {}
+        await ensureIntroReadme(cfg.repo);
         setSyncMsg('Repository created and initialized');
         setToast({ text: 'Repository ready', href: `https://github.com/${cfg.owner}/${cfg.repo}` });
       } else {
@@ -134,19 +140,19 @@ export function App() {
 
   const GitHubIcon = () => (
     <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
-      <path d="M8 0C3.58 0 0 3.58 0 8a8 8 0 0 0 5.47 7.59c.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.01.08-2.11 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.91.08 2.11.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+      <path d="M8 0C3.58 0 0 3.58 0 8a8 8 0 0 0 5.47 7.59c.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.01.08-2.11 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.91.08 2.11.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
     </svg>
   );
 
   const NotesIcon = () => (
     <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
-      <path d="M3 1.75A1.75 1.75 0 0 1 4.75 0h6.5A1.75 1.75 0 0 1 13 1.75v12.5A1.75 1.75 0 0 1 11.25 16h-6.5A1.75 1.75 0 0 1 3 14.25Zm1.5.75a.75.75 0 0 0-.75.75v10.5c0 .414.336.75.75.75h6.5a.75.75 0 0 0 .75-.75V3.25a.75.75 0 0 0-.75-.75ZM5 4.5A.5.5 0 0 1 5.5 4h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 5 4.5Zm0 2.75A.75.75 0 0 1 5.75 6.5h4.5a.75.75 0 0 1 0 1.5h-4.5A.75.75 0 0 1 5 7.25Zm0 2.75c0-.414.336-.75.75-.75h4.5a.75.75 0 0 1 0 1.5h-4.5A.75.75 0 0 1 5 10Z"/>
+      <path d="M3 1.75A1.75 1.75 0 0 1 4.75 0h6.5A1.75 1.75 0 0 1 13 1.75v12.5A1.75 1.75 0 0 1 11.25 16h-6.5A1.75 1.75 0 0 1 3 14.25Zm1.5.75a.75.75 0 0 0-.75.75v10.5c0 .414.336.75.75.75h6.5a.75.75 0 0 0 .75-.75V3.25a.75.75 0 0 0-.75-.75ZM5 4.5A.5.5 0 0 1 5.5 4h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 5 4.5Zm0 2.75A.75.75 0 0 1 5.75 6.5h4.5a.75.75 0 0 1 0 1.5h-4.5A.75.75 0 0 1 5 7.25Zm0 2.75c0-.414.336-.75.75-.75h4.5a.75.75 0 0 1 0 1.5h-4.5A.75.75 0 0 1 5 10Z" />
     </svg>
   );
 
   const CloseIcon = () => (
     <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
-      <path d="M3.22 3.22a.75.75 0 0 1 1.06 0L8 6.94l3.72-3.72a.75.75 0 1 1 1.06 1.06L9.06 8l3.72 3.72a.75.75 0 1 1-1.06 1.06L8 9.06l-3.72 3.72a.75.75 0 1 1-1.06-1.06L6.94 8 3.22 4.28a.75.75 0 0 1 0-1.06Z"/>
+      <path d="M3.22 3.22a.75.75 0 0 1 1.06 0L8 6.94l3.72-3.72a.75.75 0 1 1 1.06 1.06L9.06 8l3.72 3.72a.75.75 0 1 1-1.06 1.06L8 9.06l-3.72 3.72a.75.75 0 1 1-1.06-1.06L6.94 8 3.22 4.28a.75.75 0 0 1 0-1.06Z" />
     </svg>
   );
 
@@ -223,14 +229,20 @@ export function App() {
     <div className="app-shell">
       <header className="topbar">
         <div className="topbar-left">
-          <button className="btn icon only-mobile" onClick={() => setSidebarOpen(true)} aria-label="Open notes">
+          <button
+            className="btn icon only-mobile"
+            onClick={() => setSidebarOpen(true)}
+            aria-label="Open notes"
+          >
             <NotesIcon />
           </button>
           <span className="brand">VibeNote</span>
         </div>
         <div className="topbar-actions">
           {!token ? (
-            <button className="btn primary" onClick={onConnect}>Connect GitHub</button>
+            <button className="btn primary" onClick={onConnect}>
+              Connect GitHub
+            </button>
           ) : (
             <>
               {remoteCfg && (
@@ -239,9 +251,15 @@ export function App() {
                 </button>
               )}
               {remoteCfg ? (
-                <button className="btn ghost" onClick={ensureOwnerAndOpen} title="Change repository">
+                <button
+                  className="btn ghost"
+                  onClick={ensureOwnerAndOpen}
+                  title="Change repository"
+                >
                   <GitHubIcon />
-                  <span>{remoteCfg.owner}/{remoteCfg.repo}</span>
+                  <span>
+                    {remoteCfg.owner}/{remoteCfg.repo}
+                  </span>
                 </button>
               ) : (
                 <button className="btn primary" onClick={ensureOwnerAndOpen}>
@@ -250,13 +268,13 @@ export function App() {
               )}
               {user ? (
                 <button className="btn ghost account-btn" onClick={() => setMenuOpen((v) => !v)}>
-                  {user.avatar_url && (
-                    <img src={user.avatar_url} alt={user.login} />
-                  )}
+                  {user.avatar_url && <img src={user.avatar_url} alt={user.login} />}
                   <span>{user.login}</span>
                 </button>
               ) : (
-                <button className="btn secondary" onClick={onConnect}>Refresh GitHub login</button>
+                <button className="btn secondary" onClick={onConnect}>
+                  Refresh GitHub login
+                </button>
               )}
             </>
           )}
@@ -268,16 +286,25 @@ export function App() {
             <div className="sidebar-title">
               <span>Notes</span>
               <span className="note-count">{notes.length}</span>
-              <button className="btn icon only-mobile" onClick={() => setSidebarOpen(false)} aria-label="Close notes">
+              <button
+                className="btn icon only-mobile"
+                onClick={() => setSidebarOpen(false)}
+                aria-label="Close notes"
+              >
                 <CloseIcon />
               </button>
             </div>
-            <button className="btn primary full-width" onClick={onCreate}>New note</button>
+            <button className="btn primary full-width" onClick={onCreate}>
+              New note
+            </button>
           </div>
           <NoteList
             notes={notes}
             activeId={activeId}
-            onSelect={(id) => { setActiveId(id); setSidebarOpen(false); }}
+            onSelect={(id) => {
+              setActiveId(id);
+              setSidebarOpen(false);
+            }}
             onRename={onRename}
             onDelete={onDelete}
           />
@@ -292,7 +319,10 @@ export function App() {
               <div className="empty-state">
                 <h2>Welcome to VibeNote</h2>
                 <p>Select a note from the sidebar or create a new one to get started.</p>
-                <p>To sync with GitHub, connect your account and link a repository. Once connected, use <strong>Sync now</strong> anytime to pull and push updates.</p>
+                <p>
+                  To sync with GitHub, connect your account and link a repository. Once connected,
+                  use <strong>Sync now</strong> anytime to pull and push updates.
+                </p>
                 {syncMsg && <p className="empty-state-status">{syncMsg}</p>}
               </div>
             )}
@@ -315,14 +345,18 @@ export function App() {
               <div className="account-handle">@{user.login}</div>
             </div>
           </div>
-          <button className="btn subtle full-width" onClick={onSignOut}>Sign out</button>
+          <button className="btn subtle full-width" onClick={onSignOut}>
+            Sign out
+          </button>
         </div>
       )}
       {toast && (
         <div className="toast">
           <span>{toast.text}</span>
           {toast.href && (
-            <a className="btn subtle" href={toast.href} target="_blank" rel="noreferrer">Open</a>
+            <a className="btn subtle" href={toast.href} target="_blank" rel="noreferrer">
+              Open
+            </a>
           )}
         </div>
       )}
