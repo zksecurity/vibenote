@@ -15,23 +15,13 @@ See `AGENTS.md` for local setup, environment variables, and serverless API instr
 
 ## Project layout
 
-- `src/` UI (React + TypeScript) and app logic
-- `src/crdt/` Y.js CRDT helpers for Markdown
-- `src/storage/` local offline storage (localStorage for MVP)
-- `src/sync/` Git sync pipeline (GitHub API placeholder + queues)
+- `src/ui/` React UI, modals, and the app shell
+- `src/auth/` GitHub Device Flow helpers used by the client
+- `src/storage/` local offline storage (localStorage for MVP, plus tombstones)
+- `src/merge/` Y.js-backed merge helpers for Markdown
+- `src/sync/` GitHub REST integration for pull/push/delete and bidirectional sync
+- `api/` Vercel serverless endpoints that proxy GitHub's device code/token APIs
 - `DESIGN.md` Deep dive into syncing, CRDT merge, file layout, and future serverless options
-
-## Status
-
-This is an MVP scaffold meant to be easy to iterate on by another LLM agent. The current app supports:
-
-- Viewing a pseudo repo + list of notes (from local storage)
-- Creating/renaming/selecting notes
-- Editing notes in a simple editor with Y.js CRDT locally
-- Persisting changes to localStorage immediately (optimistic)
-- A stub Git sync pipeline (ready to wire to GitHub REST API)
-
-Production‑grade items (auth, real Git push/pull, better editor, y-websocket, presence) are described and planned in DESIGN.md.
 
 ## Deploying
 
@@ -42,6 +32,7 @@ Vercel deployment instructions and preview setup are documented in `AGENTS.md`.
 This app uses GitHub’s Device Authorization Flow via serverless proxy endpoints (no CORS issues in the browser).
 
 Steps:
+
 - Create a new GitHub OAuth App at https://github.com/settings/developers → New OAuth App.
   - Homepage URL: your Vercel production URL (or `http://localhost:5173` for dev)
   - Authorization callback URL: can be any valid URL (not used by device flow), e.g. your homepage URL
@@ -49,6 +40,7 @@ Steps:
 - In the app, click “Connect GitHub” and follow the instructions; enter the user code in the opened GitHub page.
 
 Endpoints provided by the app (Vercel functions):
+
 - `POST /api/github/device-code` → calls GitHub device code API
 - `POST /api/github/device-token` → polls for access token
 
@@ -57,6 +49,7 @@ For local development of these endpoints, see `AGENTS.md` (using `vercel dev`).
 ## Auth Modes
 
 **OAuth Device Flow**
+
 - Permissions: `repo` (public + private) per user; broad OAuth scope.
 - Tokens: User access token, long‑lived bearer stored locally (MVP).
 - Backend: Minimal (serverless proxy to avoid CORS only).
@@ -65,6 +58,7 @@ For local development of these endpoints, see `AGENTS.md` (using `vercel dev`).
 - Best for: Fast setup, personal use, minimal backend.
 
 **GitHub App (Planned)**
+
 - Permissions: Fine‑grained (Repository contents: Read & write; Metadata: Read).
 - Tokens: Short‑lived installation tokens scoped to selected repos.
 - Backend: Required (sign JWT, mint installation tokens; optional API proxy).
@@ -75,14 +69,17 @@ For local development of these endpoints, see `AGENTS.md` (using `vercel dev`).
 ## Manual Sync (MVP)
 
 The header has a “Sync Now” button that:
+
 - Compares all local notes to remote files in the configured repo/branch
 - Commits changed or new files via GitHub Contents API with message `vibenote: update notes`
 
 To use it:
+
 1. Click “Connect GitHub” and authorize.
 2. Click “Repo” to set `{ owner, repo, branch }`.
 3. Click “Sync Now”.
 
 Notes:
+
 - For the MVP, conflict resolution relies on full‑text replace and optional Y.Text merging in memory; real background batching is planned.
 - If a remote file does not exist, the app will create it.
