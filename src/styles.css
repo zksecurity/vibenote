@@ -6,6 +6,11 @@
   --accent: #0969da;
   --accent-border: #54aeff;
   --accent-soft: #ddf4ff;
+  --success: #1f883d;
+  --success-hover: #1a7f37;
+  --success-active: #166830;
+  --success-border: #2c974b;
+  --success-shadow: 0 10px 20px rgba(46, 164, 79, 0.25);
   --text: #1f2328;
   --muted: #57606a;
   --radius: 12px;
@@ -129,15 +134,28 @@ textarea {
 }
 
 .btn.primary {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--success);
+  border-color: var(--success-border);
   color: #ffffff;
-  box-shadow: 0 10px 30px rgba(9, 105, 218, 0.35);
+  box-shadow: var(--success-shadow);
 }
 
 .btn.primary:hover {
-  background: #0757c4;
-  border-color: #0757c4;
+  background: var(--success-hover);
+  border-color: var(--success-hover);
+  box-shadow: 0 12px 28px rgba(46, 164, 79, 0.28);
+}
+
+.btn.primary:active {
+  background: var(--success-active);
+  border-color: var(--success-active);
+  box-shadow: none;
+}
+
+.btn.primary:disabled {
+  background: rgba(31, 136, 61, 0.5);
+  border-color: rgba(31, 136, 61, 0.4);
+  box-shadow: none;
 }
 
 .btn.secondary {
