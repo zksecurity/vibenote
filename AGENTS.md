@@ -63,8 +63,27 @@ Coding Guidelines
 - Formatting: use Prettier (repo includes `.prettierrc`).
 - Variables: prefer `let` over `const`, except for global constants, functions, or other module‑level constant objects.
 - Types: use `type` aliases instead of `interface`.
-- Exports: collect all exports at the top of the file (named exports), avoid inline `export` sprinkled through implementations.
-- Type safety: use strong types; do not use `any`; avoid `as` casts; avoid non‑null assertions (`!`), except if it's obvious from the surrounding code that the value cannot be nullish. If narrowing is required, use proper type guards.
+- Exports: collect all exports at the top of the file (named exports), avoid inline `export` sprinkled through the file. Good Example:
+
+```ts
+import { helper } from  "stuff"
+
+export { mainMethod, anotherMethod }
+
+function mainMethod() { // ...
+```
+
+- Export types using the `type` qualifier: `export type { MyType }` or `export { type MyType }`
+- Type safety: use strong types
+  - do not use `any`
+  - avoid `as` casts
+  - avoid non‑null assertions (`!`), except if obvious from the surrounding code that the value cannot be nullish
+  - If narrowing is required, use proper type guards.
+- Avoid confusing boolean coercions: For values that are not boolean, prefer explicit value checks over truthy tests on `value` or `!value`:
+  - `if (value !== undefined)` rather than `if (value)`
+  - `if (text === "")` rather than `if (!text)`
+  - `number !== 0 && array.includes(number)` rather than `number && array.includes(number)`
+- When writing shared modules, prefer placing exported/high-level APIs at the top of the file and push low-level helpers toward the bottom, so readers can grasp intent before implementation details.
 
 Type Checking
 
@@ -76,6 +95,5 @@ Testing
 
 Agent Conventions
 
-- When you make a change that is either trivial or that you already confirmed to be successful by running tests (i.e., it doesn't require manual testing/quality control from the UI), then commit the change right away.
+- When you make a change that is simple enough and doesn't touch UI, try to confirm its correctness directly by running tests, and if successful, commit the change right away.
 - When we introduce new conventions or useful workflows, record them in this AGENTS.md so future work is consistent.
-- When touching shared modules, prefer listing exported/high-level APIs first and push low-level helpers toward the bottom so readers can grasp intent before implementation details.
