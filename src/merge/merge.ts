@@ -1,18 +1,22 @@
-// Pure merge logic for three-way Markdown/text merges.
-// No GitHub or storage dependencies. Browser-friendly.
+/**
+ * Pure merge logic for three-way Markdown/text merges.
+ * No GitHub or storage dependencies. Browser-friendly.
+ *
+ * For debugging: in devtools, access __lastMerge to see the last merge inputs/outputs.
+ */
 import DiffMatchPatch from 'diff-match-patch';
 import { mergeWithYjs } from './merge-with-yjs';
 
-// For debugging: in devtools, access __lastMerge to see the last merge inputs/outputs.
+export { type MergeResult, mergeMarkdown };
 
-export type MergeResult = {
+type MergeResult = {
   base: string;
   ours: string;
   theirs: string;
   result: string;
 };
 
-export function mergeMarkdown(base: string, ours: string, theirs: string): string {
+function mergeMarkdown(base: string, ours: string, theirs: string): string {
   // Yjs-backed three-way merge: plan ours relative to base, apply theirs first,
   // then ours via relative positions to ensure deterministic order.
   let result = mergeWithYjs({ base, ours, theirs });
@@ -22,7 +26,7 @@ export function mergeMarkdown(base: string, ours: string, theirs: string): strin
   return result;
 }
 
-// unused legacy merge implementation below
+// UNUSED LEGACY MERGE IMPLEMENTATION BELOW
 
 /**
  * Simple three-way merge without Yjs, using diff-match-patch
@@ -97,5 +101,3 @@ function mergeBlock(base: string, ours: string, theirs: string): string {
   // If patches applied cleanly, trust the patch result to preserve locality
   return result;
 }
-
-export const __test = { splitIntoBlocks, mergeBlock };

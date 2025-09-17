@@ -126,7 +126,6 @@ it('merges list insertions at different positions', () => {
   });
 });
 
-// fails
 it('handles list reordering and text edits', () => {
   let base = `- item1\n- item2\n- item3`;
   let ours = `- item2\n- item1 updated\n- item3`;
@@ -151,7 +150,6 @@ it('merges ordered list numbering differences', () => {
   });
 });
 
-// fails
 it('combines paragraph split vs append', () => {
   let base = `Paragraph one. Paragraph two.`;
   let ours = `Paragraph one.\n\nParagraph two extended locally.`;
@@ -212,7 +210,6 @@ it('combines italic and bold emphasis edits', () => {
   });
 });
 
-// fails
 it('merges competing blockquote and paragraph edits', () => {
   let base = `Quote: life is good.`;
   let ours = `> life is good.\n\nAdded note.`;
