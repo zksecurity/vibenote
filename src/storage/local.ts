@@ -15,6 +15,32 @@ export interface NoteDoc extends NoteMeta {
 const NS = 'vibenote';
 const k = (s: string) => `${NS}:${s}`;
 
+const WELCOME_NOTE = `# 👋 Welcome to VibeNote
+
+**VibeNote** is a friendly home for your Markdown notes that syncs straight to a GitHub repository you control.
+
+## Why VibeNote?
+- ✨ Clean note-taking UI that feels at home on desktop and mobile.
+- 🗂️ Your notes are just Markdown files on GitHub, versioned and portable.
+- 🔄 One-click sync keeps local edits and remote changes in step.
+
+## Quick start
+1. Create or open a note in the list on the left.
+2. Hit the GitHub button to connect your account via the device flow.
+3. Choose the repository VibeNote should sync with (or let it create one).
+4. Use the circular sync icon whenever you want to pull and push changes.
+
+## Transparency for engineers
+- 🗃️ Notes live in your browser storage and inside your GitHub repo — we never copy them to our servers.
+- 🔐 The GitHub device-flow token stays in 'localStorage'; it is never sent to VibeNote infrastructure.
+- 🤝 Automatic conflict resolution handles Markdown merges for you, so you do not have to untangle git conflicts.
+
+## Learn more
+- 📦 Source code: https://github.com/mitschabaude/vibenote
+- 💡 Have ideas or found a bug? Open an issue on GitHub and help shape the roadmap.
+
+Happy writing! ✍️`;
+
 type LocalStoreOptions = {
   seedWelcome?: boolean;
 };
@@ -28,7 +54,7 @@ export class LocalStore {
     const shouldSeed = opts.seedWelcome ?? true;
     if (shouldSeed && this.index.length === 0) {
       // Seed with a welcome note
-      const id = this.createNote('Welcome', `# Welcome to VibeNote\n\nStart editing…`);
+      const id = this.createNote('Welcome', WELCOME_NOTE);
       this.index = this.loadIndex();
     }
   }
@@ -82,7 +108,12 @@ export class LocalStore {
     localStorage.setItem(k(`note:${id}`), JSON.stringify(next));
     this.touchIndex(id, { title: safe, path, updatedAt });
     if (pathChanged) {
-      recordRenameTombstone({ from: fromPath, to: path, lastRemoteSha: doc.lastRemoteSha, renamedAt: updatedAt });
+      recordRenameTombstone({
+        from: fromPath,
+        to: path,
+        lastRemoteSha: doc.lastRemoteSha,
+        renamedAt: updatedAt,
+      });
     }
   }
 
@@ -92,7 +123,11 @@ export class LocalStore {
     localStorage.setItem(k('index'), JSON.stringify(idx));
     if (doc) {
       // Record tombstone for safe remote delete handling
-      recordDeleteTombstone({ path: doc.path, lastRemoteSha: doc.lastRemoteSha, deletedAt: Date.now() });
+      recordDeleteTombstone({
+        path: doc.path,
+        lastRemoteSha: doc.lastRemoteSha,
+        deletedAt: Date.now(),
+      });
     }
     localStorage.removeItem(k(`note:${id}`));
     this.index = idx;
@@ -108,7 +143,7 @@ export class LocalStore {
     }
     for (const key of toRemove) localStorage.removeItem(key);
     // Seed welcome note
-    const id = this.createNote('Welcome', `# Welcome to VibeNote\n\nStart editing…`);
+    const id = this.createNote('Welcome', WELCOME_NOTE);
     this.index = this.loadIndex();
     return id;
   }
@@ -127,7 +162,12 @@ export class LocalStore {
       const id = crypto.randomUUID();
       const title = basename(f.path).replace(/\.md$/i, '');
       const meta: NoteMeta = { id, path: f.path, title, updatedAt: now };
-      const doc: NoteDoc = { ...meta, text: f.text, lastRemoteSha: f.sha, lastSyncedHash: hashText(f.text) };
+      const doc: NoteDoc = {
+        ...meta,
+        text: f.text,
+        lastRemoteSha: f.sha,
+        lastSyncedHash: hashText(f.text),
+      };
       index.push(meta);
       localStorage.setItem(k(`note:${id}`), JSON.stringify(doc));
     }
@@ -179,8 +219,19 @@ function joinPath(dir: string, file: string) {
 }
 
 // --- Tombstones and utils ---
-export type DeleteTombstone = { type: 'delete'; path: string; lastRemoteSha?: string; deletedAt: number };
-export type RenameTombstone = { type: 'rename'; from: string; to: string; lastRemoteSha?: string; renamedAt: number };
+export type DeleteTombstone = {
+  type: 'delete';
+  path: string;
+  lastRemoteSha?: string;
+  deletedAt: number;
+};
+export type RenameTombstone = {
+  type: 'rename';
+  from: string;
+  to: string;
+  lastRemoteSha?: string;
+  renamedAt: number;
+};
 export type Tombstone = DeleteTombstone | RenameTombstone;
 
 const TOMBSTONES_KEY = k('tombstones');
@@ -201,15 +252,30 @@ function saveTombstones(ts: Tombstone[]) {
   localStorage.setItem(TOMBSTONES_KEY, JSON.stringify(ts));
 }
 
-export function recordDeleteTombstone(t: { path: string; lastRemoteSha?: string; deletedAt: number }) {
+export function recordDeleteTombstone(t: {
+  path: string;
+  lastRemoteSha?: string;
+  deletedAt: number;
+}) {
   const ts = listTombstones();
   ts.push({ type: 'delete', path: t.path, lastRemoteSha: t.lastRemoteSha, deletedAt: t.deletedAt });
   saveTombstones(ts);
 }
 
-export function recordRenameTombstone(t: { from: string; to: string; lastRemoteSha?: string; renamedAt: number }) {
+export function recordRenameTombstone(t: {
+  from: string;
+  to: string;
+  lastRemoteSha?: string;
+  renamedAt: number;
+}) {
   const ts = listTombstones();
-  ts.push({ type: 'rename', from: t.from, to: t.to, lastRemoteSha: t.lastRemoteSha, renamedAt: t.renamedAt });
+  ts.push({
+    type: 'rename',
+    from: t.from,
+    to: t.to,
+    lastRemoteSha: t.lastRemoteSha,
+    renamedAt: t.renamedAt,
+  });
   saveTombstones(ts);
 }
 
@@ -289,7 +355,11 @@ export function moveNotePath(id: string, toPath: string) {
   const idx = ((): NoteMeta[] => {
     const raw = localStorage.getItem(k('index'));
     if (!raw) return [];
-    try { return JSON.parse(raw) as NoteMeta[]; } catch { return []; }
+    try {
+      return JSON.parse(raw) as NoteMeta[];
+    } catch {
+      return [];
+    }
   })();
   const j = idx.findIndex((n) => n.id === id);
   if (j >= 0) {
