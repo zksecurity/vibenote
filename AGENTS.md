@@ -45,9 +45,8 @@ Commit & PR Conventions
 
 UI/UX Conventions
 
-- Mobile-first: modals full-screen on small screens; larger tap targets.
-- Avoid `alert()`; prefer in-app modals/toasts for flow steps and messages.
-- Current visual direction (Oct 2024): light GitHub-inspired shell. Use soft gray backgrounds, white surfaces, GitHub green for primary actions, and muted blue accents. Top bar mirrors GitHub repo view with circular sync icon, repo chip, and avatar. On small screens, repo name becomes the "title" (owner hidden <520px) and header must stay within two rows max.
+- Mobile-first: modals full-screen on small screens; convenient tap targets.
+- Visual direction: light GitHub-inspired shell. Use soft gray backgrounds, white surfaces, GitHub green for primary actions, and muted blue accents. Top bar mirrors GitHub repo view with circular sync icon, repo chip, and avatar. On small screens, repo name becomes the "title" (owner hidden <520px) and header stays within one row.
 
 Auth Modes
 
