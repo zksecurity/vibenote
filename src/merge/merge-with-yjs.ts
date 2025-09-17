@@ -12,28 +12,35 @@
 import * as Y from 'yjs';
 import DiffMatchPatch from 'diff-match-patch';
 
-export type MergeInputs = {
+export { type MergeInputs, mergeWithYjs };
+
+type MergeInputs = {
   base: string;
   ours: string;
   theirs: string;
 };
 
 /** Merge local and remote variants against a shared ancestor using Yjs. */
-export function mergeWithYjs({ base, ours, theirs }: MergeInputs): string {
+function mergeWithYjs({ base, ours, theirs }: MergeInputs): string {
   if (ours === theirs) return ours;
   let doc = new Y.Doc();
   let text = doc.getText('t');
   text.insert(0, base);
-  // Precompute diff metadata for "theirs" so we can reuse both spans and edits.
-  let baseToTheirsDmp = new DiffMatchPatch();
-  let baseToTheirsDiffs = diffStructured(base, theirs, baseToTheirsDmp);
-  let theirsRanges = collectChangedRanges(baseToTheirsDiffs);
+
+  // Compute diffs for both variants against the base
+  let theirDiffs = diffStructured(base, theirs);
+  let ourDiffs = diffStructured(base, ours);
+
   // Plan our edits relative to base using relative positions anchored in `text`
-  let ourOps = computeOurOps(text, base, ours);
+  let ourOps = diffsToOps(text, ourDiffs);
+
   // Apply "theirs" directly to the shared doc using the precomputed diff
-  applyVariantDirect(text, base, theirs, { dmp: baseToTheirsDmp, diffs: baseToTheirsDiffs });
+  applyDiffsToYText(text, theirDiffs);
+
   // Then apply "ours" using relative positions (which survive prior edits)
-  applyOurOpsAfterTheirs(text, ourOps, theirsRanges);
+  let theirRanges = collectChangedRanges(theirDiffs);
+  applyOurOpsAfterTheirs(text, ourOps, theirRanges);
+
   return text.toString();
 }
 
@@ -51,29 +58,17 @@ type DeleteOp = {
   end: Y.RelativePosition;
 };
 
-type OurOp = InsertOp | DeleteOp;
+type Op = InsertOp | DeleteOp;
 type Range = { start: number; end: number };
 
 type DMPDiff = [number, string];
-
-type ApplyVariantOptions = {
-  dmp?: DiffMatchPatch;
-  diffs?: DMPDiff[];
-};
 
 /**
  * Precompute local edits as relative positions that survive subsequent mutations
  * so they can be replayed after remote changes while tracking replaced spans.
  */
-function computeOurOps(
-  ytext: Y.Text,
-  base: string,
-  ours: string,
-  inputDmp?: DiffMatchPatch
-): OurOp[] {
-  let dmp = inputDmp ?? new DiffMatchPatch();
-  let diffs = diffStructured(base, ours, dmp);
-  let ops: OurOp[] = [];
+function diffsToOps(ytext: Y.Text, diffs: DMPDiff[]): Op[] {
+  let ops: Op[] = [];
   let pos = 0;
   for (let i = 0; i < diffs.length; i++) {
     let [op, text] = diffs[i]!;
@@ -109,29 +104,17 @@ function computeOurOps(
   return ops;
 }
 
-/** Apply a diff between ancestor and variant directly to shared text. */
-function applyVariantDirect(
-  ytext: Y.Text,
-  base: string,
-  variant: string,
-  options?: ApplyVariantOptions
-): void {
-  let diffs = options?.diffs ?? diffStructured(base, variant, options?.dmp);
-  applyDiffsToYText(ytext, diffs);
-}
-
 /** Replay local operations after remote edits, skipping conflicts when spans overlap. */
-function applyOurOpsAfterTheirs(merged: Y.Text, ops: OurOp[], theirsRanges: Range[]): void {
+function applyOurOpsAfterTheirs(merged: Y.Text, ops: Op[], theirRanges: Range[]): void {
   let doc = merged.doc;
-  if (!doc) return;
+  if (!doc) throw Error('Y.Text is not attached to a Y.Doc');
   for (let op of ops) {
     if (op.kind === 'insert') {
       // If this insert is part of a replacement and the replaced base span intersects
       // a span changed by "theirs", prefer "theirs" and skip our insert.
       if (op.replaceLen > 0) {
-        let a = op.replaceStart;
-        let b = op.replaceStart + op.replaceLen;
-        let conflict = theirsRanges.some(range => rangesOverlap(a, b, range));
+        let range = { start: op.replaceStart, end: op.replaceStart + op.replaceLen };
+        let conflict = theirRanges.some((r) => rangesOverlap(range, r));
         if (conflict) continue;
       }
       let abs = Y.createAbsolutePositionFromRelativePosition(op.rel, doc);
@@ -157,13 +140,6 @@ function applyOurOpsAfterTheirs(merged: Y.Text, ops: OurOp[], theirsRanges: Rang
   }
 }
 
-/** Identify ranges in the ancestor that were touched by the remote variant. */
-function computeChangedRanges(base: string, theirs: string, inputDmp?: DiffMatchPatch): Range[] {
-  let dmp = inputDmp ?? new DiffMatchPatch();
-  let diffs = diffStructured(base, theirs, dmp);
-  return collectChangedRanges(diffs);
-}
-
 /** Collect base ranges that were deleted when applying a diff. */
 function collectChangedRanges(diffs: DMPDiff[]): Range[] {
   let ranges: Range[] = [];
@@ -185,9 +161,9 @@ function collectChangedRanges(diffs: DMPDiff[]): Range[] {
   return ranges;
 }
 
-/** Check whether a replacement span overlaps a remote change range. */
-function rangesOverlap(aStart: number, aEnd: number, range: Range): boolean {
-  return Math.max(range.start, aStart) < Math.min(range.end, aEnd);
+/** Check whether two ranges overlap. */
+function rangesOverlap(range1: Range, range2: Range): boolean {
+  return Math.max(range2.start, range1.start) < Math.min(range2.end, range1.end);
 }
 
 /** Apply precomputed diff tuples to a Yjs text instance. */
@@ -292,7 +268,7 @@ function hasMultipleLogicalLines(text: string): boolean {
 
 /** Push a diff tuple, coalescing adjacent operations of the same type. */
 function pushDiff(acc: DMPDiff[], op: number, text: string): void {
-  if (!text.length) return;
+  if (text.length === 0) return;
   let last = acc[acc.length - 1];
   if (last && last[0] === op) {
     last[1] += text;
@@ -300,10 +276,3 @@ function pushDiff(acc: DMPDiff[], op: number, text: string): void {
     acc.push([op, text]);
   }
 }
-
-export const __test = {
-  applyVariantDirect,
-  computeChangedRanges,
-  computeOurOps,
-  applyOurOpsAfterTheirs,
-};
