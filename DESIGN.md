@@ -16,54 +16,62 @@ This document captures the core architecture, sync logic, and decisions so anoth
 - CRDT: Y.js with a Y.Text per note; markdown text is the canonical content from/to Git.
 - Storage:
   - Local: localStorage for MVP (swap to IndexedDB later via `idb-keyval` or `y-indexeddb`).
-  - Remote: GitHub REST API (contents + commits). For now, mocked functions with clear extension points.
-- Sync:
+  - Remote: GitHub REST API (contents + commits) invoked directly from the client using the stored OAuth token.
+  - Sync:
   - Optimistic apply to local CRDT + persist to local storage immediately.
-  - Periodic background sync: batch local changes and publish commits to the repo.
+  - Manual `Sync now` trigger today; background sync loop is still planned.
   - Merge strategy: pull remote md, import both local and remote into Y.Text, use Y.js to converge, export md, commit the result. (See “CRDT merge with plain text” below.)
 
 ## Repository Layout
 
-- Top‑level folder for notes, e.g., `notes/` (configurable).
-- One note per file, `notes/<slug>.md`.
-- Optional `notes/_index.json` (or `_index.yml`) for metadata (titles, ordering) – not required for MVP.
+- Notes live at the repository root by default (configurable via `notesDir`).
+- One note per Markdown file, `<slug>.md`.
+- `RepoConfigModal` seeds a README explaining VibeNote when creating a new repo and skips it from the note list.
+- Future work can add an index/metadata file when ordering/custom attributes are needed.
 
 ## Identity & Auth
 
-- MVP: bearer token input stored in local storage (a GitHub Personal Access Token). No server.
-- Future: GitHub OAuth (PKCE) with client‑side token storage; or small server to handle OAuth code exchange.
+- MVP: GitHub Device Authorization Flow. The UI requests a device code via serverless proxy (`api/github/device-code`), polls `api/github/device-token` for the access token, and stores it in `localStorage` under `vibenote:gh-token`.
+- Serverless functions (deployed on Vercel) keep the OAuth Client ID secret and avoid browser CORS issues.
+- Future: GitHub App mode for least-privilege access (see below) or a refined OAuth flow that avoids storing long-lived tokens client-side.
 
 ## GitHub App (Future Option)
 
 Goal: least‑privilege access limited to user‑selected repositories, cleaner consent for private notes, and short‑lived tokens.
 
 - Why a GitHub App:
+
   - Users select specific repositories at install time (or “all repos”).
   - Permissions are fine‑grained (e.g., Repository contents: Read & write, Metadata: Read).
   - Installation access tokens are short‑lived and scoped to the selected repos only.
 
 - Proposed permissions (initial):
+
   - Repository contents: Read & write
   - Metadata: Read
   - Avoid Administration (repo creation) to keep consent light; ask users to create a repo manually when needed.
 
 - Backend responsibilities (tiny service or Vercel Functions):
+
   - Sign an app JWT using the app’s private key.
   - Exchange for an installation access token for a given installation (and optional repo).
   - Optionally proxy GitHub Contents API (read/write) using the installation token to avoid exposing it to the client.
 
 - Client flow (GitHub App mode):
-  1) User installs the GitHub App and selects one or more repos.
-  2) Client stores minimal identifiers (installation id, owner/repo) — no long‑lived user tokens.
-  3) For sync, client calls backend: `POST /api/app/token { installationId, owner, repo }` or directly `POST /api/contents` with the desired operation; backend uses short‑lived installation token.
+
+  1. User installs the GitHub App and selects one or more repos.
+  2. Client stores minimal identifiers (installation id, owner/repo) — no long‑lived user tokens.
+  3. For sync, client calls backend: `POST /api/app/token { installationId, owner, repo }` or directly `POST /api/contents` with the desired operation; backend uses short‑lived installation token.
 
 - Migration strategy:
+
   - Keep OAuth Device Flow as “Quick start”.
   - Add an “Advanced: GitHub App” option in repo settings.
   - If App mode is selected, disable user tokens and route all sync via backend using installation tokens.
   - Document that private repos remain the default for personal notes; App mode still supports private repos with least privilege.
 
 - Webhooks (optional):
+
   - Subscribe to push events for selected repos to signal the client that new commits exist, enabling smarter pull/merge prompts.
 
 - Security notes:
@@ -86,44 +94,43 @@ Goal: least‑privilege access limited to user‑selected repositories, cleaner 
 ## Sync Algorithm (MVP)
 
 1. On app load:
-   - Load local repo index + notes from local storage.
-   - If user has a Git token and repo configured, schedule background sync.
+   - Instantiate `LocalStore`, which seeds a welcome note if none exist and materialises the local index from `localStorage`.
+   - Load any existing GitHub token (`vibenote:gh-token`) and remote config (`vibenote:config`).
 2. Editing a note:
-   - Update the Y.Text (CRDT) and save the new md content in local storage immediately.
-   - Mark the note as dirty in `SyncQueue` with a local timestamp/version.
-3. Background sync (every N seconds or on demand):
-   - For each dirty note:
-     - Fetch remote md (HEAD) via Git API (if online).
-     - Merge local vs remote using Y.Text as above.
-  - If the merged text differs from remote, create a commit with message `vibenote: update <note>`.
-   - Push commit(s) via Git API.
-   - Update local last synced sha / etag per note.
+   - Apply the edit through a Y.Text instance and immediately persist the new Markdown to `localStorage`.
+   - `LocalStore` updates `updatedAt` and leaves tombstones when notes are deleted or renamed.
+3. Sync (Manual for now):
+   - User clicks “Sync now”, which calls `syncBidirectional(LocalStore)`.
+   - For each remote file, pull contents and compare against local `lastRemoteSha`/`lastSyncedHash`.
+   - Merge diverged notes via Y.js three-way merge, upload changes with `PUT /contents`, and update sync metadata.
+   - Push local deletes/renames using tombstones, and restore remote deletes when local edits exist.
+   - Background polling remains on the roadmap so manual sync becomes an escape hatch rather than the primary path.
 
 Notes:
+
 - Batch commits: we can aggregate multiple note updates into one commit per sync window.
 - Conflict policy: CRDT decides; no manual three‑way textual conflict markers.
 - If remote changed but merge produces identical text, skip committing.
 
-## Git Operations (Planned)
+## Git Operations
 
-MVP will provide placeholders in `src/sync/git-sync.ts` for:
+`src/sync/git-sync.ts` now implements the GitHub Contents API end-to-end:
 
-- `configureRemote({ owner, repo, branch, token })`
-- `pullNote(path): Promise<{ text: string, sha: string }>`
-- `commitBatch([{ path, text, baseSha }], message): Promise<commitSha>`
+- `configureRemote` persists `{ owner, repo, branch, notesDir }` in `localStorage`.
+- `pullNote`, `listNoteFiles`, `commitBatch`, and `deleteFiles` wrap REST calls and convert Base64 content.
+- `syncBidirectional` mediates merges, handles local tombstones, restores remote deletions when needed, and records per-note sync hashes.
 
-Implementation options:
-- Use GitHub REST API v3 (contents endpoints for simple files). Pros: simple; cons: large repos need GraphQL/trees.
-- Use `isomorphic-git` in browser + a CORS‑friendly HTTP backend (later).
-- Future server: small proxy for auth/webhooks and to unify git logic.
+Future options still include moving to GraphQL/tree APIs for scale or pushing Git logic to a backend proxy when GitHub App mode lands.
 
 ## Local Storage Format (MVP)
 
 Key namespace: `vibenote:*`
 
-- `vibenote:config` – JSON: `{ owner, repo, branch, token, notesDir }`
-- `vibenote:index` – JSON list: `[{ id, path, title, updatedAt }]`
-- `vibenote:note:<id>` – JSON: `{ id, path, title, text, updatedAt, lastRemoteSha }`
+- `vibenote:gh-token` – GitHub OAuth access token (device flow output).
+- `vibenote:config` – JSON: `{ owner, repo, branch, notesDir }`.
+- `vibenote:index` – JSON list: `[{ id, path, title, updatedAt }]`.
+- `vibenote:note:<id>` – JSON: `{ id, path, title, text, updatedAt, lastRemoteSha, lastSyncedHash }`.
+- `vibenote:tombstones` – Array of delete/rename markers used to reconcile remote deletions safely.
 
 We avoid storing Y.js updates to keep it simple; instead, we reconstruct `Y.Text` from `text` on open. Later we can store Y updates in `y-indexeddb` for faster loads.
 
@@ -139,11 +146,13 @@ We avoid storing Y.js updates to keep it simple; instead, we reconstruct `Y.Text
 - Offline: no remote calls, local edits continue.
 - Token invalid: show a subtle banner; continue offline.
 - Merge failure: unlikely with Y.Text; if remote file deleted, confirm recreate.
+- Sign out clears the token/config, resets local notes to the welcome state, and removes tombstones.
 
 ## Security
 
-- Token is stored in localStorage for MVP – acceptable for personal usage. Document this clearly in README.
-- Future: use OAuth + server to mint short‑lived tokens.
+- Device Flow tokens are long-lived bearer tokens stored in `localStorage`. This is acceptable for personal usage but not ideal for multi-device teams; document risks clearly and provide sign-out.
+- Serverless proxies keep the OAuth Client ID server-side and avoid exposing user tokens beyond the browser.
+- Roadmap includes GitHub App mode to replace bearer tokens with short-lived installation tokens and potentially move sync calls behind a backend proxy.
 
 ## Testing & Dev
 
@@ -152,10 +161,11 @@ We avoid storing Y.js updates to keep it simple; instead, we reconstruct `Y.Text
 
 ## Roadmap
 
-- [ ] Wire GitHub REST API for real pull/commit
+- [x] Wire GitHub REST API for real pull/commit
 - [ ] Switch to IndexedDB for local storage
+- [ ] Automatic background sync loop (manual “Sync now” remains as manual override)
 - [ ] Better editor (CodeMirror + y-codemirror)
 - [ ] Presence & collaboration (y-webrtc or y-websocket)
 - [ ] Repository browser (folders, images)
 - [ ] Webhooks (optional small server) to hint at remote updates
- - [ ] GitHub App mode (selected repos, least‑privilege permissions, short‑lived installation tokens)
+- [ ] GitHub App mode (selected repos, least-privilege permissions, short-lived installation tokens)

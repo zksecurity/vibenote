@@ -15,13 +15,18 @@ export interface NoteDoc extends NoteMeta {
 const NS = 'vibenote';
 const k = (s: string) => `${NS}:${s}`;
 
+type LocalStoreOptions = {
+  seedWelcome?: boolean;
+};
+
 export class LocalStore {
   private index: NoteMeta[];
   private notesDir = '';
 
-  constructor() {
+  constructor(opts: LocalStoreOptions = {}) {
     this.index = this.loadIndex();
-    if (this.index.length === 0) {
+    const shouldSeed = opts.seedWelcome ?? true;
+    if (shouldSeed && this.index.length === 0) {
       // Seed with a welcome note
       const id = this.createNote('Welcome', `# Welcome to VibeNote\n\nStart editing…`);
       this.index = this.loadIndex();
@@ -69,10 +74,15 @@ export class LocalStore {
     const path = joinPath(this.notesDir, `${safe}.md`);
     const updatedAt = Date.now();
     const next: NoteDoc = { ...doc, title: safe, path, updatedAt };
+    const pathChanged = fromPath !== path;
+    if (pathChanged) {
+      delete next.lastRemoteSha;
+      delete next.lastSyncedHash;
+    }
     localStorage.setItem(k(`note:${id}`), JSON.stringify(next));
     this.touchIndex(id, { title: safe, path, updatedAt });
-    if (fromPath !== path) {
-      recordRenameTombstone({ from: fromPath, to: path, lastRemoteSha: doc.lastRemoteSha, renamedAt: Date.now() });
+    if (pathChanged) {
+      recordRenameTombstone({ from: fromPath, to: path, lastRemoteSha: doc.lastRemoteSha, renamedAt: updatedAt });
     }
   }
 
