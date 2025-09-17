@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { NoteList } from './NoteList';
 import { Editor } from './Editor';
-import { LocalStore, type NoteMeta, type NoteDoc } from '../storage/local';
+import { LocalStore, clearAllTombstones, type NoteMeta, type NoteDoc } from '../storage/local';
 import { getStoredToken, requestDeviceCode, fetchCurrentUser, clearToken } from '../auth/github';
 import {
   configureRemote,
@@ -84,20 +84,29 @@ export function App() {
     try {
       setSyncMsg(null);
       setSyncing(true);
+      const hadRemoteBefore = remoteCfg !== null;
       const existed = await repoExists(cfg.owner, cfg.repo);
       await ensureRepoExists(cfg.owner, cfg.repo, true);
       configureRemote({ ...cfg, notesDir: '' });
       setRemoteCfg(getRemoteConfig());
       // Seed initial notes if newly created
       if (!existed) {
-        const files: { path: string; text: string; baseSha?: string }[] = [];
-        for (const n of store.listNotes()) {
-          const local = store.loadNote(n.id);
-          if (!local) continue;
-          files.push({ path: local.path, text: local.text });
-        }
-        if (files.length > 0) {
-          await commitBatch(files, 'vibenote: initialize notes');
+        if (!hadRemoteBefore) {
+          const files: { path: string; text: string; baseSha?: string }[] = [];
+          for (const n of store.listNotes()) {
+            const local = store.loadNote(n.id);
+            if (!local) continue;
+            files.push({ path: local.path, text: local.text });
+          }
+          if (files.length > 0) {
+            await commitBatch(files, 'vibenote: initialize notes');
+          }
+        } else {
+          clearAllTombstones();
+          store.replaceWithRemote([]);
+          const notesSnapshot = store.listNotes();
+          setNotes(notesSnapshot);
+          setActiveId(notesSnapshot[0]?.id ?? null);
         }
         await ensureIntroReadme(cfg.repo);
         setSyncMsg('Repository created and initialized');
