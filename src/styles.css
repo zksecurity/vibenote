@@ -1030,6 +1030,19 @@ textarea:focus-visible {
   }
 }
 
+/* Widen repo button on large screens to avoid ellipsis */
+@media (min-width: 1100px) {
+  .repo-btn {
+    max-width: 560px;
+  }
+}
+
+@media (min-width: 1500px) {
+  .repo-btn {
+    max-width: 720px;
+  }
+}
+
 @media (max-width: 520px) {
   .repo-btn .repo-owner {
     display: none;
