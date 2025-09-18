@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { NoteList } from './NoteList';
 import { Editor } from './Editor';
 import {
@@ -81,15 +81,8 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   }, [slug]);
 
   useEffect(() => {
-    let entry: { slug: string; owner?: string; repo?: string; title?: string } = { slug };
-    if (route.kind === 'repo') {
-      entry.owner = route.owner;
-      entry.repo = route.repo;
-    } else if (route.kind === 'new') {
-      entry.title = 'Local scratchpad';
-    }
-    const connected = slug !== 'new' && linked;
-    onRecordRecent({ ...entry, connected });
+    if (route.kind !== 'repo') return;
+    onRecordRecent({ slug, owner: route.owner, repo: route.repo, connected: linked });
   }, [slug, route, linked, onRecordRecent]);
 
   useEffect(() => {
@@ -163,7 +156,9 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
       let existed = await repoExists(targetOwner, targetRepo);
       if (!existed) {
         if (!currentLogin || currentLogin !== targetOwner) {
-          setSyncMsg('Repository not found. VibeNote can only auto-create repositories under your username.');
+          setSyncMsg(
+            'Repository not found. VibeNote can only auto-create repositories under your username.'
+          );
           return;
         }
         let created = await ensureRepoExists(targetOwner, targetRepo, true);
@@ -198,14 +193,18 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
           setActiveId(notesSnapshot[0]?.id ?? null);
         }
         await ensureIntroReadme(targetConfig);
-        setToast({ text: 'Repository ready', href: `https://github.com/${targetOwner}/${targetRepo}` });
+        setToast({
+          text: 'Repository ready',
+          href: `https://github.com/${targetOwner}/${targetRepo}`,
+        });
       }
 
       const entries = await listNoteFiles(targetConfig);
       const remoteFiles: { path: string; text: string; sha?: string }[] = [];
       for (let entry of entries) {
         const remoteFile = await pullNote(targetConfig, entry.path);
-        if (remoteFile) remoteFiles.push({ path: remoteFile.path, text: remoteFile.text, sha: remoteFile.sha });
+        if (remoteFile)
+          remoteFiles.push({ path: remoteFile.path, text: remoteFile.text, sha: remoteFile.sha });
       }
       targetStore.replaceWithRemote(remoteFiles);
 
@@ -274,8 +273,18 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     >
       <path d="M2.5 8a5.5 5.5 0 0 1 9-3.9" strokeWidth="1.4" strokeLinecap="round" />
       <path d="M13.5 8a5.5 5.5 0 0 1-9 3.9" strokeWidth="1.4" strokeLinecap="round" />
-      <path d="M11.5 2.5 13.5 5l-3 .5" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M4.5 13.5 2.5 11l3-.5" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M11.5 2.5 13.5 5l-3 .5"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M4.5 13.5 2.5 11l3-.5"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 

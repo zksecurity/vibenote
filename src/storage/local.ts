@@ -547,7 +547,7 @@ function saveRecentRepos(entries: RecentRepo[]) {
 
 export function listRecentRepos(): RecentRepo[] {
   const legacy = readLegacyRepoConfig();
-  let entries = loadRecentRepos();
+  let entries = loadRecentRepos().filter((entry) => entry.slug !== 'new');
   let mapped = entries.map((entry) => ({
     ...entry,
     connected: entry.connected ?? isRepoLinked(entry.slug),

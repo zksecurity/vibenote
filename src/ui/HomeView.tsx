@@ -8,74 +8,70 @@ type HomeViewProps = {
 };
 
 export function HomeView({ recents, navigate }: HomeViewProps) {
-  let hasRepos = recents.length > 0;
+  const repos = recents.filter((entry) => entry.slug !== 'new');
+  const hasRepos = repos.length > 0;
 
   const openEntry = (entry: RecentRepo) => {
-    if (entry.slug === 'new') {
-      navigate({ kind: 'new' });
+    if (entry.owner && entry.repo) {
+      navigate({ kind: 'repo', owner: entry.owner, repo: entry.repo });
       return;
     }
-    let owner = entry.owner;
-    let repo = entry.repo;
-    if (!owner || !repo) {
-      let [fallbackOwner, fallbackRepo] = entry.slug.split('/', 2);
-      owner = fallbackOwner;
-      repo = fallbackRepo;
-    }
-    if (!owner || !repo) return;
-    navigate({ kind: 'repo', owner, repo });
+    const [owner, repo] = entry.slug.split('/', 2);
+    if (owner && repo) navigate({ kind: 'repo', owner, repo });
   };
 
   const renderLabel = (entry: RecentRepo) => {
-    if (entry.title) return entry.title;
     if (entry.owner && entry.repo) return `${entry.owner}/${entry.repo}`;
-    if (entry.slug === 'new') return 'Local scratchpad';
     return entry.slug;
   };
 
+  const goCreateRepo = () => {
+    navigate({ kind: 'new' });
+  };
+
   return (
-    <div className="app-shell">
+    <div className="app-shell home-shell">
       <header className="topbar">
         <div className="topbar-left">
           <span className="brand">VibeNote</span>
         </div>
-        <div className="topbar-actions">
-          <button className="btn primary" onClick={() => navigate({ kind: 'new' })}>
-            Start new notebook
-          </button>
-        </div>
+        <div className="topbar-actions" />
       </header>
-      <div className="app-layout">
-        <section className="workspace" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-          <div className="empty-state" style={{ maxWidth: 480 }}>
-            <h2>Welcome to VibeNote</h2>
-            <p>Select a repository below or start a fresh scratchpad.</p>
-            {hasRepos ? (
-              <div style={{ width: '100%', marginTop: 24 }}>
-                <div style={{ fontWeight: 600, textAlign: 'left', marginBottom: 8 }}>Recent repositories</div>
-                <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 8 }}>
-                  {recents.map((entry) => (
-                    <li key={entry.slug}>
-                      <button
-                        className="btn secondary"
-                        style={{ width: '100%', justifyContent: 'space-between', alignItems: 'center' }}
-                        onClick={() => openEntry(entry)}
-                      >
-                        <span>
-                          {renderLabel(entry)}
-                        </span>
-                        <span aria-hidden>→</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : (
-              <p style={{ marginTop: 24 }}>No repositories yet. Start with a scratchpad to try things out.</p>
-            )}
+      <main className="home-main">
+        <section className="home-header">
+          <div>
+            <h1>Recent repositories</h1>
+            <p>Jump back into your notes or connect a new GitHub repo.</p>
           </div>
+          <button className="btn primary" onClick={goCreateRepo}>
+            Create notes repository
+          </button>
         </section>
-      </div>
+        {hasRepos ? (
+          <ul className="home-recents">
+            {repos.map((entry) => (
+              <li key={entry.slug}>
+                <button className="home-repo" onClick={() => openEntry(entry)}>
+                  <span className="home-repo-label">{renderLabel(entry)}</span>
+                  <span aria-hidden className="home-repo-arrow">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor">
+                      <path d="M6 12 10 8 6 4" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <section className="home-empty">
+            <h2>Connect your first repository</h2>
+            <p>Bring an existing GitHub notes repo into VibeNote to get started.</p>
+            <button className="btn primary" onClick={goCreateRepo}>
+              Create notes repository
+            </button>
+          </section>
+        )}
+      </main>
     </div>
   );
 }
