@@ -814,9 +814,11 @@ textarea:focus-visible {
   }
 
   .align-workspace {
-    /* Push the trigger so its left edge matches workspace content left
-       (sidebar width + workspace padding) minus the topbar padding */
-    margin-left: calc(320px + 1px + clamp(20px, 6vw, 56px) - clamp(16px, 4vw, 32px));
+    /* Absolutely position the trigger so it aligns with the workspace column */
+    position: absolute;
+    left: calc(320px + 1px + clamp(20px, 6vw, 56px));
+    top: calc((var(--topbar-height) - 40px) / 2);
+    margin-left: 0;
   }
 }
 
