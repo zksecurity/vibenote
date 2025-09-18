@@ -22,7 +22,7 @@ import {
   type RemoteConfig,
 } from '../sync/git-sync';
 import { ensureIntroReadme } from '../sync/readme';
-import { RepoConfigModal } from './RepoConfigModal';
+import { RepoSwitcher } from './RepoSwitcher';
 import { DeviceCodeModal } from './DeviceCodeModal';
 import type { Route } from './routing';
 
@@ -70,6 +70,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   const [menuOpen, setMenuOpen] = useState(false);
   const [toast, setToast] = useState<{ text: string; href?: string } | null>(null);
   const [repoModalMode, setRepoModalMode] = useState<'onboard' | 'manage'>('manage');
+  const [showSwitcher, setShowSwitcher] = useState(false);
   const [accessState, setAccessState] = useState<'unknown' | 'reachable' | 'unreachable'>('unknown');
   const [refreshTick, setRefreshTick] = useState(0);
 
@@ -293,16 +294,11 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   };
 
   const ensureOwnerAndOpen = async () => {
-    if (!token) {
-      await onConnect();
-      return;
-    }
-    if (!ownerLogin) {
+    if (!ownerLogin && token) {
       const u = await fetchCurrentUser();
       setOwnerLogin(u?.login ?? null);
     }
-    setRepoModalMode(linked ? 'manage' : 'onboard');
-    setShowConfig(true);
+    setShowSwitcher(true);
   };
 
   const GitHubIcon = () => (
@@ -490,9 +486,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                   </span>
                 </button>
               ) : (
-                <button className="btn primary" onClick={ensureOwnerAndOpen}>
-                  Connect repository
-                </button>
+                <button className="btn primary" onClick={ensureOwnerAndOpen}>Choose repository</button>
               )}
               {user ? (
                 <button
@@ -621,14 +615,14 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
           )}
         </div>
       )}
-      {showConfig && ownerLogin && (
-        <RepoConfigModal
+      {showSwitcher && (
+        <RepoSwitcher
           accountOwner={ownerLogin}
-          initialOwner={route.kind === 'repo' ? route.owner : ownerLogin}
-          initialRepo={route.kind === 'repo' ? route.repo : undefined}
-          mode={repoModalMode}
-          onSubmit={onConfigSubmit}
-          onCancel={() => setShowConfig(false)}
+          route={route}
+          slug={slug}
+          navigate={navigate}
+          onRecordRecent={onRecordRecent}
+          onClose={() => setShowSwitcher(false)}
         />
       )}
       {device && (
