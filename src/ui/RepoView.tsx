@@ -312,13 +312,14 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
-      if (isTypingTarget(e.target)) return;
       const key = e.key.toLowerCase();
+      // Always allow Ctrl/Cmd+K to open the switcher, even when typing
       if ((e.ctrlKey || e.metaKey) && key === 'k') {
         e.preventDefault();
         void ensureOwnerAndOpen();
         return;
       }
+      if (isTypingTarget(e.target)) return;
       const now = Date.now();
       if (key === 'g') {
         lastG = now;
