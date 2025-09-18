@@ -113,8 +113,8 @@ textarea {
 
 .repo-btn {
   gap: 6px;
-  max-width: clamp(140px, 42vw, 240px);
-  min-width: 0;
+  max-width: clamp(180px, 42vw, 360px);
+  min-width: 160px;
   overflow: hidden;
   justify-content: flex-start;
   height: 40px;
@@ -1040,6 +1040,14 @@ textarea:focus-visible {
 @media (min-width: 1500px) {
   .repo-btn {
     max-width: 720px;
+  }
+}
+
+/* Tablet-ish widths: give the slug more room */
+@media (min-width: 720px) and (max-width: 1099.98px) {
+  .repo-btn {
+    max-width: min(48vw, 460px);
+    min-width: 240px;
   }
 }
 
