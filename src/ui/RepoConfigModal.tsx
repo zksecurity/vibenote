@@ -2,44 +2,72 @@ import React, { useEffect, useState } from 'react';
 import { repoExists } from '../sync/git-sync';
 
 interface Props {
-  defaultOwner: string;
-  defaultRepo?: string;
+  accountOwner: string;
+  initialOwner?: string;
+  initialRepo?: string;
   mode: 'onboard' | 'manage';
   onSubmit: (cfg: { owner: string; repo: string; branch: string }) => void;
   onCancel: () => void;
 }
 
-export function RepoConfigModal({ defaultOwner, defaultRepo, mode, onSubmit, onCancel }: Props) {
-  const [repo, setRepo] = useState(defaultRepo || 'notes');
+export function RepoConfigModal({
+  accountOwner,
+  initialOwner,
+  initialRepo,
+  mode,
+  onSubmit,
+  onCancel,
+}: Props) {
+  const [owner, setOwner] = useState(initialOwner || accountOwner);
+  const [repo, setRepo] = useState(initialRepo || 'notes');
   const [exists, setExists] = useState<boolean | null>(null);
   const [checking, setChecking] = useState(false);
 
   useEffect(() => {
-    setRepo(defaultRepo || 'notes');
-  }, [defaultRepo]);
+    setOwner(initialOwner || accountOwner);
+  }, [accountOwner, initialOwner, mode]);
+
+  useEffect(() => {
+    setRepo(initialRepo || 'notes');
+  }, [initialRepo, mode]);
 
   useEffect(() => {
     let cancelled = false;
-    const name = repo.trim();
-    if (!name) { setExists(null); return; }
+    const targetOwner = owner.trim();
+    const targetRepo = repo.trim();
+    if (!targetOwner || !targetRepo) {
+      setExists(null);
+      setChecking(false);
+      return;
+    }
     setChecking(true);
     const t = setTimeout(async () => {
       try {
-        const ok = await repoExists(defaultOwner, name);
+        const ok = await repoExists(targetOwner, targetRepo);
         if (!cancelled) setExists(ok);
       } finally {
         if (!cancelled) setChecking(false);
       }
     }, 300);
     return () => { cancelled = true; clearTimeout(t); };
-  }, [defaultOwner, repo]);
+  }, [owner, repo]);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
+    const o = owner.trim();
     const r = repo.trim();
-    if (!r) return;
-    onSubmit({ owner: defaultOwner, repo: r, branch: 'main' });
+    if (!o || !r) return;
+    onSubmit({ owner: o, repo: r, branch: 'main' });
   };
+
+  const trimmedOwner = owner.trim();
+  const trimmedRepo = repo.trim();
+  const originalRepo = initialRepo ?? '';
+  const initialOwnerValue = initialOwner || accountOwner;
+  const unchanged = Boolean(initialRepo) && trimmedOwner === initialOwnerValue && trimmedRepo === originalRepo;
+  const ownerMatchesAccount = trimmedOwner === accountOwner;
+  const blockedCreate = exists === false && !ownerMatchesAccount;
+  const submitDisabled = unchanged || !trimmedOwner || !trimmedRepo || blockedCreate;
 
   return (
     <div className="modal-backdrop" onClick={onCancel}>
@@ -54,7 +82,12 @@ export function RepoConfigModal({ defaultOwner, defaultRepo, mode, onSubmit, onC
             )}
         </div>
         <div className="toolbar" style={{ gap: 8 }}>
-          <input className="input" value={defaultOwner} disabled />
+          <input
+            className="input"
+            placeholder={accountOwner}
+            value={owner}
+            onChange={(e) => setOwner(e.target.value)}
+          />
           <span style={{ alignSelf:'center', color:'var(--muted)' }}>/</span>
           <input
             className="input"
@@ -66,12 +99,14 @@ export function RepoConfigModal({ defaultOwner, defaultRepo, mode, onSubmit, onC
         <div style={{ color:'var(--muted)', minHeight: 20 }}>
           {checking
             ? 'Checking repository…'
-            : (defaultRepo && repo.trim() === defaultRepo)
+            : unchanged
               ? 'Currently connected'
               : exists === true
                 ? 'Repository exists — connect to it'
                 : exists === false
-                  ? 'Will create a new private repository'
+                  ? ownerMatchesAccount
+                    ? 'Will create a new private repository'
+                    : 'Repository not found. Enter one you already have access to.'
                   : ''}
         </div>
         <div className="toolbar" style={{ justifyContent: 'flex-end' }}>
@@ -79,9 +114,15 @@ export function RepoConfigModal({ defaultOwner, defaultRepo, mode, onSubmit, onC
           <button
             type="submit"
             className="btn primary"
-            disabled={Boolean(defaultRepo && repo.trim() === defaultRepo) || !repo.trim()}
+            disabled={submitDisabled}
           >
-            {(defaultRepo && repo.trim() === defaultRepo) ? 'Already connected' : (exists ? (mode === 'onboard' ? 'Connect repository' : 'Switch to repository') : (mode === 'onboard' ? 'Create repository' : 'Create and connect'))}
+            {unchanged
+              ? 'Already connected'
+              : exists === true
+                ? (mode === 'onboard' ? 'Connect repository' : 'Switch to repository')
+                : exists === false && ownerMatchesAccount
+                  ? (mode === 'onboard' ? 'Create repository' : 'Create and connect')
+                  : (mode === 'onboard' ? 'Connect repository' : 'Switch to repository')}
           </button>
         </div>
       </form>

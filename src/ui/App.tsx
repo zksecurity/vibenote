@@ -81,15 +81,37 @@ export function App() {
   };
 
   const onConfigSubmit = async (cfg: { owner: string; repo: string; branch: string }) => {
+    setSyncMsg(null);
+    setSyncing(true);
     try {
-      setSyncMsg(null);
-      setSyncing(true);
       const hadRemoteBefore = remoteCfg !== null;
-      const existed = await repoExists(cfg.owner, cfg.repo);
-      await ensureRepoExists(cfg.owner, cfg.repo, true);
-      configureRemote({ ...cfg, notesDir: '' });
+      const targetOwner = cfg.owner.trim();
+      const targetRepo = cfg.repo.trim();
+      if (!targetOwner || !targetRepo) return;
+
+      let currentLogin = ownerLogin;
+      if (!currentLogin) {
+        const u = await fetchCurrentUser();
+        currentLogin = u?.login ?? null;
+        setOwnerLogin(u?.login ?? null);
+      }
+
+      const existed = await repoExists(targetOwner, targetRepo);
+      if (!existed) {
+        if (!currentLogin || currentLogin !== targetOwner) {
+          setSyncMsg('Repository not found. VibeNote can only auto-create repositories under your username.');
+          return;
+        }
+        const created = await ensureRepoExists(targetOwner, targetRepo, true);
+        if (!created) {
+          setSyncMsg('Failed to create repository under your account.');
+          return;
+        }
+      }
+
+      configureRemote({ owner: targetOwner, repo: targetRepo, branch: cfg.branch, notesDir: '' });
       setRemoteCfg(getRemoteConfig());
-      // Seed initial notes if newly created
+
       if (!existed) {
         if (!hadRemoteBefore) {
           const files: { path: string; text: string; baseSha?: string }[] = [];
@@ -108,28 +130,28 @@ export function App() {
           setNotes(notesSnapshot);
           setActiveId(notesSnapshot[0]?.id ?? null);
         }
-        await ensureIntroReadme(cfg.repo);
+        await ensureIntroReadme(targetRepo);
         setSyncMsg('Repository created and initialized');
-        setToast({ text: 'Repository ready', href: `https://github.com/${cfg.owner}/${cfg.repo}` });
+        setToast({ text: 'Repository ready', href: `https://github.com/${targetOwner}/${targetRepo}` });
       } else {
-        // Existing repo: pull notes from remote and replace local state
         const entries = await listNoteFiles();
         const files: { path: string; text: string; sha?: string }[] = [];
         for (const e of entries) {
           const rf = await pullNote(e.path);
           if (rf) files.push({ path: rf.path, text: rf.text, sha: rf.sha });
         }
-        // Replace local storage with remote files
         store.replaceWithRemote(files);
-        setNotes(store.listNotes());
-        setActiveId(store.listNotes()[0]?.id ?? null);
+        const syncedNotes = store.listNotes();
+        setNotes(syncedNotes);
+        setActiveId(syncedNotes[0]?.id ?? null);
         setSyncMsg('Connected to repository');
       }
+
+      setShowConfig(false);
     } catch (e) {
       console.error(e);
       setSyncMsg('Failed to configure repository');
     } finally {
-      setShowConfig(false);
       setSyncing(false);
     }
   };
@@ -411,8 +433,9 @@ export function App() {
       )}
       {showConfig && ownerLogin && (
         <RepoConfigModal
-          defaultOwner={ownerLogin}
-          defaultRepo={remoteCfg?.repo}
+          accountOwner={ownerLogin}
+          initialOwner={remoteCfg?.owner || ownerLogin}
+          initialRepo={remoteCfg?.repo}
           mode={repoModalMode}
           onSubmit={onConfigSubmit}
           onCancel={() => setShowConfig(false)}
