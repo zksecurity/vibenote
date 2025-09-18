@@ -219,7 +219,6 @@ describe('syncBidirectional', () => {
   let store: LocalStore;
   let remote: MockRemoteRepo;
   let syncBidirectional: typeof import('./git-sync').syncBidirectional;
-  let configureRemote: typeof import('./git-sync').configureRemote;
 
 beforeEach(async () => {
   globalAny.localStorage = new MemoryStorage();
@@ -235,18 +234,16 @@ beforeEach(async () => {
   };
   const mod = await import('./git-sync');
   syncBidirectional = mod.syncBidirectional;
-  configureRemote = mod.configureRemote;
-  configureRemote({ owner: 'user', repo: 'repo', branch: 'main', notesDir: '' });
-  store = new LocalStore({ seedWelcome: false });
+  store = new LocalStore('user/repo', { seedWelcome: false });
 });
 
   test('pushes new notes and remains stable', async () => {
     const firstId = store.createNote('First', 'first note');
     const secondId = store.createNote('Second', 'second note');
-    await syncBidirectional(store);
-    await syncBidirectional(store);
+    await syncBidirectional(store, 'user/repo');
+    await syncBidirectional(store, 'user/repo');
     expectParity(store, remote);
-    expect(listTombstones()).toHaveLength(0);
+    expect(listTombstones(store.getSlug())).toHaveLength(0);
     const firstDoc = store.loadNote(firstId);
     const secondDoc = store.loadNote(secondId);
     expect(firstDoc?.path).toBe('First.md');
@@ -255,19 +252,19 @@ beforeEach(async () => {
 
   test('applies local deletions to remote without resurrection', async () => {
     const id = store.createNote('Ghost', 'haunt me');
-    await syncBidirectional(store);
+    await syncBidirectional(store, 'user/repo');
     store.deleteNote(id);
-    await syncBidirectional(store);
+    await syncBidirectional(store, 'user/repo');
     expectParity(store, remote);
     expect(store.listNotes()).toHaveLength(0);
-    expect(listTombstones()).toHaveLength(0);
+    expect(listTombstones(store.getSlug())).toHaveLength(0);
   });
 
   test('renames move files remotely', async () => {
     const id = store.createNote('Original', 'rename me');
-    await syncBidirectional(store);
+    await syncBidirectional(store, 'user/repo');
     store.renameNote(id, 'Renamed');
-    await syncBidirectional(store);
+    await syncBidirectional(store, 'user/repo');
     expectParity(store, remote);
     const notes = store.listNotes();
     expect(notes).toHaveLength(1);
@@ -277,10 +274,10 @@ beforeEach(async () => {
 
   test('rename removes old remote path after prior sync', async () => {
     const id = store.createNote('test', 'body');
-    await syncBidirectional(store);
+    await syncBidirectional(store, 'user/repo');
     expect([...remote.snapshot().keys()]).toEqual(['test.md']);
     store.renameNote(id, 'test2');
-    await syncBidirectional(store);
+    await syncBidirectional(store, 'user/repo');
     const remoteFiles = [...remote.snapshot().keys()].sort();
     expect(remoteFiles).toEqual(['test2.md']);
     expectParity(store, remote);
@@ -288,10 +285,10 @@ beforeEach(async () => {
 
   test('rename with remote edits keeps both copies in sync', async () => {
     const id = store.createNote('draft', 'original body');
-    await syncBidirectional(store);
+    await syncBidirectional(store, 'user/repo');
     remote.setFile('draft.md', 'remote update');
     store.renameNote(id, 'draft-renamed');
-    await syncBidirectional(store);
+    await syncBidirectional(store, 'user/repo');
     const paths = [...remote.snapshot().keys()].sort();
     expect(paths).toEqual(['draft-renamed.md', 'draft.md']);
     expectParity(store, remote);
@@ -301,7 +298,7 @@ beforeEach(async () => {
 
   test('pulls new remote notes', async () => {
     remote.setFile('Remote.md', '# remote');
-    await syncBidirectional(store);
+    await syncBidirectional(store, 'user/repo');
     expectParity(store, remote);
     const notes = store.listNotes();
     expect(notes).toHaveLength(1);
@@ -311,9 +308,9 @@ beforeEach(async () => {
 
   test('removes notes when deleted remotely', async () => {
     const id = store.createNote('Shared', 'shared text');
-    await syncBidirectional(store);
+    await syncBidirectional(store, 'user/repo');
     remote.deleteDirect('Shared.md');
-    await syncBidirectional(store);
+    await syncBidirectional(store, 'user/repo');
     expectParity(store, remote);
     expect(store.listNotes()).toHaveLength(0);
   });
@@ -322,7 +319,7 @@ beforeEach(async () => {
     remote.setFile('data.json', '{"keep":true}');
     remote.setFile('image.png', 'binary');
     store.createNote('OnlyNote', '# hello');
-    await syncBidirectional(store);
+    await syncBidirectional(store, 'user/repo');
     const snapshot = remote.snapshot();
     expect(snapshot.get('data.json')).toBe('{"keep":true}');
     expect(snapshot.get('image.png')).toBe('binary');
@@ -331,7 +328,7 @@ beforeEach(async () => {
 
   test('leaves nested Markdown files untouched', async () => {
     remote.setFile('nested/Nested.md', '# nested');
-    await syncBidirectional(store);
+    await syncBidirectional(store, 'user/repo');
     const snapshot = remote.snapshot();
     expect(snapshot.get('nested/Nested.md')).toBe('# nested');
     expect(store.listNotes()).toHaveLength(0);

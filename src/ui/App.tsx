@@ -1,465 +1,61 @@
-import React, { useMemo, useState, useEffect } from 'react';
-import { NoteList } from './NoteList';
-import { Editor } from './Editor';
-import { LocalStore, clearAllTombstones, type NoteMeta, type NoteDoc } from '../storage/local';
-import { getStoredToken, requestDeviceCode, fetchCurrentUser, clearToken } from '../auth/github';
-import {
-  configureRemote,
-  getRemoteConfig,
-  pullNote,
-  commitBatch,
-  ensureRepoExists,
-  repoExists,
-  clearRemoteConfig,
-  listNoteFiles,
-  syncBidirectional,
-} from '../sync/git-sync';
-import { ensureIntroReadme } from '../sync/readme';
-import { RepoConfigModal } from './RepoConfigModal';
-import { DeviceCodeModal } from './DeviceCodeModal';
+import React, { useCallback, useEffect, useState } from 'react';
+import { useRoute } from './routing';
+import { RepoView } from './RepoView';
+import { HomeView } from './HomeView';
+import { listKnownRepoSlugs, listRecentRepos, recordRecentRepo, type RecentRepo } from '../storage/local';
 
 export function App() {
-  const store = useMemo(() => new LocalStore(), []);
-  const [notes, setNotes] = useState<NoteMeta[]>(store.listNotes());
-  const [activeId, setActiveId] = useState<string | null>(notes[0]?.id ?? null);
-  const [doc, setDoc] = useState<NoteDoc | null>(activeId ? store.loadNote(activeId) : null);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [token, setToken] = useState<string | null>(getStoredToken());
-  const [showConfig, setShowConfig] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [syncMsg, setSyncMsg] = useState<string | null>(null);
-  const [device, setDevice] = useState<import('../auth/github').DeviceCodeResponse | null>(null);
-  const [ownerLogin, setOwnerLogin] = useState<string | null>(null);
-  const [remoteCfg, setRemoteCfg] = useState(getRemoteConfig());
-  const [user, setUser] = useState<{ login: string; name?: string; avatar_url?: string } | null>(
-    null
-  );
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [toast, setToast] = useState<{ text: string; href?: string } | null>(null);
-  const [repoModalMode, setRepoModalMode] = useState<'onboard' | 'manage'>('manage');
+  const { route, navigate } = useRoute();
+  const [recents, setRecents] = useState<RecentRepo[]>(() => listRecentRepos());
 
-  useEffect(() => {
-    setNotes(store.listNotes());
-  }, [store]);
-
-  useEffect(() => {
-    setDoc(activeId ? store.loadNote(activeId) : null);
-  }, [store, activeId]);
-
-  const onCreate = () => {
-    const id = store.createNote();
-    setNotes(store.listNotes());
-    setActiveId(id);
-    setSidebarOpen(false);
-  };
-
-  const onRename = (id: string, title: string) => {
-    try {
-      store.renameNote(id, title);
-      setNotes(store.listNotes());
-    } catch (e) {
-      console.error(e);
-      setSyncMsg('Invalid title. Avoid / and control characters.');
-    }
-  };
-
-  const onDelete = (id: string) => {
-    store.deleteNote(id);
-    const list = store.listNotes();
-    setNotes(list);
-    if (activeId === id) setActiveId(list[0]?.id ?? null);
-  };
-
-  const onConnect = async () => {
-    try {
-      const d = await requestDeviceCode();
-      setDevice(d);
-    } catch (e) {
-      console.error(e);
-      setSyncMsg('Failed to start GitHub authorization');
-    }
-  };
-
-  const onConfigSubmit = async (cfg: { owner: string; repo: string; branch: string }) => {
-    setSyncMsg(null);
-    setSyncing(true);
-    try {
-      const hadRemoteBefore = remoteCfg !== null;
-      const targetOwner = cfg.owner.trim();
-      const targetRepo = cfg.repo.trim();
-      if (!targetOwner || !targetRepo) return;
-
-      let currentLogin = ownerLogin;
-      if (!currentLogin) {
-        const u = await fetchCurrentUser();
-        currentLogin = u?.login ?? null;
-        setOwnerLogin(u?.login ?? null);
-      }
-
-      const existed = await repoExists(targetOwner, targetRepo);
-      if (!existed) {
-        if (!currentLogin || currentLogin !== targetOwner) {
-          setSyncMsg('Repository not found. VibeNote can only auto-create repositories under your username.');
-          return;
-        }
-        const created = await ensureRepoExists(targetOwner, targetRepo, true);
-        if (!created) {
-          setSyncMsg('Failed to create repository under your account.');
-          return;
-        }
-      }
-
-      configureRemote({ owner: targetOwner, repo: targetRepo, branch: cfg.branch, notesDir: '' });
-      setRemoteCfg(getRemoteConfig());
-
-      if (!existed) {
-        if (!hadRemoteBefore) {
-          const files: { path: string; text: string; baseSha?: string }[] = [];
-          for (const n of store.listNotes()) {
-            const local = store.loadNote(n.id);
-            if (!local) continue;
-            files.push({ path: local.path, text: local.text });
-          }
-          if (files.length > 0) {
-            await commitBatch(files, 'vibenote: initialize notes');
-          }
-        } else {
-          clearAllTombstones();
-          store.replaceWithRemote([]);
-          const notesSnapshot = store.listNotes();
-          setNotes(notesSnapshot);
-          setActiveId(notesSnapshot[0]?.id ?? null);
-        }
-        await ensureIntroReadme(targetRepo);
-        setSyncMsg('Repository created and initialized');
-        setToast({ text: 'Repository ready', href: `https://github.com/${targetOwner}/${targetRepo}` });
-      } else {
-        const entries = await listNoteFiles();
-        const files: { path: string; text: string; sha?: string }[] = [];
-        for (const e of entries) {
-          const rf = await pullNote(e.path);
-          if (rf) files.push({ path: rf.path, text: rf.text, sha: rf.sha });
-        }
-        store.replaceWithRemote(files);
-        const syncedNotes = store.listNotes();
-        setNotes(syncedNotes);
-        setActiveId(syncedNotes[0]?.id ?? null);
-        setSyncMsg('Connected to repository');
-      }
-
-      setShowConfig(false);
-    } catch (e) {
-      console.error(e);
-      setSyncMsg('Failed to configure repository');
-    } finally {
-      setSyncing(false);
-    }
-  };
-
-  const ensureOwnerAndOpen = async () => {
-    if (!token) {
-      await onConnect();
-      return;
-    }
-    if (!ownerLogin) {
-      const u = await fetchCurrentUser();
-      setOwnerLogin(u?.login ?? null);
-    }
-    setRepoModalMode('manage');
-    setShowConfig(true);
-  };
-
-  const GitHubIcon = () => (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
-      <path d="M8 0C3.58 0 0 3.58 0 8a8 8 0 0 0 5.47 7.59c.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.01.08-2.11 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.91.08 2.11.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
-    </svg>
-  );
-
-  const NotesIcon = () => (
-    <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
-      <path d="M3 1.75A1.75 1.75 0 0 1 4.75 0h6.5A1.75 1.75 0 0 1 13 1.75v12.5A1.75 1.75 0 0 1 11.25 16h-6.5A1.75 1.75 0 0 1 3 14.25Zm1.5.75a.75.75 0 0 0-.75.75v10.5c0 .414.336.75.75.75h6.5a.75.75 0 0 0 .75-.75V3.25a.75.75 0 0 0-.75-.75ZM5 4.5A.5.5 0 0 1 5.5 4h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 5 4.5Zm0 2.75A.75.75 0 0 1 5.75 6.5h4.5a.75.75 0 0 1 0 1.5h-4.5A.75.75 0 0 1 5 7.25Zm0 2.75c0-.414.336-.75.75-.75h4.5a.75.75 0 0 1 0 1.5h-4.5A.75.75 0 0 1 5 10Z" />
-    </svg>
-  );
-
-  const CloseIcon = () => (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
-      <path d="M3.22 3.22a.75.75 0 0 1 1.06 0L8 6.94l3.72-3.72a.75.75 0 1 1 1.06 1.06L9.06 8l3.72 3.72a.75.75 0 1 1-1.06 1.06L8 9.06l-3.72 3.72a.75.75 0 1 1-1.06-1.06L6.94 8 3.22 4.28a.75.75 0 0 1 0-1.06Z" />
-    </svg>
-  );
-
-  const SyncIcon = ({ spinning }: { spinning: boolean }) => (
-    <svg
-      className={`sync-icon ${spinning ? 'spinning' : ''}`}
-      width="20"
-      height="20"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      aria-hidden
-    >
-      <path d="M2.5 8a5.5 5.5 0 0 1 9-3.9" strokeWidth="1.4" strokeLinecap="round" />
-      <path d="M13.5 8a5.5 5.5 0 0 1-9 3.9" strokeWidth="1.4" strokeLinecap="round" />
-      <path d="M11.5 2.5 13.5 5l-3 .5" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M4.5 13.5 2.5 11l3-.5" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
+  const recordVisit = useCallback(
+    (entry: { slug: string; owner?: string; repo?: string; title?: string; connected?: boolean }) => {
+      recordRecentRepo(entry);
+      setRecents(listRecentRepos());
+    },
+    []
   );
 
   useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 4000);
-    return () => clearTimeout(t);
-  }, [toast]);
+    setRecents(listRecentRepos());
+  }, [route]);
 
   useEffect(() => {
-    const onDoc = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (!target.closest('.account-menu') && !target.closest('.account-btn')) {
-        setMenuOpen(false);
-      }
-    };
-    document.addEventListener('click', onDoc);
-    return () => document.removeEventListener('click', onDoc);
+    const onStorage = () => setRecents(listRecentRepos());
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
   }, []);
 
-  // Restore user/account info on reload when a token is present
   useEffect(() => {
-    if (!token) return;
-    (async () => {
-      const u = await fetchCurrentUser();
-      setUser(u);
-      setOwnerLogin(u?.login ?? null);
-    })();
-  }, [token]);
-
-  const onSignOut = () => {
-    clearToken();
-    clearRemoteConfig();
-    setToken(null);
-    setUser(null);
-    setOwnerLogin(null);
-    setRemoteCfg(null);
-    setMenuOpen(false);
-    const id = store.resetToWelcome();
-    setNotes(store.listNotes());
-    setActiveId(id);
-    setSyncMsg('Signed out');
-  };
-
-  const onSyncNow = async () => {
-    try {
-      setSyncMsg(null);
-      setSyncing(true);
-      const cfg = getRemoteConfig();
-      if (!token || !cfg) {
-        setSyncMsg('Connect GitHub and configure repo first');
-        return;
+    if (route.kind === 'home') {
+      const recentEntries = listRecentRepos();
+      if (recentEntries.length === 0) {
+        const fallback = listKnownRepoSlugs();
+        if (fallback.length === 0) {
+          navigate({ kind: 'new' }, { replace: true });
+        }
       }
-      const summary = await syncBidirectional(store);
-      const parts: string[] = [];
-      if (summary.pulled) parts.push(`pulled ${summary.pulled}`);
-      if (summary.merged) parts.push(`merged ${summary.merged}`);
-      if (summary.pushed) parts.push(`pushed ${summary.pushed}`);
-      if (summary.deletedRemote) parts.push(`deleted remote ${summary.deletedRemote}`);
-      if (summary.deletedLocal) parts.push(`deleted local ${summary.deletedLocal}`);
-      setSyncMsg(parts.length ? `Synced: ${parts.join(', ')}` : 'Up to date');
-    } catch (err) {
-      console.error(err);
-      setSyncMsg('Sync failed');
-    } finally {
-      setSyncing(false);
-      setNotes(store.listNotes());
-      // Ensure the active editor reflects merged/pulled text
-      setDoc(activeId ? store.loadNote(activeId) : null);
     }
-  };
+  }, [route, navigate]);
 
-  return (
-    <div className="app-shell">
-      <header className="topbar">
-        <div className="topbar-left">
-          <button
-            className="btn icon only-mobile"
-            onClick={() => setSidebarOpen((value) => !value)}
-            aria-label={sidebarOpen ? 'Close notes' : 'Open notes'}
-            aria-expanded={sidebarOpen}
-          >
-            <NotesIcon />
-          </button>
-          <span className="brand">VibeNote</span>
-        </div>
-        <div className="topbar-actions">
-          {!token ? (
-            <button className="btn primary" onClick={onConnect}>
-              Connect GitHub
-            </button>
-          ) : (
-            <>
-              {remoteCfg && (
-                <button
-                  className={`btn secondary sync-btn ${syncing ? 'is-syncing' : ''}`}
-                  onClick={onSyncNow}
-                  disabled={syncing}
-                  aria-label={syncing ? 'Syncing' : 'Sync now'}
-                  title={syncing ? 'Syncing…' : 'Sync now'}
-                >
-                  <SyncIcon spinning={syncing} />
-                </button>
-              )}
-              {remoteCfg ? (
-                <button
-                  className="btn ghost repo-btn"
-                  onClick={ensureOwnerAndOpen}
-                  title="Change repository"
-                >
-                  <GitHubIcon />
-                  <span className="repo-label">
-                    <span className="repo-owner">{remoteCfg.owner}/</span>
-                    <span>{remoteCfg.repo}</span>
-                  </span>
-                </button>
-              ) : (
-                <button className="btn primary" onClick={ensureOwnerAndOpen}>
-                  Connect repository
-                </button>
-              )}
-              {user ? (
-                <button
-                  className="btn ghost account-btn"
-                  onClick={() => setMenuOpen((v) => !v)}
-                  aria-label="Account menu"
-                >
-                  {user.avatar_url ? (
-                    <img src={user.avatar_url} alt={user.login} />
-                  ) : (
-                    <span className="account-avatar-fallback" aria-hidden>
-                      {(user.name || user.login || '?').charAt(0).toUpperCase()}
-                    </span>
-                  )}
-                </button>
-              ) : (
-                <button className="btn secondary" onClick={onConnect}>
-                  Refresh GitHub login
-                </button>
-              )}
-            </>
-          )}
-        </div>
-      </header>
-      <div className="app-layout">
-        <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
-          <div className="sidebar-header">
-            <div className="sidebar-title">
-              <span>Notes</span>
-              <span className="note-count">{notes.length}</span>
-              <button
-                className="btn icon only-mobile"
-                onClick={() => setSidebarOpen(false)}
-                aria-label="Close notes"
-              >
-                <CloseIcon />
-              </button>
-            </div>
-            <button className="btn primary full-width" onClick={onCreate}>
-              New note
-            </button>
-          </div>
-          <NoteList
-            notes={notes}
-            activeId={activeId}
-            onSelect={(id) => {
-              setActiveId(id);
-              setSidebarOpen(false);
-            }}
-            onRename={onRename}
-            onDelete={onDelete}
-          />
-        </aside>
-        <section className="workspace">
-          <div className="workspace-body">
-            {doc ? (
-              <div className="workspace-panels">
-                <Editor doc={doc} onChange={(text) => store.saveNote(doc.id, text)} />
-              </div>
-            ) : (
-              <div className="empty-state">
-                <h2>Welcome to VibeNote</h2>
-                <p>Select a note from the sidebar or create a new one to get started.</p>
-                <p>
-                  To sync with GitHub, connect your account and link a repository. Once connected,
-                  use <strong>Sync now</strong> anytime to pull and push updates.
-                </p>
-                {syncMsg && <p className="empty-state-status">{syncMsg}</p>}
-              </div>
-            )}
-          </div>
-          {syncMsg && (
-            <div className="status-banner">
-              <span>Status</span>
-              <span>{syncMsg}</span>
-            </div>
-          )}
-        </section>
-      </div>
-      {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
-      {menuOpen && user && (
-        <div className="account-menu">
-          <div className="account-menu-header">
-            <div className="account-menu-avatar" aria-hidden>
-              {user.avatar_url ? (
-                <img src={user.avatar_url} alt="" />
-              ) : (
-                <span>{(user.name || user.login || '?').charAt(0).toUpperCase()}</span>
-              )}
-            </div>
-            <div>
-              <div className="account-name">{user.name || user.login}</div>
-              <div className="account-handle">@{user.login}</div>
-            </div>
-          </div>
-          <button className="btn subtle full-width" onClick={onSignOut}>
-            Sign out
-          </button>
-        </div>
-      )}
-      {toast && (
-        <div className="toast">
-          <span>{toast.text}</span>
-          {toast.href && (
-            <a className="btn subtle" href={toast.href} target="_blank" rel="noreferrer">
-              Open
-            </a>
-          )}
-        </div>
-      )}
-      {showConfig && ownerLogin && (
-        <RepoConfigModal
-          accountOwner={ownerLogin}
-          initialOwner={remoteCfg?.owner || ownerLogin}
-          initialRepo={remoteCfg?.repo}
-          mode={repoModalMode}
-          onSubmit={onConfigSubmit}
-          onCancel={() => setShowConfig(false)}
-        />
-      )}
-      {device && (
-        <DeviceCodeModal
-          device={device}
-          onDone={(t) => {
-            if (t) {
-              localStorage.setItem('vibenote:gh-token', t);
-              setToken(t);
-              fetchCurrentUser().then((u) => {
-                setOwnerLogin(u?.login ?? null);
-                setUser(u);
-                setRepoModalMode('onboard');
-                setShowConfig(true);
-              });
-            }
-            setDevice(null);
-          }}
-          onCancel={() => setDevice(null)}
-        />
-      )}
-    </div>
-  );
+  if (route.kind === 'home') {
+    return <HomeView recents={recents} navigate={navigate} />;
+  }
+
+  if (route.kind === 'new') {
+    return <RepoView slug="new" route={route} navigate={navigate} onRecordRecent={recordVisit} />;
+  }
+
+  if (route.kind === 'repo') {
+    return (
+      <RepoView
+        slug={`${route.owner}/${route.repo}`}
+        route={route}
+        navigate={navigate}
+        onRecordRecent={recordVisit}
+      />
+    );
+  }
+
+  return null;
 }

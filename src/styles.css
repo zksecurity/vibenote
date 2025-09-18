@@ -77,6 +77,8 @@ textarea {
   border-bottom: 1px solid var(--border);
   box-shadow: 0 1px 0 rgba(15, 23, 42, 0.06);
   min-height: var(--topbar-height);
+  height: var(--topbar-height);
+  box-sizing: border-box;
   flex-wrap: nowrap;
 }
 
@@ -92,6 +94,21 @@ textarea {
   font-size: 20px;
   font-weight: 600;
   letter-spacing: -0.01em;
+}
+
+.brand-button {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+
+.brand-button:focus-visible {
+  outline: 2px solid var(--accent-border);
+  outline-offset: 3px;
 }
 
 .repo-btn {
@@ -143,6 +160,100 @@ textarea {
   flex-wrap: nowrap;
   min-width: 0;
   flex: 1 1 auto;
+}
+
+.home-main {
+  max-width: 960px;
+  margin: 40px auto;
+  padding: 0 clamp(16px, 4vw, 32px);
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.home-header {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.home-header h1 {
+  margin: 0 0 4px;
+  font-size: 1.5rem;
+}
+
+.home-header p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.home-recents {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.home-repo {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 500;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+
+.home-repo:hover {
+  border-color: var(--accent-border);
+  box-shadow: var(--shadow);
+}
+
+.home-repo:focus-visible {
+  outline: 2px solid var(--accent-border);
+  outline-offset: 3px;
+}
+
+.home-repo-label {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-repo-arrow {
+  color: var(--muted);
+  display: inline-flex;
+}
+
+.home-empty {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 32px;
+  text-align: center;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+}
+
+.home-empty h2 {
+  margin: 0;
+  color: var(--text);
+}
+
+.home-empty p {
+  margin: 0 0 8px;
 }
 
 .toolbar {
@@ -376,6 +487,10 @@ textarea:focus-visible {
   grid-template-columns: 320px 1fr;
   background: var(--bg);
   min-height: 0;
+}
+
+.app-layout.single {
+  grid-template-columns: 1fr;
 }
 
 .sidebar {
@@ -621,6 +736,92 @@ textarea:focus-visible {
   font-weight: 500;
 }
 
+/* Repo Switcher */
+.repo-switcher-panel {
+  position: fixed;
+  top: var(--topbar-height);
+  left: clamp(20px, 6vw, 56px);
+  width: min(560px, calc(100vw - 2 * clamp(20px, 6vw, 56px)));
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  padding: 12px;
+  z-index: 60;
+}
+
+.repo-switcher-input-row {
+  display: flex;
+  gap: 8px;
+}
+
+.repo-switcher-input {
+  flex: 1 1 auto;
+}
+
+.repo-switcher-status {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 8px 2px 6px;
+}
+
+.repo-switcher-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 50vh;
+  overflow: auto;
+}
+
+.repo-switcher-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+}
+
+.repo-switcher-item:hover,
+.repo-switcher-item.active {
+  background: var(--surface-subtle);
+  border-color: var(--border);
+}
+
+.repo-switcher-slug {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.repo-switcher-connected {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+/* Align repo trigger and switcher with workspace content on desktop */
+@media (min-width: 960px) {
+  .repo-switcher-panel {
+    left: calc(320px + 1px + clamp(20px, 6vw, 56px));
+    width: min(560px, calc(100vw - (320px + 1px + clamp(20px, 6vw, 56px)) - clamp(20px, 6vw, 56px)));
+  }
+
+  .align-workspace {
+    /* Absolutely position the trigger so it aligns with the workspace column */
+    position: absolute;
+    left: calc(320px + 1px + clamp(20px, 6vw, 56px));
+    top: calc((var(--topbar-height) - 40px) / 2);
+    margin-left: 0;
+  }
+}
+
 .status-banner span:first-of-type {
   font-size: 0.75rem;
   text-transform: uppercase;
@@ -795,12 +996,23 @@ textarea:focus-visible {
     padding: 10px 16px;
   }
 
-  .brand {
+  .brand-button {
     display: none;
   }
 
   .topbar-left {
     gap: 6px;
+  }
+
+  .home-main {
+    margin: 24px auto;
+    gap: 18px;
+    padding: 0 18px;
+  }
+
+  .home-header {
+    grid-template-columns: 1fr;
+    align-items: flex-start;
   }
 
   .topbar-actions {
