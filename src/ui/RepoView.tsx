@@ -436,6 +436,21 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
           >
             <span className="brand">VibeNote</span>
           </button>
+          {route.kind === 'repo' ? (
+            <button
+              className={`btn ${isRepoUnreachable ? 'ghost' : linked ? 'ghost' : 'primary'} repo-btn align-workspace`}
+              onClick={ensureOwnerAndOpen}
+              title={linked ? 'Change repository' : 'Choose repository'}
+            >
+              <GitHubIcon />
+              <span className="repo-label">
+                <span className="repo-owner">{route.owner}/</span>
+                <span>{route.repo}</span>
+              </span>
+            </button>
+          ) : (
+            <button className="btn primary repo-btn align-workspace" onClick={ensureOwnerAndOpen}>Choose repository</button>
+          )}
         </div>
         <div className="topbar-actions">
           {!token ? (
@@ -443,22 +458,6 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
               <button className="btn primary" onClick={onConnect}>
                 Connect GitHub
               </button>
-              {route.kind === 'repo' ? (
-                <button
-                  className={`btn ghost repo-btn`}
-                  onClick={() => {
-                    setRepoModalMode('manage');
-                    setShowConfig(true);
-                  }}
-                  title={'Change repository'}
-                >
-                  <GitHubIcon />
-                  <span className="repo-label">
-                    <span className="repo-owner">{route.owner}/</span>
-                    <span>{route.repo}</span>
-                  </span>
-                </button>
-              ) : null}
             </>
           ) : (
             <>
@@ -472,21 +471,6 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                 >
                   <SyncIcon spinning={syncing} />
                 </button>
-              )}
-              {route.kind === 'repo' ? (
-                <button
-                  className={`btn ${isRepoUnreachable ? 'ghost' : linked ? 'ghost' : 'primary'} repo-btn`}
-                  onClick={ensureOwnerAndOpen}
-                  title={linked ? 'Change repository' : 'Connect repository'}
-                >
-                  <GitHubIcon />
-                  <span className="repo-label">
-                    <span className="repo-owner">{route.owner}/</span>
-                    <span>{route.repo}</span>
-                  </span>
-                </button>
-              ) : (
-                <button className="btn primary" onClick={ensureOwnerAndOpen}>Choose repository</button>
               )}
               {user ? (
                 <button

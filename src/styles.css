@@ -806,6 +806,20 @@ textarea:focus-visible {
   font-size: 0.85rem;
 }
 
+/* Align repo trigger and switcher with workspace content on desktop */
+@media (min-width: 960px) {
+  .repo-switcher-panel {
+    left: calc(320px + 1px + clamp(20px, 6vw, 56px));
+    width: min(560px, calc(100vw - (320px + 1px + clamp(20px, 6vw, 56px)) - clamp(20px, 6vw, 56px)));
+  }
+
+  .align-workspace {
+    /* Push the trigger so its left edge matches workspace content left
+       (sidebar width + workspace padding) minus the topbar padding */
+    margin-left: calc(320px + 1px + clamp(20px, 6vw, 56px) - clamp(16px, 4vw, 32px));
+  }
+}
+
 .status-banner span:first-of-type {
   font-size: 0.75rem;
   text-transform: uppercase;
