@@ -39,7 +39,10 @@ export function RepoSwitcher({ accountOwner, route, slug, navigate, onClose, onR
   useEffect(() => {
     // focus input on open
     inputRef.current?.focus();
+    const openedAt = performance.now();
     const onDoc = (e: MouseEvent) => {
+      // ignore the opening click that triggered the switcher
+      if (performance.now() - openedAt < 200) return;
       const el = e.target as HTMLElement;
       if (!panelRef.current) return;
       if (!el.closest('.repo-switcher-panel')) onClose();
@@ -210,4 +213,3 @@ export function RepoSwitcher({ accountOwner, route, slug, navigate, onClose, onR
     </div>
   );
 }
-
