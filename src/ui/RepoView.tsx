@@ -70,6 +70,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   const [menuOpen, setMenuOpen] = useState(false);
   const [toast, setToast] = useState<{ text: string; href?: string } | null>(null);
   const [repoModalMode, setRepoModalMode] = useState<'onboard' | 'manage'>('manage');
+  const [accessState, setAccessState] = useState<'unknown' | 'reachable' | 'unreachable'>('unknown');
 
   useEffect(() => {
     setLinked(slug !== 'new' && isRepoLinked(slug));
@@ -78,12 +79,39 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   useEffect(() => {
     setSidebarOpen(false);
     setSyncMsg(null);
+    setAccessState('unknown');
   }, [slug]);
 
   useEffect(() => {
     if (route.kind !== 'repo') return;
+    if (accessState !== 'reachable') return; // only record reachable repos
     onRecordRecent({ slug, owner: route.owner, repo: route.repo, connected: linked });
-  }, [slug, route, linked, onRecordRecent]);
+  }, [slug, route, linked, onRecordRecent, accessState]);
+
+  // Determine whether the current repository is reachable with the current token
+  useEffect(() => {
+    let cancelled = false;
+    if (route.kind !== 'repo') {
+      setAccessState('unknown');
+      return;
+    }
+    if (!token) {
+      // Without a token, treat as unreachable for private repos; show guidance UI
+      setAccessState('unreachable');
+      return;
+    }
+    (async () => {
+      try {
+        const ok = await repoExists(route.owner, route.repo);
+        if (!cancelled) setAccessState(ok ? 'reachable' : 'unreachable');
+      } catch {
+        if (!cancelled) setAccessState('unreachable');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [route, token]);
 
   useEffect(() => {
     let nextNotes = store.listNotes();
@@ -356,6 +384,8 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     }
   };
 
+  const isRepoUnreachable = route.kind === 'repo' && accessState === 'unreachable';
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -379,12 +409,30 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
         </div>
         <div className="topbar-actions">
           {!token ? (
-            <button className="btn primary" onClick={onConnect}>
-              Connect GitHub
-            </button>
+            <>
+              <button className="btn primary" onClick={onConnect}>
+                Connect GitHub
+              </button>
+              {route.kind === 'repo' ? (
+                <button
+                  className={`btn ghost repo-btn`}
+                  onClick={() => {
+                    setRepoModalMode('manage');
+                    setShowConfig(true);
+                  }}
+                  title={'Change repository'}
+                >
+                  <GitHubIcon />
+                  <span className="repo-label">
+                    <span className="repo-owner">{route.owner}/</span>
+                    <span>{route.repo}</span>
+                  </span>
+                </button>
+              ) : null}
+            </>
           ) : (
             <>
-              {linked && (
+              {linked && !isRepoUnreachable && (
                 <button
                   className={`btn secondary sync-btn ${syncing ? 'is-syncing' : ''}`}
                   onClick={onSyncNow}
@@ -397,7 +445,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
               )}
               {route.kind === 'repo' ? (
                 <button
-                  className={`btn ${linked ? 'ghost' : 'primary'} repo-btn`}
+                  className={`btn ${isRepoUnreachable ? 'ghost' : linked ? 'ghost' : 'primary'} repo-btn`}
                   onClick={ensureOwnerAndOpen}
                   title={linked ? 'Change repository' : 'Connect repository'}
                 >
@@ -435,60 +483,78 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
           )}
         </div>
       </header>
-      <div className="app-layout">
-        <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
-          <div className="sidebar-header">
-            <div className="sidebar-title">
-              <span>Notes</span>
-              <span className="note-count">{notes.length}</span>
-              <button
-                className="btn icon only-mobile"
-                onClick={() => setSidebarOpen(false)}
-                aria-label="Close notes"
-              >
-                <CloseIcon />
-              </button>
-            </div>
-            <button className="btn primary full-width" onClick={onCreate}>
-              New note
-            </button>
-          </div>
-          <NoteList
-            notes={notes}
-            activeId={activeId}
-            onSelect={(id) => {
-              setActiveId(id);
-              setSidebarOpen(false);
-            }}
-            onRename={onRename}
-            onDelete={onDelete}
-          />
-        </aside>
-        <section className="workspace">
-          <div className="workspace-body">
-            {doc ? (
-              <div className="workspace-panels">
-                <Editor doc={doc} onChange={(text) => store.saveNote(doc.id, text)} />
-              </div>
-            ) : (
+      <div className={`app-layout ${isRepoUnreachable ? 'single' : ''}`}>
+        {isRepoUnreachable ? (
+          <section className="workspace" style={{ width: '100%' }}>
+            <div className="workspace-body">
               <div className="empty-state">
-                <h2>Welcome to VibeNote</h2>
-                <p>Select a note from the sidebar or create a new one to get started.</p>
+                <h2>Can’t access this repository</h2>
                 <p>
-                  To sync with GitHub, connect your account and link a repository. Once connected,
-                  use <strong>Sync now</strong> anytime to pull and push updates.
+                  You don’t have permission to view <strong>{route.kind === 'repo' ? `${route.owner}/${route.repo}` : ''}</strong> with the current GitHub device token.
                 </p>
-                {syncMsg && <p className="empty-state-status">{syncMsg}</p>}
+                <p>
+                  Sign out and sign in with a token that has access, or switch to a different repository from the header.
+                </p>
               </div>
-            )}
-          </div>
-          {syncMsg && (
-            <div className="status-banner">
-              <span>Status</span>
-              <span>{syncMsg}</span>
             </div>
-          )}
-        </section>
+          </section>
+        ) : (
+          <>
+            <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
+              <div className="sidebar-header">
+                <div className="sidebar-title">
+                  <span>Notes</span>
+                  <span className="note-count">{notes.length}</span>
+                  <button
+                    className="btn icon only-mobile"
+                    onClick={() => setSidebarOpen(false)}
+                    aria-label="Close notes"
+                  >
+                    <CloseIcon />
+                  </button>
+                </div>
+                <button className="btn primary full-width" onClick={onCreate}>
+                  New note
+                </button>
+              </div>
+              <NoteList
+                notes={notes}
+                activeId={activeId}
+                onSelect={(id) => {
+                  setActiveId(id);
+                  setSidebarOpen(false);
+                }}
+                onRename={onRename}
+                onDelete={onDelete}
+              />
+            </aside>
+            <section className="workspace">
+              <div className="workspace-body">
+                {doc ? (
+                  <div className="workspace-panels">
+                    <Editor doc={doc} onChange={(text) => store.saveNote(doc.id, text)} />
+                  </div>
+                ) : (
+                  <div className="empty-state">
+                    <h2>Welcome to VibeNote</h2>
+                    <p>Select a note from the sidebar or create a new one to get started.</p>
+                    <p>
+                      To sync with GitHub, connect your account and link a repository. Once connected,
+                      use <strong>Sync now</strong> anytime to pull and push updates.
+                    </p>
+                    {syncMsg && <p className="empty-state-status">{syncMsg}</p>}
+                  </div>
+                )}
+              </div>
+              {syncMsg && (
+                <div className="status-banner">
+                  <span>Status</span>
+                  <span>{syncMsg}</span>
+                </div>
+              )}
+            </section>
+          </>
+        )}
       </div>
       {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
       {menuOpen && user && (

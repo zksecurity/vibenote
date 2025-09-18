@@ -489,6 +489,10 @@ textarea:focus-visible {
   min-height: 0;
 }
 
+.app-layout.single {
+  grid-template-columns: 1fr;
+}
+
 .sidebar {
   background: var(--surface);
   border-right: 1px solid var(--border);
