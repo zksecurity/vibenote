@@ -473,9 +473,14 @@ function readLegacyRepoConfig(): { owner: string; repo: string } | null {
 }
 
 function migrateLegacyNamespaceIfNeeded(targetSlug: string) {
-  let newIndexKey = repoKey(targetSlug, 'index');
+  const newIndexKey = repoKey(targetSlug, 'index');
   if (localStorage.getItem(newIndexKey)) return;
-  let legacyIndexRaw = localStorage.getItem(LEGACY_INDEX_KEY);
+  // Only migrate legacy data into the matching legacy slug to avoid polluting other namespaces
+  const legacyCfg = readLegacyRepoConfig();
+  if (!legacyCfg) return;
+  const legacySlug = `${legacyCfg.owner}/${legacyCfg.repo}`;
+  if (legacySlug !== targetSlug) return;
+  const legacyIndexRaw = localStorage.getItem(LEGACY_INDEX_KEY);
   if (!legacyIndexRaw) return;
   let legacyIndex: NoteMeta[];
   try {

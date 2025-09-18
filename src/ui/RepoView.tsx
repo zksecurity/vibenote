@@ -73,6 +73,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   const [showSwitcher, setShowSwitcher] = useState(false);
   const [accessState, setAccessState] = useState<'unknown' | 'reachable' | 'unreachable'>('unknown');
   const [refreshTick, setRefreshTick] = useState(0);
+  const initialPullRef = useState({ done: false })[0];
 
   useEffect(() => {
     setLinked(slug !== 'new' && isRepoLinked(slug));
@@ -89,6 +90,36 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     if (accessState !== 'reachable') return; // only record reachable repos
     onRecordRecent({ slug, owner: route.owner, repo: route.repo, connected: linked });
   }, [slug, route, linked, onRecordRecent, accessState]);
+
+  // When we navigate to a reachable repo we haven't linked locally yet, auto-load its notes
+  useEffect(() => {
+    (async () => {
+      if (route.kind !== 'repo') return;
+      if (accessState !== 'reachable') return;
+      if (!token) return;
+      if (linked) return;
+      if (initialPullRef.done) return;
+      try {
+        const cfg: RemoteConfig = buildRemoteConfig(slug);
+        const entries = await listNoteFiles(cfg);
+        const files: { path: string; text: string; sha?: string }[] = [];
+        for (const e of entries) {
+          const rf = await pullNote(cfg, e.path);
+          if (rf) files.push({ path: rf.path, text: rf.text, sha: rf.sha });
+        }
+        store.replaceWithRemote(files);
+        setNotes(store.listNotes());
+        setActiveId((prev) => prev ?? store.listNotes()[0]?.id ?? null);
+        markRepoLinked(slug);
+        setLinked(true);
+        setSyncMsg('Loaded repository');
+      } catch (e) {
+        console.error(e);
+      } finally {
+        initialPullRef.done = true;
+      }
+    })();
+  }, [route, accessState, token, linked, slug, store, initialPullRef]);
 
   // Determine whether the current repository is reachable with the current token
   useEffect(() => {
