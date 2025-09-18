@@ -547,7 +547,12 @@ function saveRecentRepos(entries: RecentRepo[]) {
 
 export function listRecentRepos(): RecentRepo[] {
   const legacy = readLegacyRepoConfig();
-  let entries = loadRecentRepos().filter((entry) => entry.slug !== 'new');
+  const now = Date.now();
+  const sixMonthsMs = 1000 * 60 * 60 * 24 * 30 * 6; // approx 6 months
+  // Purge very old entries and the placeholder 'new'
+  let entries = loadRecentRepos()
+    .filter((entry) => entry.slug !== 'new')
+    .filter((entry) => now - entry.lastOpenedAt <= sixMonthsMs);
   let mapped = entries.map((entry) => ({
     ...entry,
     connected: entry.connected ?? isRepoLinked(entry.slug),
@@ -569,7 +574,10 @@ export function listRecentRepos(): RecentRepo[] {
     }
   }
 
-  return mapped.sort((a, b) => b.lastOpenedAt - a.lastOpenedAt);
+  const sorted = mapped.sort((a, b) => b.lastOpenedAt - a.lastOpenedAt);
+  // Persist pruning so storage stays tidy
+  saveRecentRepos(sorted);
+  return sorted;
 }
 
 export function recordRecentRepo(entry: {
@@ -580,7 +588,11 @@ export function recordRecentRepo(entry: {
   connected?: boolean;
 }) {
   let now = Date.now();
-  let entries = loadRecentRepos().filter((item) => item.slug !== entry.slug);
+  // Start from pruned list
+  const sixMonthsMs = 1000 * 60 * 60 * 24 * 30 * 6;
+  let entries = loadRecentRepos()
+    .filter((item) => item.slug !== entry.slug)
+    .filter((item) => now - item.lastOpenedAt <= sixMonthsMs);
   let connected = entry.connected ?? isRepoLinked(entry.slug);
   entries.unshift({ ...entry, connected, lastOpenedAt: now });
   if (entries.length > 10) entries = entries.slice(0, 10);

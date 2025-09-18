@@ -169,3 +169,11 @@ We avoid storing Y.js updates to keep it simple; instead, we reconstruct `Y.Text
 - [ ] Repository browser (folders, images)
 - [ ] Webhooks (optional small server) to hint at remote updates
 - [ ] GitHub App mode (selected repos, least-privilege permissions, short-lived installation tokens)
+
+### Repo rename handling (future)
+
+If a repository is renamed on GitHub, the app should detect it and offer a guided update:
+
+- Detection: calls to `GET /repos/{owner}/{repo}` or Contents API may return redirect/moved semantics or 404 with a URL hint. When we see a mismatch, prompt the user.
+- UX: show a dialog to update the slug to the new `owner/repo`. Keep local notes under the same namespace until confirmed, then migrate the namespace keys to the new slug.
+- Safety: no data loss; only rename the local namespace and update recents/linked markers. Remote sync continues with the new slug after confirmation.

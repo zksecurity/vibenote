@@ -71,6 +71,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   const [toast, setToast] = useState<{ text: string; href?: string } | null>(null);
   const [repoModalMode, setRepoModalMode] = useState<'onboard' | 'manage'>('manage');
   const [accessState, setAccessState] = useState<'unknown' | 'reachable' | 'unreachable'>('unknown');
+  const [refreshTick, setRefreshTick] = useState(0);
 
   useEffect(() => {
     setLinked(slug !== 'new' && isRepoLinked(slug));
@@ -125,6 +126,39 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   useEffect(() => {
     setDoc(activeId ? store.loadNote(activeId) : null);
   }, [store, activeId]);
+
+  // Cross-tab coherence: listen to localStorage changes for this repo slug
+  useEffect(() => {
+    const encodedSlug = encodeURIComponent(slug);
+    const prefix = `vibenote:repo:${encodedSlug}:`;
+    let timer: number | null = null;
+    const scheduleRefresh = () => {
+      if (timer !== null) return;
+      timer = window.setTimeout(() => {
+        timer = null;
+        // Re-read index and doc to reflect changes
+        const nextNotes = store.listNotes();
+        setNotes(nextNotes);
+        setActiveId((prev) => {
+          if (prev && nextNotes.some((n) => n.id === prev)) return prev;
+          return nextNotes[0]?.id ?? null;
+        });
+        // Nudge dependent effects
+        setRefreshTick((t) => t + 1);
+      }, 150);
+    };
+    const onStorage = (e: StorageEvent) => {
+      if (e.storageArea !== window.localStorage) return;
+      if (!e.key) return; // some browsers
+      if (!e.key.startsWith(prefix)) return;
+      scheduleRefresh();
+    };
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [slug, store]);
 
   const onCreate = () => {
     const id = store.createNote();
