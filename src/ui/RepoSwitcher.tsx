@@ -24,7 +24,7 @@ function parseOwnerRepo(input: string): Parsed {
 }
 
 export function RepoSwitcher({ accountOwner, route, slug, navigate, onClose, onRecordRecent }: Props) {
-  const [input, setInput] = useState(() => (route.kind === 'repo' ? `${route.owner}/${route.repo}` : ''));
+  const [input, setInput] = useState('');
   const [recents, setRecents] = useState<RecentRepo[]>(() => listRecentRepos());
   const [checking, setChecking] = useState(false);
   const [exists, setExists] = useState<boolean | null>(null);
@@ -60,14 +60,15 @@ export function RepoSwitcher({ accountOwner, route, slug, navigate, onClose, onR
 
   const suggestions = useMemo(() => {
     const q = input.trim().toLowerCase();
-    if (!q) return recents.slice(0, 8);
+    const base = recents.filter((r) => r.slug !== slug);
+    if (!q) return base.slice(0, 8);
     const score = (slug: string) => (slug.toLowerCase().startsWith(q) ? 0 : slug.toLowerCase().includes(q) ? 1 : 2);
-    return recents
+    return base
       .slice()
       .sort((a, b) => score(a.slug) - score(b.slug) || b.lastOpenedAt - a.lastOpenedAt)
       .filter((r) => r.slug.toLowerCase().includes(q))
       .slice(0, 8);
-  }, [input, recents]);
+  }, [input, recents, slug]);
 
   useEffect(() => {
     setSelectedIndex(0);
