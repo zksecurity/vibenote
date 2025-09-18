@@ -94,6 +94,21 @@ textarea {
   letter-spacing: -0.01em;
 }
 
+.brand-button {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+
+.brand-button:focus-visible {
+  outline: 2px solid var(--accent-border);
+  outline-offset: 3px;
+}
+
 .repo-btn {
   gap: 6px;
   max-width: clamp(140px, 42vw, 240px);
@@ -177,6 +192,10 @@ textarea {
 .btn:focus-visible {
   outline: 2px solid var(--accent-border);
   outline-offset: 3px;
+}
+
+.brand-home {
+  display: none;
 }
 
 .btn:disabled {
@@ -797,6 +816,10 @@ textarea:focus-visible {
 
   .brand {
     display: none;
+  }
+
+  .brand-home {
+    display: inline-flex;
   }
 
   .topbar-left {
