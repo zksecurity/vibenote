@@ -145,6 +145,12 @@ textarea {
   flex: 1 1 auto;
 }
 
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
