@@ -257,8 +257,9 @@ export function App() {
         <div className="topbar-left">
           <button
             className="btn icon only-mobile"
-            onClick={() => setSidebarOpen(true)}
-            aria-label="Open notes"
+            onClick={() => setSidebarOpen((value) => !value)}
+            aria-label={sidebarOpen ? 'Close notes' : 'Open notes'}
+            aria-expanded={sidebarOpen}
           >
             <NotesIcon />
           </button>
