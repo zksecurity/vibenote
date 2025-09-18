@@ -20,30 +20,10 @@ export interface RemoteFile {
   sha: string; // blob sha at HEAD
 }
 
-let remote: RemoteConfig | null = loadConfig();
-
-function loadConfig(): RemoteConfig | null {
-  const raw = localStorage.getItem('vibenote:config');
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as RemoteConfig;
-  } catch {
-    return null;
-  }
-}
-
-export function configureRemote(cfg: RemoteConfig) {
-  remote = cfg;
-  localStorage.setItem('vibenote:config', JSON.stringify(cfg));
-}
-
-export function getRemoteConfig(): RemoteConfig | null {
-  return remote ?? loadConfig();
-}
-
-export function clearRemoteConfig() {
-  remote = null;
-  localStorage.removeItem('vibenote:config');
+export function buildRemoteConfig(slug: string): RemoteConfig {
+  const [owner, repo] = slug.split('/', 2);
+  if (!owner || !repo) throw new Error('Invalid repository slug');
+  return { owner, repo, branch: 'main', notesDir: '' };
 }
 
 export async function repoExists(owner: string, repo: string): Promise<boolean> {
@@ -65,11 +45,10 @@ function encodeApiPath(path: string): string {
   return path.split('/').map(encodeURIComponent).join('/');
 }
 
-export async function pullNote(path: string): Promise<RemoteFile | null> {
-  if (!remote) return null;
-  const url = `https://api.github.com/repos/${remote.owner}/${remote.repo}/contents/${encodeApiPath(
+export async function pullNote(config: RemoteConfig, path: string): Promise<RemoteFile | null> {
+  const url = `https://api.github.com/repos/${config.owner}/${config.repo}/contents/${encodeApiPath(
     path
-  )}?ref=${encodeURIComponent(remote.branch)}`;
+  )}?ref=${encodeURIComponent(config.branch)}`;
   const res = await fetch(url, { headers: authHeaders() });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error('Failed to fetch note');
@@ -87,9 +66,8 @@ export type SyncSummary = {
 };
 
 // Fetch raw blob content by SHA
-export async function fetchBlob(sha: string): Promise<string | null> {
-  if (!remote) return null;
-  const url = `https://api.github.com/repos/${remote.owner}/${remote.repo}/git/blobs/${encodeURIComponent(sha)}`;
+export async function fetchBlob(config: RemoteConfig, sha: string): Promise<string | null> {
+  const url = `https://api.github.com/repos/${config.owner}/${config.repo}/git/blobs/${encodeURIComponent(sha)}`;
   const res = await fetch(url, { headers: authHeaders() });
   if (!res.ok) return null;
   const data = await res.json();
@@ -99,15 +77,15 @@ export async function fetchBlob(sha: string): Promise<string | null> {
 
 // Upsert a single file and return its new content sha
 export async function putFile(
+  config: RemoteConfig,
   file: { path: string; text: string; baseSha?: string },
   message: string
 ): Promise<string> {
-  if (!remote) throw new Error('No remote');
-  const url = `https://api.github.com/repos/${remote.owner}/${remote.repo}/contents/${encodeApiPath(file.path)}`;
+  const url = `https://api.github.com/repos/${config.owner}/${config.repo}/contents/${encodeApiPath(file.path)}`;
   const res = await fetch(url, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ message, content: toBase64(file.text), sha: file.baseSha, branch: remote.branch }),
+    body: JSON.stringify({ message, content: toBase64(file.text), sha: file.baseSha, branch: config.branch }),
   });
   if (!res.ok) throw new Error('Commit failed');
   const data = await res.json();
@@ -117,14 +95,15 @@ export async function putFile(
 }
 
 export async function commitBatch(
+  config: RemoteConfig,
   files: { path: string; text: string; baseSha?: string }[],
   message: string
 ): Promise<string | null> {
-  if (!remote || files.length === 0) return null;
+  if (files.length === 0) return null;
   let commitSha: string | null = null;
   for (const f of files) {
-    const url = `https://api.github.com/repos/${remote.owner}/${
-      remote.repo
+    const url = `https://api.github.com/repos/${config.owner}/${
+      config.repo
     }/contents/${encodeApiPath(f.path)}`;
     const res = await fetch(url, {
       method: 'PUT',
@@ -133,7 +112,7 @@ export async function commitBatch(
         message,
         content: toBase64(f.text),
         sha: f.baseSha,
-        branch: remote.branch,
+        branch: config.branch,
       }),
     });
     if (!res.ok) throw new Error('Commit failed');
@@ -144,12 +123,11 @@ export async function commitBatch(
 }
 
 // List Markdown files under the configured notesDir at HEAD
-export async function listNoteFiles(): Promise<{ path: string; sha: string }[]> {
-  if (!remote) return [];
-  const dir = (remote.notesDir || '').replace(/(^\/+|\/+?$)/g, '');
-  const base = `https://api.github.com/repos/${remote.owner}/${remote.repo}/contents`;
+export async function listNoteFiles(config: RemoteConfig): Promise<{ path: string; sha: string }[]> {
+  const dir = (config.notesDir || '').replace(/(^\/+|\/+?$)/g, '');
+  const base = `https://api.github.com/repos/${config.owner}/${config.repo}/contents`;
   const url = `${base}${dir ? '/' + encodeApiPath(dir) : ''}?ref=${encodeURIComponent(
-    remote.branch
+    config.branch
   )}`;
   const res = await fetch(url, { headers: authHeaders() });
   if (res.status === 404) return [];
@@ -177,14 +155,15 @@ function toBase64(input: string): string {
 }
 
 export async function deleteFiles(
+  config: RemoteConfig,
   files: { path: string; sha: string }[],
   message: string
 ): Promise<string | null> {
-  if (!remote || files.length === 0) return null;
+  if (files.length === 0) return null;
   let commitSha: string | null = null;
   for (const f of files) {
-    const url = `https://api.github.com/repos/${remote.owner}/${
-      remote.repo
+    const url = `https://api.github.com/repos/${config.owner}/${
+      config.repo
     }/contents/${encodeApiPath(f.path)}`;
     const res = await fetch(url, {
       method: 'DELETE',
@@ -192,7 +171,7 @@ export async function deleteFiles(
       body: JSON.stringify({
         message,
         sha: f.sha,
-        branch: remote.branch,
+        branch: config.branch,
       }),
     });
     if (!res.ok) throw new Error('Delete failed');
@@ -234,32 +213,34 @@ function hashText(text: string): string {
   return (h >>> 0).toString(16);
 }
 
-export async function syncBidirectional(store: LocalStore): Promise<SyncSummary> {
+export async function syncBidirectional(store: LocalStore, slug: string): Promise<SyncSummary> {
   let pulled = 0;
   let pushed = 0;
   let deletedRemote = 0;
   let deletedLocal = 0;
   let merged = 0;
 
-  const entries = await listNoteFiles();
+  const config = buildRemoteConfig(slug);
+  const storeSlug = store.getSlug();
+  const entries = await listNoteFiles(config);
   const remoteMap = new Map<string, string>(entries.map((e) => [e.path, e.sha] as const));
-  const pending = listTombstones();
+  const pending = listTombstones(storeSlug);
   const renameSources = new Set(pending.filter((t) => t.type === 'rename').map((t) => t.from));
   const deleteSources = new Set(pending.filter((t) => t.type === 'delete').map((t) => t.path));
 
   // Process remote files: pull new or changed, merge when both changed
   for (const e of entries) {
-    const local = findByPath(e.path);
+    const local = findByPath(storeSlug, e.path);
     if (!local) {
       if (renameSources.has(e.path) || deleteSources.has(e.path)) continue;
       // New remote file → pull
-      const rf = await pullNote(e.path);
+      const rf = await pullNote(config, e.path);
       if (!rf) continue;
       // Create local note using the store so index stays consistent
       const title = e.path.slice(e.path.lastIndexOf('/') + 1).replace(/\.md$/i, '');
       const id = store.createNote(title, rf.text);
       // Mark sync metadata
-      markSynced(id, { remoteSha: rf.sha, syncedHash: hashText(rf.text) });
+      markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: hashText(rf.text) });
       pulled++;
       continue;
     }
@@ -269,30 +250,30 @@ export async function syncBidirectional(store: LocalStore): Promise<SyncSummary>
       // Remote unchanged since base
       const changedLocally = doc.lastSyncedHash !== hashText(doc.text || '');
       if (changedLocally) {
-        const newSha = await putFile({ path: doc.path, text: doc.text, baseSha: e.sha }, 'vibenote: update notes');
-        markSynced(id, { remoteSha: newSha, syncedHash: hashText(doc.text || '') });
+        const newSha = await putFile(config, { path: doc.path, text: doc.text, baseSha: e.sha }, 'vibenote: update notes');
+        markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: hashText(doc.text || '') });
         pushed++;
       }
     } else {
       // Remote changed; fetch remote content
-      const rf = await pullNote(e.path);
+      const rf = await pullNote(config, e.path);
       if (!rf) continue;
-      const base = lastRemoteSha ? await fetchBlob(lastRemoteSha) : '';
+      const base = lastRemoteSha ? await fetchBlob(config, lastRemoteSha) : '';
       const localText = doc.text || '';
       if (doc.lastSyncedHash !== hashText(localText)) {
         // both changed → merge
         const mergedText = mergeMarkdown(base ?? '', localText, rf.text);
         if (mergedText !== localText) {
-          updateNoteText(id, mergedText);
+          updateNoteText(storeSlug, id, mergedText);
         }
-        const newSha = await putFile({ path: doc.path, text: mergedText, baseSha: rf.sha }, 'vibenote: merge notes');
-        markSynced(id, { remoteSha: newSha, syncedHash: hashText(mergedText) });
+        const newSha = await putFile(config, { path: doc.path, text: mergedText, baseSha: rf.sha }, 'vibenote: merge notes');
+        markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: hashText(mergedText) });
         merged++;
         pushed++;
       } else {
         // only remote changed → pull
-        updateNoteText(id, rf.text);
-        markSynced(id, { remoteSha: rf.sha, syncedHash: hashText(rf.text) });
+        updateNoteText(storeSlug, id, rf.text);
+        markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: hashText(rf.text) });
         pulled++;
       }
     }
@@ -303,14 +284,14 @@ export async function syncBidirectional(store: LocalStore): Promise<SyncSummary>
   const localNotes = store.listNotes();
   for (const meta of localNotes) {
     if (!remoteMap.has(meta.path)) {
-      const local = findByPath(meta.path);
+      const local = findByPath(storeSlug, meta.path);
       if (!local) continue;
       const { id, doc } = local;
       const changedLocally = doc.lastSyncedHash !== hashText(doc.text || '');
       if (changedLocally) {
         // Restore to remote
-        const newSha = await putFile({ path: doc.path, text: doc.text }, 'vibenote: restore note');
-        markSynced(id, { remoteSha: newSha, syncedHash: hashText(doc.text || '') });
+        const newSha = await putFile(config, { path: doc.path, text: doc.text }, 'vibenote: restore note');
+        markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: hashText(doc.text || '') });
         pushed++;
       } else {
         // Delete locally (will record a tombstone, which we clear below)
@@ -321,66 +302,66 @@ export async function syncBidirectional(store: LocalStore): Promise<SyncSummary>
   }
 
   // Process tombstones (deletes and renames)
-  const tombs = listTombstones();
+  const tombs = listTombstones(storeSlug);
   for (const t of tombs) {
     if (t.type === 'delete') {
       const sha = remoteMap.get(t.path);
       if (!sha) {
         // already gone remotely
-        removeTombstones((x) => x.type === 'delete' && x.path === t.path && x.deletedAt === t.deletedAt);
+        removeTombstones(storeSlug, (x) => x.type === 'delete' && x.path === t.path && x.deletedAt === t.deletedAt);
         continue;
       }
       if (!t.lastRemoteSha || t.lastRemoteSha === sha) {
         // safe to delete remotely
-        await deleteFiles([{ path: t.path, sha }], 'vibenote: delete removed notes');
+        await deleteFiles(config, [{ path: t.path, sha }], 'vibenote: delete removed notes');
         deletedRemote++;
-        removeTombstones((x) => x.type === 'delete' && x.path === t.path && x.deletedAt === t.deletedAt);
+        removeTombstones(storeSlug, (x) => x.type === 'delete' && x.path === t.path && x.deletedAt === t.deletedAt);
       } else {
         // remote changed since we deleted locally → keep remote (no action), clear tombstone
-        removeTombstones((x) => x.type === 'delete' && x.path === t.path && x.deletedAt === t.deletedAt);
+        removeTombstones(storeSlug, (x) => x.type === 'delete' && x.path === t.path && x.deletedAt === t.deletedAt);
       }
     } else if (t.type === 'rename') {
       const remoteSha = remoteMap.get(t.from);
       if (!remoteSha && !t.lastRemoteSha) {
         // Nothing tracked for this rename: remote already missing
-        removeTombstones((x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt);
+        removeTombstones(storeSlug, (x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt);
         continue;
       }
       let shaToDelete = remoteSha;
       if (!shaToDelete) {
-        const remoteFile = await pullNote(t.from);
+        const remoteFile = await pullNote(config, t.from);
         if (!remoteFile) {
-          removeTombstones((x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt);
+          removeTombstones(storeSlug, (x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt);
           continue;
         }
         shaToDelete = remoteFile.sha;
         remoteMap.set(t.from, shaToDelete);
       }
       if (!t.lastRemoteSha || t.lastRemoteSha === shaToDelete) {
-        await deleteFiles([{ path: t.from, sha: shaToDelete }], 'vibenote: delete old path after rename');
+        await deleteFiles(config, [{ path: t.from, sha: shaToDelete }], 'vibenote: delete old path after rename');
         deletedRemote++;
         remoteMap.delete(t.from);
-        removeTombstones((x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt);
+        removeTombstones(storeSlug, (x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt);
         continue;
       }
 
-      const existing = findByPath(t.from);
-      const remoteFile = await pullNote(t.from);
+      const existing = findByPath(storeSlug, t.from);
+      const remoteFile = await pullNote(config, t.from);
       if (remoteFile) {
         if (existing) {
           if ((existing.doc.text || '') !== remoteFile.text) {
-            updateNoteText(existing.id, remoteFile.text);
+            updateNoteText(storeSlug, existing.id, remoteFile.text);
           }
-          markSynced(existing.id, { remoteSha: remoteFile.sha, syncedHash: hashText(remoteFile.text) });
+          markSynced(storeSlug, existing.id, { remoteSha: remoteFile.sha, syncedHash: hashText(remoteFile.text) });
         } else {
           const title = basename(t.from).replace(/\.md$/i, '');
           const newId = store.createNote(title, remoteFile.text);
-          moveNotePath(newId, t.from);
-          markSynced(newId, { remoteSha: remoteFile.sha, syncedHash: hashText(remoteFile.text) });
+          moveNotePath(storeSlug, newId, t.from);
+          markSynced(storeSlug, newId, { remoteSha: remoteFile.sha, syncedHash: hashText(remoteFile.text) });
           pulled++;
         }
       }
-      removeTombstones((x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt);
+      removeTombstones(storeSlug, (x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt);
     }
   }
 
