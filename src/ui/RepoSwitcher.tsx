@@ -60,7 +60,7 @@ export function RepoSwitcher({ accountOwner, route, slug, navigate, onClose, onR
 
   const suggestions = useMemo(() => {
     const q = input.trim().toLowerCase();
-    const base = recents.filter((r) => r.slug !== slug);
+    const base = recents;
     if (!q) return base.slice(0, 8);
     const score = (slug: string) => (slug.toLowerCase().startsWith(q) ? 0 : slug.toLowerCase().includes(q) ? 1 : 2);
     return base
@@ -68,7 +68,7 @@ export function RepoSwitcher({ accountOwner, route, slug, navigate, onClose, onR
       .sort((a, b) => score(a.slug) - score(b.slug) || b.lastOpenedAt - a.lastOpenedAt)
       .filter((r) => r.slug.toLowerCase().includes(q))
       .slice(0, 8);
-  }, [input, recents, slug]);
+  }, [input, recents]);
 
   useEffect(() => {
     setSelectedIndex(0);
