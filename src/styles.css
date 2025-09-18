@@ -194,10 +194,6 @@ textarea {
   outline-offset: 3px;
 }
 
-.brand-home {
-  display: none;
-}
-
 .btn:disabled {
   cursor: not-allowed;
   opacity: 0.6;
@@ -814,12 +810,8 @@ textarea:focus-visible {
     padding: 10px 16px;
   }
 
-  .brand {
+  .brand-button {
     display: none;
-  }
-
-  .brand-home {
-    display: inline-flex;
   }
 
   .topbar-left {

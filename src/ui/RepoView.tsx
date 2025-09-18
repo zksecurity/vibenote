@@ -250,12 +250,6 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     </svg>
   );
 
-  const HomeIcon = () => (
-    <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
-      <path d="M7.22 1.22a1.25 1.25 0 0 1 1.56 0l5.5 4.4c.3.24.47.6.47.99v6.64c0 .69-.56 1.25-1.25 1.25H10c-.41 0-.75-.34-.75-.75V9.25H6.75v4.5c0 .41-.34.75-.75.75H2.5c-.69 0-1.25-.56-1.25-1.25V6.61c0-.39.17-.75.47-.99l5.5-4.4Z" />
-    </svg>
-  );
-
   const NotesIcon = () => (
     <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
       <path d="M3 1.75A1.75 1.75 0 0 1 4.75 0h6.5A1.75 1.75 0 0 1 13 1.75v12.5A1.75 1.75 0 0 1 11.25 16h-6.5A1.75 1.75 0 0 1 3 14.25Zm1.5.75a.75.75 0 0 0-.75.75v10.5c0 .414.336.75.75.75h6.5a.75.75 0 0 0 .75-.75V3.25a.75.75 0 0 0-.75-.75ZM5 4.5A.5.5 0 0 1 5.5 4h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 5 4.5Zm0 2.75A.75.75 0 0 1 5.75 6.5h4.5a.75.75 0 0 1 0 1.5h-4.5A.75.75 0 0 1 5 7.25Zm0 2.75c0-.414.336-.75.75-.75h4.5a.75.75 0 0 1 0 1.5h-4.5A.75.75 0 0 1 5 10Z" />
@@ -372,14 +366,6 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
             aria-label="Go home"
           >
             <span className="brand">VibeNote</span>
-          </button>
-          <button
-            className="btn icon brand-home"
-            type="button"
-            onClick={() => navigate({ kind: 'home' })}
-            aria-label="Go home"
-          >
-            <HomeIcon />
           </button>
         </div>
         <div className="topbar-actions">
