@@ -503,7 +503,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
           </button>
           {route.kind === 'repo' ? (
             <button
-              className={`btn ${isRepoUnreachable ? 'ghost' : linked ? 'ghost' : 'primary'} repo-btn align-workspace`}
+              className={`btn ghost repo-btn align-workspace`}
               onClick={ensureOwnerAndOpen}
               title={linked ? 'Change repository' : 'Choose repository'}
             >
