@@ -317,6 +317,25 @@ beforeEach(async () => {
     expectParity(store, remote);
     expect(store.listNotes()).toHaveLength(0);
   });
+
+  test('ignores non-Markdown files when syncing', async () => {
+    remote.setFile('data.json', '{"keep":true}');
+    remote.setFile('image.png', 'binary');
+    store.createNote('OnlyNote', '# hello');
+    await syncBidirectional(store);
+    const snapshot = remote.snapshot();
+    expect(snapshot.get('data.json')).toBe('{"keep":true}');
+    expect(snapshot.get('image.png')).toBe('binary');
+    expect(snapshot.get('OnlyNote.md')).toBe('# hello');
+  });
+
+  test('leaves nested Markdown files untouched', async () => {
+    remote.setFile('nested/Nested.md', '# nested');
+    await syncBidirectional(store);
+    const snapshot = remote.snapshot();
+    expect(snapshot.get('nested/Nested.md')).toBe('# nested');
+    expect(store.listNotes()).toHaveLength(0);
+  });
 });
 
 function expectParity(store: LocalStore, remote: MockRemoteRepo) {
