@@ -127,6 +127,28 @@ textarea {
   flex-shrink: 0;
 }
 
+.repo-trigger {
+  gap: 8px;
+  font-weight: 600;
+}
+
+.btn.ghost.repo-trigger {
+  background: var(--surface-subtle);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.btn.ghost.repo-trigger:hover {
+  background: rgba(9, 105, 218, 0.12);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.repo-trigger svg {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
 .repo-label {
   display: inline-flex;
   align-items: baseline;
@@ -164,26 +186,107 @@ textarea {
 
 .home-main {
   max-width: 960px;
-  margin: 40px auto;
+  margin: 48px auto;
   padding: 0 clamp(16px, 4vw, 32px);
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 32px;
 }
 
-.home-header {
+.home-hero,
+.onboarding-hero {
+  background: linear-gradient(135deg, rgba(9, 105, 218, 0.12), rgba(31, 136, 61, 0.12));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: clamp(24px, 6vw, 40px);
+  display: grid;
+  gap: 20px;
+  box-shadow: var(--shadow);
+}
+
+.home-hero-text {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  gap: 16px;
+}
+
+.home-pill,
+.onboarding-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(9, 105, 218, 0.12);
+  color: var(--accent);
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.home-actions,
+.onboarding-card-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
 }
 
-.home-header h1 {
-  margin: 0 0 4px;
-  font-size: 1.5rem;
+.home-hero-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: clamp(20px, 5vw, 28px);
+  box-shadow: var(--shadow-soft);
 }
 
-.home-header p {
+.home-hero-card h2 {
+  margin: 0 0 12px;
+  font-size: 1.25rem;
+}
+
+.home-hero-card p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.home-steps {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: var(--muted);
+}
+
+.home-steps li {
+  margin: 0;
+}
+
+.home-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: clamp(20px, 4vw, 28px);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.home-section-header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.home-section-header h2 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.home-section-header p {
   margin: 0;
   color: var(--muted);
 }
@@ -236,24 +339,149 @@ textarea {
 }
 
 .home-empty {
-  border: 1px dashed var(--border);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 32px;
-  text-align: center;
-  color: var(--muted);
+  padding: clamp(20px, 4vw, 28px);
   display: flex;
   flex-direction: column;
   gap: 12px;
-  align-items: center;
+  align-items: flex-start;
+  color: var(--muted);
+  box-shadow: var(--shadow-soft);
 }
 
-.home-empty h2 {
+.home-empty h3 {
   margin: 0;
   color: var(--text);
 }
 
 .home-empty p {
-  margin: 0 0 8px;
+  margin: 0;
+}
+
+.home-hero h1,
+.onboarding-hero h1 {
+  margin: 0;
+  font-size: clamp(1.9rem, 4vw, 2.6rem);
+  line-height: 1.2;
+}
+
+.home-hero p,
+.onboarding-hero p {
+  margin: 0;
+  color: var(--muted);
+  max-width: 560px;
+}
+
+.onboarding-main {
+  max-width: 960px;
+  margin: 48px auto;
+  padding: 0 clamp(16px, 4vw, 32px);
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.onboarding-grid {
+  display: grid;
+  gap: 20px;
+}
+
+.onboarding-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: clamp(20px, 5vw, 28px);
+  box-shadow: var(--shadow-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.onboarding-card h2 {
+  margin: 0;
+  font-size: 1.3rem;
+}
+
+.onboarding-card p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.onboarding-step {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.onboarding-connected {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface-subtle);
+  font-weight: 600;
+}
+
+.onboarding-card-actions {
+  width: 100%;
+  align-items: stretch;
+}
+
+.onboarding-card-actions .btn {
+  flex: 1 1 180px;
+}
+
+.onboarding-hint {
+  margin: 0;
+  color: var(--muted);
+}
+
+.onboarding-status {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  color: var(--accent);
+  font-weight: 500;
+}
+
+@media (max-width: 600px) {
+  .onboarding-card-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .onboarding-card-actions .btn {
+    flex: 1 1 auto;
+    width: 100%;
+  }
+}
+
+@media (min-width: 880px) {
+  .home-hero {
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+    align-items: center;
+  }
+}
+
+@media (min-width: 720px) {
+  .onboarding-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .home-main,
+  .onboarding-main {
+    margin: 32px auto;
+  }
 }
 
 .toolbar {
@@ -746,8 +974,33 @@ textarea:focus-visible {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-soft);
-  padding: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   z-index: 60;
+}
+
+.repo-switcher-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.repo-switcher-header > div {
+  flex: 1 1 auto;
+}
+
+.repo-switcher-title {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.repo-switcher-description {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.95rem;
 }
 
 .repo-switcher-input-row {
@@ -762,7 +1015,7 @@ textarea:focus-visible {
 .repo-switcher-status {
   color: var(--muted);
   font-size: 0.9rem;
-  margin: 8px 2px 6px;
+  margin: 4px 2px 6px;
 }
 
 .repo-switcher-list {
@@ -804,6 +1057,17 @@ textarea:focus-visible {
 .repo-switcher-connected {
   color: var(--muted);
   font-size: 0.85rem;
+}
+
+@media (max-width: 520px) {
+  .repo-switcher-input-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .repo-switcher-input-row .btn {
+    width: 100%;
+  }
 }
 
 /* Align repo trigger and switcher with workspace content on desktop */

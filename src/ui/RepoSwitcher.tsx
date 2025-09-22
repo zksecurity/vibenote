@@ -12,6 +12,8 @@ type Props = {
   navigate: (route: Route, options?: { replace?: boolean }) => void;
   onClose: () => void;
   onRecordRecent: (entry: { slug: string; owner?: string; repo?: string; connected?: boolean }) => void;
+  mode?: 'onboard' | 'manage';
+  initialInput?: string;
 };
 
 type Parsed = { owner: string; repo: string } | null;
@@ -23,7 +25,16 @@ function parseOwnerRepo(input: string): Parsed {
   return { owner, repo };
 }
 
-export function RepoSwitcher({ accountOwner, route, slug, navigate, onClose, onRecordRecent }: Props) {
+export function RepoSwitcher({
+  accountOwner,
+  route,
+  slug,
+  navigate,
+  onClose,
+  onRecordRecent,
+  mode = 'manage',
+  initialInput,
+}: Props) {
   const [input, setInput] = useState('');
   const [recents, setRecents] = useState<RecentRepo[]>(() => listRecentRepos());
   const [checking, setChecking] = useState(false);
@@ -35,6 +46,12 @@ export function RepoSwitcher({ accountOwner, route, slug, navigate, onClose, onR
   useEffect(() => {
     setRecents(listRecentRepos());
   }, [route]);
+
+  useEffect(() => {
+    if (initialInput === undefined) return;
+    setInput(initialInput);
+    setSelectedIndex(0);
+  }, [initialInput]);
 
   useEffect(() => {
     // focus input on open
@@ -73,6 +90,14 @@ export function RepoSwitcher({ accountOwner, route, slug, navigate, onClose, onR
   useEffect(() => {
     setSelectedIndex(0);
   }, [suggestions.length]);
+
+  const placeholder = mode === 'onboard' && accountOwner ? `${accountOwner}/notes` : 'owner/repo';
+  const title = mode === 'onboard' ? 'Create or link a notes repository' : 'Switch repository';
+  const description =
+    mode === 'onboard'
+      ? 'Name a repository under your account or pick a recent workspace.'
+      : 'Type owner/repo or choose a recent workspace.';
+  const createButtonClass = mode === 'onboard' ? 'btn primary' : 'btn secondary';
 
   // Debounced existence check for precise owner/repo inputs
   useEffect(() => {
@@ -159,19 +184,29 @@ export function RepoSwitcher({ accountOwner, route, slug, navigate, onClose, onR
     ? exists === true
       ? 'Press Enter to open'
       : exists === false
-      ? accountOwner && parsed.owner === accountOwner
-        ? 'Repo not found — you can create it'
-        : 'Repo not found or no access'
-      : 'Type owner/repo to open'
-    : 'Type owner/repo or choose a recent';
+        ? accountOwner && parsed.owner === accountOwner
+          ? mode === 'onboard'
+            ? 'Repo not found — press Enter to create it'
+            : 'Repo not found — you can create it'
+          : 'Repo not found or no access'
+        : 'Type owner/repo to open'
+    : mode === 'onboard'
+    ? 'Name your repository or pick a recent workspace.'
+    : 'Type owner/repo or choose a recent workspace.';
 
   return (
     <div ref={panelRef} className="repo-switcher-panel" onClick={(e) => e.stopPropagation()}>
+      <div className="repo-switcher-header">
+        <div>
+          <h2 className="repo-switcher-title">{title}</h2>
+          <p className="repo-switcher-description">{description}</p>
+        </div>
+      </div>
       <div className="repo-switcher-input-row">
         <input
           ref={inputRef}
           className="input repo-switcher-input"
-          placeholder="owner/repo"
+          placeholder={placeholder}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
@@ -188,7 +223,7 @@ export function RepoSwitcher({ accountOwner, route, slug, navigate, onClose, onR
           }}
         />
         {canCreate && (
-          <button className="btn secondary" onClick={() => parsed && createRepo(parsed.owner, parsed.repo)}>
+          <button className={createButtonClass} onClick={() => parsed && createRepo(parsed.owner, parsed.repo)}>
             Create repo
           </button>
         )}
