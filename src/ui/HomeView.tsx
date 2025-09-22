@@ -35,40 +35,69 @@ export function HomeView({ recents, navigate }: HomeViewProps) {
         <div className="topbar-left">
           <span className="brand">VibeNote</span>
         </div>
-        <div className="topbar-actions" />
+        <div className="topbar-actions">
+          <button className="btn secondary" onClick={goCreateRepo}>
+            New repository
+          </button>
+        </div>
       </header>
       <main className="home-main">
-        <section className="home-header">
-          <div>
-            <h1>Recent repositories</h1>
-            <p>Jump back into your notes or connect a new GitHub repo.</p>
+        <section className="home-hero">
+          <div className="home-hero-text">
+            <h1>Keep your release notes in sync</h1>
+            <p>
+              Spin up a dedicated notes repository on GitHub and share shipping context with your
+              team in minutes.
+            </p>
           </div>
-          <button className="btn primary" onClick={goCreateRepo}>
-            Create notes repository
-          </button>
-        </section>
-        {hasRepos ? (
-          <ul className="home-recents">
-            {repos.map((entry) => (
-              <li key={entry.slug}>
-                <button className="home-repo" onClick={() => openEntry(entry)}>
-                  <span className="home-repo-label">{renderLabel(entry)}</span>
-                  <span aria-hidden className="home-repo-arrow">
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor">
-                      <path d="M6 12 10 8 6 4" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <section className="home-empty">
-            <h2>Connect your first repository</h2>
-            <p>Bring an existing GitHub notes repo into VibeNote to get started.</p>
+          <div className="home-hero-actions">
             <button className="btn primary" onClick={goCreateRepo}>
               Create notes repository
             </button>
+            <button className="btn ghost" onClick={goCreateRepo}>
+              Link existing repo
+            </button>
+          </div>
+        </section>
+        {hasRepos ? (
+          <section className="home-section">
+            <div className="home-section-header">
+              <h2>Recent repositories</h2>
+              <button className="btn subtle" onClick={goCreateRepo}>
+                Connect another
+              </button>
+            </div>
+            <p className="home-section-subtitle">Jump back into a repo you've opened recently.</p>
+            <ul className="home-recents">
+              {repos.map((entry) => (
+                <li key={entry.slug}>
+                  <button className="home-repo" onClick={() => openEntry(entry)}>
+                    <span className="home-repo-label">{renderLabel(entry)}</span>
+                    <span aria-hidden className="home-repo-arrow">
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor">
+                        <path d="M6 12 10 8 6 4" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : (
+          <section className="home-empty-card">
+            <h2>Create your first notes repository</h2>
+            <p>
+              We'll initialize a private repo under your GitHub account with a README so teammates know
+              how to contribute.
+            </p>
+            <div className="home-empty-actions">
+              <button className="btn primary" onClick={goCreateRepo}>
+                Create notes repository
+              </button>
+              <button className="btn ghost" onClick={goCreateRepo}>
+                Link existing repo
+              </button>
+            </div>
           </section>
         )}
       </main>

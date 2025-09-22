@@ -479,7 +479,205 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     }
   };
 
+  const accountControl = user ? (
+    <button className="btn ghost account-btn" onClick={() => setMenuOpen((v) => !v)} aria-label="Account menu">
+      {user.avatar_url ? (
+        <img src={user.avatar_url} alt={user.login} />
+      ) : (
+        <span className="account-avatar-fallback" aria-hidden>
+          {(user.name || user.login || '?').charAt(0).toUpperCase()}
+        </span>
+      )}
+    </button>
+  ) : (
+    <button className="btn secondary" onClick={onConnect}>
+      Refresh GitHub login
+    </button>
+  );
+
+  const accountMenu =
+    menuOpen && user ? (
+      <div className="account-menu">
+        <div className="account-menu-header">
+          <div className="account-menu-avatar" aria-hidden>
+            {user.avatar_url ? (
+              <img src={user.avatar_url} alt="" />
+            ) : (
+              <span>{(user.name || user.login || '?').charAt(0).toUpperCase()}</span>
+            )}
+          </div>
+          <div>
+            <div className="account-name">{user.name || user.login}</div>
+            <div className="account-handle">@{user.login}</div>
+          </div>
+        </div>
+        <button className="btn subtle full-width" onClick={onSignOut}>
+          Sign out
+        </button>
+      </div>
+    ) : null;
+
+  const toastEl =
+    toast && toast.text ? (
+      <div className="toast">
+        <span>{toast.text}</span>
+        {toast.href && (
+          <a className="btn subtle" href={toast.href} target="_blank" rel="noreferrer">
+            Open
+          </a>
+        )}
+      </div>
+    ) : null;
+
+  const repoSwitcherEl = showSwitcher ? (
+    <RepoSwitcher
+      accountOwner={ownerLogin}
+      route={route}
+      slug={slug}
+      navigate={navigate}
+      onRecordRecent={onRecordRecent}
+      onClose={() => setShowSwitcher(false)}
+    />
+  ) : null;
+
+  const deviceModalEl =
+    device ? (
+      <DeviceCodeModal
+        device={device}
+        onDone={(t) => {
+          if (t) {
+            localStorage.setItem('vibenote:gh-token', t);
+            setToken(t);
+            fetchCurrentUser().then((u) => {
+              setOwnerLogin(u?.login ?? null);
+              setUser(u);
+              setRepoModalMode('onboard');
+              setShowConfig(true);
+            });
+          }
+          setDevice(null);
+        }}
+        onCancel={() => setDevice(null)}
+      />
+    ) : null;
+
   const isRepoUnreachable = route.kind === 'repo' && accessState === 'unreachable';
+
+  if (slug === 'new') {
+    const onboardingBanner = syncMsg ? <div className="onboarding-banner">{syncMsg}</div> : null;
+
+    return (
+      <div className="app-shell onboarding-shell">
+        <header className="topbar">
+          <div className="topbar-left">
+            <button
+              className="brand-button"
+              type="button"
+              onClick={() => navigate({ kind: 'home' })}
+              aria-label="Go home"
+            >
+              <span className="brand">VibeNote</span>
+            </button>
+          </div>
+          <div className="topbar-actions">
+            {!token ? (
+              <button className="btn primary" onClick={onConnect}>
+                Connect GitHub
+              </button>
+            ) : (
+              <>
+                <button className="btn secondary" onClick={ensureOwnerAndOpen}>
+                  Repo switcher
+                </button>
+                {accountControl}
+              </>
+            )}
+          </div>
+        </header>
+        <main className="onboarding-main">
+          <section className="onboarding-hero">
+            <h1>Set up your notes repository</h1>
+            <p>
+              VibeNote keeps launch notes, changelogs, and planning docs in GitHub so your team stays on
+              the same page.
+            </p>
+          </section>
+          {onboardingBanner}
+          <section className="onboarding-grid">
+            <article className="onboarding-card">
+              <span className="onboarding-step">Step 1</span>
+              <h2>Connect GitHub</h2>
+              <p>Authorize VibeNote using GitHub's device flow. The token stays on this browser.</p>
+              {token ? (
+                <div className="onboarding-connected">
+                  <div>
+                    <div className="onboarding-connected-label">Signed in</div>
+                    <div className="onboarding-connected-user">
+                      {user?.name ? (
+                        <>
+                          {user.name}
+                          {user.login ? <span className="onboarding-connected-handle">@{user.login}</span> : null}
+                        </>
+                      ) : ownerLogin ? (
+                        <span>@{ownerLogin}</span>
+                      ) : (
+                        <span>GitHub account connected</span>
+                      )}
+                    </div>
+                  </div>
+                  <button className="btn subtle" onClick={onSignOut}>
+                    Sign out
+                  </button>
+                </div>
+              ) : (
+                <div className="onboarding-actions">
+                  <button className="btn primary" onClick={onConnect}>
+                    Connect GitHub
+                  </button>
+                </div>
+              )}
+              <p className="onboarding-hint">
+                {token
+                  ? 'Device tokens stay on this browser. Sign out anytime to revoke access.'
+                  : "We'll open GitHub in a new tab so you can finish the device flow."}
+              </p>
+            </article>
+            <article className="onboarding-card">
+              <span className="onboarding-step">Step 2</span>
+              <h2>Create notes repository</h2>
+              <p>Spin up a private repo or link an existing notes repo without leaving VibeNote.</p>
+              <div className="onboarding-actions">
+                <button className="btn primary" onClick={ensureOwnerAndOpen} disabled={!token}>
+                  Create notes repository
+                </button>
+              </div>
+              <p className="onboarding-hint">
+                {token
+                  ? 'Already have one? Pick it in the switcher that opens next.'
+                  : 'Connect GitHub first to choose or create a repository.'}
+              </p>
+            </article>
+            <article className="onboarding-card onboarding-secondary">
+              <span className="onboarding-step">Step 3</span>
+              <h2>Write together</h2>
+              <ul className="onboarding-list">
+                <li>Capture launch notes and retros in Markdown.</li>
+                <li>Sync with GitHub whenever you're ready to publish.</li>
+                <li>Keep your ship history close to your codebase.</li>
+              </ul>
+              <p className="onboarding-hint">
+                Press <kbd>⌘</kbd>/<kbd>Ctrl</kbd> + <kbd>K</kbd> to open the repo switcher anytime.
+              </p>
+            </article>
+          </section>
+        </main>
+        {accountMenu}
+        {toastEl}
+        {repoSwitcherEl}
+        {deviceModalEl}
+      </div>
+    );
+  }
 
   return (
     <div className="app-shell">
@@ -513,17 +711,13 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                 <span>{route.repo}</span>
               </span>
             </button>
-          ) : (
-            <button className="btn primary repo-btn align-workspace" onClick={ensureOwnerAndOpen}>Choose repository</button>
-          )}
+          ) : null}
         </div>
         <div className="topbar-actions">
           {!token ? (
-            <>
-              <button className="btn primary" onClick={onConnect}>
-                Connect GitHub
-              </button>
-            </>
+            <button className="btn primary" onClick={onConnect}>
+              Connect GitHub
+            </button>
           ) : (
             <>
               {linked && !isRepoUnreachable && (
@@ -537,25 +731,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                   <SyncIcon spinning={syncing} />
                 </button>
               )}
-              {user ? (
-                <button
-                  className="btn ghost account-btn"
-                  onClick={() => setMenuOpen((v) => !v)}
-                  aria-label="Account menu"
-                >
-                  {user.avatar_url ? (
-                    <img src={user.avatar_url} alt={user.login} />
-                  ) : (
-                    <span className="account-avatar-fallback" aria-hidden>
-                      {(user.name || user.login || '?').charAt(0).toUpperCase()}
-                    </span>
-                  )}
-                </button>
-              ) : (
-                <button className="btn secondary" onClick={onConnect}>
-                  Refresh GitHub login
-                </button>
-              )}
+              {accountControl}
             </>
           )}
         </div>
@@ -634,65 +810,10 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
         )}
       </div>
       {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
-      {menuOpen && user && (
-        <div className="account-menu">
-          <div className="account-menu-header">
-            <div className="account-menu-avatar" aria-hidden>
-              {user.avatar_url ? (
-                <img src={user.avatar_url} alt="" />
-              ) : (
-                <span>{(user.name || user.login || '?').charAt(0).toUpperCase()}</span>
-              )}
-            </div>
-            <div>
-              <div className="account-name">{user.name || user.login}</div>
-              <div className="account-handle">@{user.login}</div>
-            </div>
-          </div>
-          <button className="btn subtle full-width" onClick={onSignOut}>
-            Sign out
-          </button>
-        </div>
-      )}
-      {toast && (
-        <div className="toast">
-          <span>{toast.text}</span>
-          {toast.href && (
-            <a className="btn subtle" href={toast.href} target="_blank" rel="noreferrer">
-              Open
-            </a>
-          )}
-        </div>
-      )}
-      {showSwitcher && (
-        <RepoSwitcher
-          accountOwner={ownerLogin}
-          route={route}
-          slug={slug}
-          navigate={navigate}
-          onRecordRecent={onRecordRecent}
-          onClose={() => setShowSwitcher(false)}
-        />
-      )}
-      {device && (
-        <DeviceCodeModal
-          device={device}
-          onDone={(t) => {
-            if (t) {
-              localStorage.setItem('vibenote:gh-token', t);
-              setToken(t);
-              fetchCurrentUser().then((u) => {
-                setOwnerLogin(u?.login ?? null);
-                setUser(u);
-                setRepoModalMode('onboard');
-                setShowConfig(true);
-              });
-            }
-            setDevice(null);
-          }}
-          onCancel={() => setDevice(null)}
-        />
-      )}
+      {accountMenu}
+      {toastEl}
+      {repoSwitcherEl}
+      {deviceModalEl}
     </div>
   );
 }
