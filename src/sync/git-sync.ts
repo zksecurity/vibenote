@@ -139,9 +139,7 @@ export async function commitBatch(
 }
 
 // List Markdown files under the configured notesDir at HEAD
-export async function listNoteFiles(
-  config: RemoteConfig
-): Promise<{ path: string; sha: string }[]> {
+export async function listNoteFiles(config: RemoteConfig): Promise<{ path: string; sha: string }[]> {
   const dir = (config.notesDir || '').replace(/(^\/+|\/+?$)/g, '');
   const base = `https://api.github.com/repos/${config.owner}/${config.repo}/contents`;
   const url = `${base}${dir ? '/' + encodeApiPath(dir) : ''}?ref=${encodeURIComponent(
@@ -290,11 +288,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         if (mergedText !== localText) {
           updateNoteText(storeSlug, id, mergedText);
         }
-        const newSha = await putFile(
-          config,
-          { path: doc.path, text: mergedText, baseSha: rf.sha },
-          'vibenote: merge notes'
-        );
+        const newSha = await putFile(config, { path: doc.path, text: mergedText, baseSha: rf.sha }, 'vibenote: merge notes');
         markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: hashText(mergedText) });
         merged++;
         pushed++;
@@ -320,11 +314,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       const changedLocally = doc.lastSyncedHash !== hashText(doc.text || '');
       if (changedLocally) {
         // Restore to remote
-        const newSha = await putFile(
-          config,
-          { path: doc.path, text: doc.text },
-          'vibenote: restore note'
-        );
+        const newSha = await putFile(config, { path: doc.path, text: doc.text }, 'vibenote: restore note');
         markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: hashText(doc.text || '') });
         pushed++;
         debugLog(slug, 'sync:restore-remote-missing', { path: doc.path });
@@ -398,11 +388,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         remoteMap.set(t.from, shaToDelete);
       }
       if (!t.lastRemoteSha || t.lastRemoteSha === shaToDelete) {
-        await deleteFiles(
-          config,
-          [{ path: t.from, sha: shaToDelete }],
-          'vibenote: delete old path after rename'
-        );
+        await deleteFiles(config, [{ path: t.from, sha: shaToDelete }], 'vibenote: delete old path after rename');
         deletedRemote++;
         remoteMap.delete(t.from);
         removeTombstones(
@@ -445,7 +431,8 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
     }
   }
 
-  return { pulled, pushed, deletedRemote, deletedLocal, merged };
+  const summary = { pulled, pushed, deletedRemote, deletedLocal, merged };
+  return summary;
 }
 
 function basename(p: string) {

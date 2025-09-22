@@ -26,6 +26,7 @@ import {
   type RemoteConfig,
 } from '../sync/git-sync';
 import { ensureIntroReadme } from '../sync/readme';
+import { hashText } from '../storage/local';
 import { RepoSwitcher } from './RepoSwitcher';
 import { RepoConfigModal } from './RepoConfigModal';
 import { Toggle } from './Toggle';
@@ -89,7 +90,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   const autoSyncTimerRef = useState<{ id: number | null }>({ id: null })[0];
   const autoSyncBusyRef = useState<{ busy: boolean }>({ busy: false })[0];
   const AUTO_SYNC_MIN_INTERVAL_MS = 60_000; // not too often
-  const AUTO_SYNC_DEBOUNCE_MS = 1_500;
+  const AUTO_SYNC_DEBOUNCE_MS = 10_000;
 
   useEffect(() => {
     setLinked(slug !== 'new' && isRepoLinked(slug));
@@ -538,6 +539,49 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route.kind, autosync, token, linked, slug]);
+
+  // Attempt a final background push via Service Worker when the page is closing.
+  useEffect(() => {
+    const shouldFlush = () => autosync && token !== null && linked && slug !== 'new';
+    const onPageHide = () => {
+      if (!shouldFlush()) return;
+      const sendViaSW = async () => {
+        try {
+          if (!('serviceWorker' in navigator)) return false;
+          const reg = await navigator.serviceWorker.ready;
+          const ctrl = reg?.active;
+          if (!ctrl) return false;
+          // Compute minimal changed set: only notes whose text differs from lastSyncedHash
+          const files = store
+            .listNotes()
+            .map((m) => store.loadNote(m.id))
+            .filter((d): d is NonNullable<typeof d> => !!d)
+            .filter((d) => d.lastSyncedHash !== hashText(d.text || ''))
+            .map((d) => ({ path: d.path, text: d.text || '', baseSha: d.lastRemoteSha }));
+          if (files.length === 0) return true;
+          const [owner, repo] = slug.split('/', 2);
+          ctrl.postMessage({
+            type: 'vibenote-flush',
+            payload: { token, config: { owner, repo, branch: 'main' }, files },
+          });
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      // Try SW-based flush
+      void sendViaSW();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') onPageHide();
+    };
+    window.addEventListener('pagehide', onPageHide);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('pagehide', onPageHide);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [autosync, token, linked, slug, store]);
 
   const onSignOut = () => {
     clearToken();
