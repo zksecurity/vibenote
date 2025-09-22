@@ -25,7 +25,7 @@ export function HomeView({ recents, navigate }: HomeViewProps) {
     return entry.slug;
   };
 
-  const goCreateRepo = () => {
+  const goToSetup = () => {
     navigate({ kind: 'new' });
   };
 
@@ -35,38 +35,61 @@ export function HomeView({ recents, navigate }: HomeViewProps) {
         <div className="topbar-left">
           <span className="brand">VibeNote</span>
         </div>
-        <div className="topbar-actions" />
-      </header>
-      <main className="home-main">
-        <section className="home-header">
-          <div>
-            <h1>Recent repositories</h1>
-            <p>Jump back into your notes or connect a new GitHub repo.</p>
-          </div>
-          <button className="btn primary" onClick={goCreateRepo}>
+        <div className="topbar-actions">
+          <button className="btn secondary" onClick={goToSetup}>
             Create notes repository
           </button>
+        </div>
+      </header>
+      <main className="home-main">
+        <section className="home-hero">
+          <div className="home-hero-text">
+            <h1>Bring your notes to GitHub</h1>
+            <p>Turn a repository into a Markdown notebook with offline-first editing and quick GitHub sync.</p>
+            <div className="home-hero-actions">
+              <button className="btn primary" onClick={goToSetup}>
+                Create notes repository
+              </button>
+              <button className="btn ghost" onClick={goToSetup}>
+                Link existing repository
+              </button>
+            </div>
+          </div>
+          <div className="home-hero-card">
+            <h2>Why VibeNote?</h2>
+            <ul>
+              <li>Notes stay as Markdown files in your repo</li>
+              <li>Offline-first editing with optimistic sync</li>
+              <li>Automatic merges powered by Y.js</li>
+            </ul>
+          </div>
         </section>
         {hasRepos ? (
-          <ul className="home-recents">
-            {repos.map((entry) => (
-              <li key={entry.slug}>
-                <button className="home-repo" onClick={() => openEntry(entry)}>
-                  <span className="home-repo-label">{renderLabel(entry)}</span>
-                  <span aria-hidden className="home-repo-arrow">
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor">
-                      <path d="M6 12 10 8 6 4" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
+          <section className="home-recents-section">
+            <div className="home-recents-header">
+              <h2>Recent repositories</h2>
+              <p>Pick up where you left off.</p>
+            </div>
+            <ul className="home-recents">
+              {repos.map((entry) => (
+                <li key={entry.slug}>
+                  <button className="home-repo" onClick={() => openEntry(entry)}>
+                    <span className="home-repo-label">{renderLabel(entry)}</span>
+                    <span aria-hidden className="home-repo-arrow">
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor">
+                        <path d="M6 12 10 8 6 4" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
         ) : (
           <section className="home-empty">
             <h2>Connect your first repository</h2>
-            <p>Bring an existing GitHub notes repo into VibeNote to get started.</p>
-            <button className="btn primary" onClick={goCreateRepo}>
+            <p>Start a fresh notes repo on GitHub or link one you already use.</p>
+            <button className="btn primary" onClick={goToSetup}>
               Create notes repository
             </button>
           </section>

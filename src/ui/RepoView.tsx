@@ -40,6 +40,7 @@ type RepoViewProps = {
 };
 
 export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProps) {
+  const isNewRoute = route.kind === 'new';
   const store = useMemo(() => {
     if (route.kind === 'repo') {
       return new LocalStore(slug, { seedWelcome: false });
@@ -58,7 +59,6 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   });
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [token, setToken] = useState<string | null>(getStoredToken());
-  const [showConfig, setShowConfig] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [device, setDevice] = useState<import('../auth/github').DeviceCodeResponse | null>(null);
@@ -69,11 +69,12 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   );
   const [menuOpen, setMenuOpen] = useState(false);
   const [toast, setToast] = useState<{ text: string; href?: string } | null>(null);
-  const [repoModalMode, setRepoModalMode] = useState<'onboard' | 'manage'>('manage');
   const [showSwitcher, setShowSwitcher] = useState(false);
   const [accessState, setAccessState] = useState<'unknown' | 'reachable' | 'unreachable'>('unknown');
   const [refreshTick, setRefreshTick] = useState(0);
   const initialPullRef = useState({ done: false })[0];
+  const [newRepoName, setNewRepoName] = useState('notes');
+  const [createError, setCreateError] = useState<string | null>(null);
 
   useEffect(() => {
     setLinked(slug !== 'new' && isRepoLinked(slug));
@@ -229,10 +230,12 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   const onConfigSubmit = async (cfg: { owner: string; repo: string; branch: string }) => {
     setSyncMsg(null);
     setSyncing(true);
+    let success = false;
+    let message: string | null = null;
     try {
       let targetOwner = cfg.owner.trim();
       let targetRepo = cfg.repo.trim();
-      if (!targetOwner || !targetRepo) return;
+      if (!targetOwner || !targetRepo) return { success: false, message: null };
 
       let targetSlug = `${targetOwner}/${targetRepo}`;
       let matchesCurrent = targetSlug === slug;
@@ -250,15 +253,15 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
       let existed = await repoExists(targetOwner, targetRepo);
       if (!existed) {
         if (!currentLogin || currentLogin !== targetOwner) {
-          setSyncMsg(
-            'Repository not found. VibeNote can only auto-create repositories under your username.'
-          );
-          return;
+          message = 'Repository not found. VibeNote can only auto-create repositories under your username.';
+          setSyncMsg(message);
+          return { success: false, message };
         }
         let created = await ensureRepoExists(targetOwner, targetRepo, true);
         if (!created) {
-          setSyncMsg('Failed to create repository under your account.');
-          return;
+          message = 'Failed to create repository under your account.';
+          setSyncMsg(message);
+          return { success: false, message };
         }
       }
 
@@ -311,25 +314,43 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
       } else {
         setSyncMsg(statusMsg);
       }
+      message = statusMsg;
 
-      setShowConfig(false);
       if (!matchesCurrent) {
         navigate({ kind: 'repo', owner: targetOwner, repo: targetRepo });
       }
+      success = true;
     } catch (e) {
       console.error(e);
-      setSyncMsg('Failed to configure repository');
+      message = 'Failed to configure repository';
+      setSyncMsg(message);
     } finally {
       setSyncing(false);
     }
+    return { success, message };
   };
 
   const ensureOwnerAndOpen = async () => {
-    if (!ownerLogin && token) {
-      const u = await fetchCurrentUser();
-      setOwnerLogin(u?.login ?? null);
+    if (!token) {
+      if (route.kind === 'new') setCreateError('Connect GitHub to choose a repository.');
+      return;
     }
-    setShowSwitcher(true);
+    try {
+      if (!ownerLogin) {
+        const u = await fetchCurrentUser();
+        setOwnerLogin(u?.login ?? null);
+        if (u) setUser(u);
+        if (!u?.login) {
+          if (route.kind === 'new') setCreateError('Could not load your GitHub account.');
+          return;
+        }
+      }
+      setCreateError(null);
+      setShowSwitcher(true);
+    } catch (err) {
+      console.error(err);
+      if (route.kind === 'new') setCreateError('Failed to reach GitHub. Try again.');
+    }
   };
 
   // Keyboard shortcuts: Cmd/Ctrl+K and "g" then "r" open the repo switcher
@@ -438,6 +459,66 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     })();
   }, [token]);
 
+  useEffect(() => {
+    if (token) setCreateError(null);
+  }, [token]);
+
+  useEffect(() => {
+    if (!isNewRoute) setCreateError(null);
+  }, [isNewRoute]);
+
+  const statusTone = useMemo(() => {
+    if (!syncMsg) return 'neutral';
+    const lower = syncMsg.toLowerCase();
+    if (lower.includes('fail') || lower.includes('not ') || lower.includes('permission') || lower.includes('denied')) {
+      return 'error';
+    }
+    if (lower.includes('connected') || lower.includes('created') || lower.includes('ready') || lower.includes('loaded')) {
+      return 'success';
+    }
+    return 'neutral';
+  }, [syncMsg]);
+
+  const onCreatePersonalRepo = async () => {
+    if (!token) {
+      setCreateError('Connect GitHub before creating a repository.');
+      return;
+    }
+    if (!ownerLogin) {
+      setCreateError('Sign in with GitHub to create a repository.');
+      return;
+    }
+    const trimmed = newRepoName.trim();
+    if (!trimmed) {
+      setCreateError('Enter a repository name.');
+      return;
+    }
+    if (trimmed.includes('/')) {
+      setCreateError('Repository names cannot include /.');
+      return;
+    }
+    const normalized = trimmed.replace(/\s+/g, '-');
+    if (/[^a-zA-Z0-9_.-]/.test(normalized)) {
+      setCreateError('Use only letters, numbers, hyphen, underscore, or dot.');
+      return;
+    }
+    if (normalized !== newRepoName) setNewRepoName(normalized);
+    setCreateError(null);
+    const result = await onConfigSubmit({ owner: ownerLogin, repo: normalized, branch: 'main' });
+    if (!result.success) {
+      setCreateError(result.message ?? 'Could not create repository.');
+    }
+  };
+
+  const onLinkExistingRepo = () => {
+    if (!token) {
+      setCreateError('Connect GitHub to choose a repository.');
+      return;
+    }
+    setCreateError(null);
+    void ensureOwnerAndOpen();
+  };
+
   const onSignOut = () => {
     clearToken();
     clearRepoLink(slug);
@@ -513,9 +594,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                 <span>{route.repo}</span>
               </span>
             </button>
-          ) : (
-            <button className="btn primary repo-btn align-workspace" onClick={ensureOwnerAndOpen}>Choose repository</button>
-          )}
+          ) : null}
         </div>
         <div className="topbar-actions">
           {!token ? (
@@ -560,23 +639,93 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
           )}
         </div>
       </header>
-      <div className={`app-layout ${isRepoUnreachable ? 'single' : ''}`}>
-        {isRepoUnreachable ? (
-          <section className="workspace" style={{ width: '100%' }}>
-            <div className="workspace-body">
-              <div className="empty-state">
-                <h2>Can’t access this repository</h2>
-                <p>
-                  You don’t have permission to view <strong>{route.kind === 'repo' ? `${route.owner}/${route.repo}` : ''}</strong> with the current GitHub device token.
-                </p>
-                <p>
-                  Sign out and sign in with a token that has access, or switch to a different repository from the header.
-                </p>
-              </div>
-            </div>
+      {isNewRoute ? (
+        <main className="onboarding-main">
+          <section className="onboarding-hero">
+            <h1>Set up your notes workspace</h1>
+            <p>Connect GitHub and pick the repository where VibeNote will sync your Markdown notes.</p>
           </section>
-        ) : (
-          <>
+          <div className="onboarding-grid">
+            <article className="onboarding-card">
+              <span className="onboarding-step">Step 1</span>
+              <h2>Connect GitHub</h2>
+              <p>Authorize VibeNote with your GitHub account so we can create commits on your behalf.</p>
+              {token && (user || ownerLogin) ? (
+                <div className="onboarding-connected">
+                  <div>
+                    <div className="onboarding-connected-label">Connected as</div>
+                    <div className="onboarding-connected-name">{user?.name || user?.login || ownerLogin}</div>
+                    {user?.login ? <div className="onboarding-connected-handle">@{user.login}</div> : null}
+                  </div>
+                  <button className="btn secondary" onClick={onConnect}>
+                    Switch account
+                  </button>
+                </div>
+              ) : (
+                <button className="btn primary" onClick={onConnect}>
+                  Connect GitHub
+                </button>
+              )}
+            </article>
+            <article className="onboarding-card">
+              <span className="onboarding-step">Step 2</span>
+              <h2>Create or link a repository</h2>
+              <p>Use an existing GitHub notes repo or let VibeNote create a fresh one under your account.</p>
+              <div className="onboarding-actions">
+                <button className="btn secondary" onClick={onLinkExistingRepo} disabled={!token || syncing}>
+                  Link existing repository
+                </button>
+                <div className="onboarding-create">
+                  <label className="onboarding-label" htmlFor="new-repo-name">
+                    New repository name
+                  </label>
+                  <div className="onboarding-input-row">
+                    <span className="onboarding-owner-prefix">{ownerLogin ? `${ownerLogin}/` : 'your-account/'}</span>
+                    <input
+                      id="new-repo-name"
+                      className="onboarding-name-input"
+                      value={newRepoName}
+                      onChange={(e) => setNewRepoName(e.target.value)}
+                      placeholder="notes"
+                      disabled={!token || !ownerLogin || syncing}
+                    />
+                  </div>
+                  <button
+                    className="btn primary full-width"
+                    onClick={onCreatePersonalRepo}
+                    disabled={!token || !ownerLogin || !newRepoName.trim() || syncing}
+                  >
+                    Create notes repository
+                  </button>
+                </div>
+              </div>
+              {createError ? <p className="onboarding-error">{createError}</p> : null}
+              {syncMsg ? (
+                <p className={`onboarding-status ${statusTone === 'error' ? 'error' : statusTone === 'success' ? 'success' : ''}`}>
+                  {syncMsg}
+                </p>
+              ) : null}
+            </article>
+          </div>
+        </main>
+      ) : (
+        <div className={`app-layout ${isRepoUnreachable ? 'single' : ''}`}>
+          {isRepoUnreachable ? (
+            <section className="workspace" style={{ width: '100%' }}>
+              <div className="workspace-body">
+                <div className="empty-state">
+                  <h2>Can’t access this repository</h2>
+                  <p>
+                    You don’t have permission to view <strong>{route.kind === 'repo' ? `${route.owner}/${route.repo}` : ''}</strong> with the current GitHub device token.
+                  </p>
+                  <p>
+                    Sign out and sign in with a token that has access, or switch to a different repository from the header.
+                  </p>
+                </div>
+              </div>
+            </section>
+          ) : (
+            <>
             <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
               <div className="sidebar-header">
                 <div className="sidebar-title">
@@ -630,9 +779,10 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                 </div>
               )}
             </section>
-          </>
-        )}
-      </div>
+            </>
+          )}
+        </div>
+      )}
       {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
       {menuOpen && user && (
         <div className="account-menu">
@@ -684,8 +834,10 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
               fetchCurrentUser().then((u) => {
                 setOwnerLogin(u?.login ?? null);
                 setUser(u);
-                setRepoModalMode('onboard');
-                setShowConfig(true);
+                if (route.kind === 'new') {
+                  setCreateError(null);
+                  setShowSwitcher(true);
+                }
               });
             }
             setDevice(null);
