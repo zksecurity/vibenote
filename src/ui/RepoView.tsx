@@ -90,7 +90,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   const autoSyncTimerRef = useState<{ id: number | null }>({ id: null })[0];
   const autoSyncBusyRef = useState<{ busy: boolean }>({ busy: false })[0];
   const AUTO_SYNC_MIN_INTERVAL_MS = 60_000; // not too often
-  const AUTO_SYNC_DEBOUNCE_MS = 1_500;
+  const AUTO_SYNC_DEBOUNCE_MS = 10_000;
 
   useEffect(() => {
     setLinked(slug !== 'new' && isRepoLinked(slug));
@@ -541,7 +541,6 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   }, [route.kind, autosync, token, linked, slug]);
 
   // Attempt a final background push via Service Worker when the page is closing.
-  // Fallback to keepalive full sync if SW is not available.
   useEffect(() => {
     const shouldFlush = () => autosync && token !== null && linked && slug !== 'new';
     const onPageHide = () => {
@@ -570,9 +569,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
           return false;
         }
       };
-      // Try SW-based flush; if not available, we intentionally avoid
-      // firing a multi-request keepalive sync here since it's unlikely
-      // to complete during process teardown.
+      // Try SW-based flush
       void sendViaSW();
     };
     const onVisibility = () => {
