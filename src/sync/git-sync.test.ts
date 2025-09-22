@@ -199,22 +199,23 @@ class MockRemoteRepo {
   }
 
   private directoryListing(dir: string) {
-    const entries: Array<{ type: string; name: string; path: string; sha: string }> = [];
+    const entries: Array<{ type: string; name: string; path: string; sha?: string }> = [];
     const prefix = dir ? `${dir.replace(this.dirTrim, '')}/` : '';
+    const seenDirs = new Set<string>();
     for (const [path, file] of this.files.entries()) {
       if (prefix && !path.startsWith(prefix)) continue;
-      if (prefix) {
-        const rest = path.slice(prefix.length);
-        if (rest.includes('/')) continue;
-      } else if (path.includes('/')) {
+      const rest = prefix ? path.slice(prefix.length) : path;
+      const slash = rest.indexOf('/');
+      if (slash >= 0) {
+        const childDir = rest.slice(0, slash);
+        if (!seenDirs.has(childDir)) {
+          seenDirs.add(childDir);
+          const full = `${(prefix + childDir).replace(this.dirTrim, '')}`;
+          entries.push({ type: 'dir', name: childDir, path: full });
+        }
         continue;
       }
-      entries.push({
-        type: 'file',
-        name: path.slice(path.lastIndexOf('/') + 1),
-        path,
-        sha: file.sha,
-      });
+      entries.push({ type: 'file', name: rest, path, sha: file.sha });
     }
     return entries;
   }
@@ -342,12 +343,32 @@ describe('syncBidirectional', () => {
     expect(snapshot.get('OnlyNote.md')).toBe('# hello');
   });
 
-  test('leaves nested Markdown files untouched', async () => {
+  test('pulls nested Markdown files', async () => {
     remote.setFile('nested/Nested.md', '# nested');
     await syncBidirectional(store, 'user/repo');
-    const snapshot = remote.snapshot();
-    expect(snapshot.get('nested/Nested.md')).toBe('# nested');
-    expect(store.listNotes()).toHaveLength(0);
+    const notes = store.listNotes();
+    expect(notes).toHaveLength(1);
+    const doc = store.loadNote(notes[0]?.id ?? '');
+    expect(doc?.path).toBe('nested/Nested.md');
+    expect(doc?.dir).toBe('nested');
+    expect(doc?.text).toBe('# nested');
+  });
+
+  test('listNoteFiles includes nested markdown', async () => {
+    const mod = await import('./git-sync');
+    remote.setFile('nested/Nested.md', '# nested');
+    let cfg = mod.buildRemoteConfig('user/repo');
+    let entries = await mod.listNoteFiles(cfg);
+    const paths = entries.map((e) => e.path).sort();
+    expect(paths).toEqual(['nested/Nested.md']);
+  });
+
+  test('excludes README.md only at root', async () => {
+    remote.setFile('README.md', 'root readme');
+    remote.setFile('sub/README.md', 'sub readme');
+    await syncBidirectional(store, 'user/repo');
+    const paths = store.listNotes().map((n) => n.path).sort();
+    expect(paths).toEqual(['sub/README.md']);
   });
 });
 

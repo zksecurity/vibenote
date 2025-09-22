@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect } from 'react';
-import { NoteList } from './NoteList';
+// Replaces flat NoteList with a collapsible tree
+import { NoteTree } from './NoteTree';
 import { Editor } from './Editor';
 import {
   LocalStore,
@@ -54,6 +55,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     return new LocalStore(slug);
   }, [slug, route.kind]);
   const [notes, setNotes] = useState<NoteMeta[]>(() => store.listNotes());
+  const [folders, setFolders] = useState<string[]>(() => store.listFolders());
   const [activeId, setActiveId] = useState<string | null>(() => {
     let initialNotes = store.listNotes();
     return initialNotes[0]?.id ?? null;
@@ -64,6 +66,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     return firstId ? store.loadNote(firstId) : null;
   });
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [selection, setSelection] = useState<{ kind: 'folder'; dir: string } | { kind: 'note'; id: string } | null>(null);
   const [token, setToken] = useState<string | null>(getStoredToken());
   const [showConfig, setShowConfig] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -166,7 +169,9 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
 
   useEffect(() => {
     let nextNotes = store.listNotes();
+    let nextFolders = store.listFolders();
     setNotes(nextNotes);
+    setFolders(nextFolders);
     setActiveId((prev) => {
       if (prev && nextNotes.some((n) => n.id === prev)) return prev;
       return nextNotes[0]?.id ?? null;
@@ -188,7 +193,9 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
         timer = null;
         // Re-read index and doc to reflect changes
         const nextNotes = store.listNotes();
+        const nextFolders = store.listFolders();
         setNotes(nextNotes);
+        setFolders(nextFolders);
         setActiveId((prev) => {
           if (prev && nextNotes.some((n) => n.id === prev)) return prev;
           return nextNotes[0]?.id ?? null;
@@ -249,10 +256,65 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   };
 
   const onCreate = () => {
-    const id = store.createNote();
+    let targetDir = '';
+    if (selection?.kind === 'folder') targetDir = selection.dir;
+    if (selection?.kind === 'note') {
+      let n = notes.find((x) => x.id === selection.id);
+      if (n) targetDir = (n.dir as string) || '';
+    }
+    const id = store.createNote(undefined, '', targetDir);
     setNotes(store.listNotes());
+    setFolders(store.listFolders());
     setActiveId(id);
     setSidebarOpen(false);
+    scheduleAutoSync();
+  };
+
+  const onCreateFolder = (parentDir: string) => {
+    let name = window.prompt('New folder name');
+    if (!name) return;
+    try {
+      store.createFolder(parentDir, name);
+      setFolders(store.listFolders());
+    } catch (e) {
+      console.error(e);
+      setSyncMsg('Invalid folder name.');
+    }
+  };
+
+  const onRenameFolder = (dir: string, newName: string) => {
+    try {
+      store.renameFolder(dir, newName);
+      setNotes(store.listNotes());
+      setFolders(store.listFolders());
+      scheduleAutoSync();
+    } catch (e) {
+      console.error(e);
+      setSyncMsg('Invalid folder name.');
+    }
+  };
+
+  const onMoveFolder = (fromDir: string, toDir?: string) => {
+    let target = toDir ?? window.prompt('Move folder to (parent path, empty for root)') ?? undefined;
+    if (target === undefined) return;
+    try {
+      store.moveFolder(fromDir, target);
+      setNotes(store.listNotes());
+      setFolders(store.listFolders());
+      scheduleAutoSync();
+    } catch (e) {
+      console.error(e);
+      setSyncMsg('Unable to move folder.');
+    }
+  };
+
+  const onDeleteFolder = (dir: string) => {
+    if (!window.confirm('Delete folder and all contained notes?')) return;
+    store.deleteFolder(dir);
+    const list = store.listNotes();
+    setNotes(list);
+    setFolders(store.listFolders());
+    if (activeId && !list.some((n) => n.id === activeId)) setActiveId(list[0]?.id ?? null);
     scheduleAutoSync();
   };
 
@@ -260,6 +322,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     try {
       store.renameNote(id, title);
       setNotes(store.listNotes());
+      setFolders(store.listFolders());
       scheduleAutoSync();
     } catch (e) {
       console.error(e);
@@ -271,6 +334,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     store.deleteNote(id);
     const list = store.listNotes();
     setNotes(list);
+    setFolders(store.listFolders());
     if (activeId === id) setActiveId(list[0]?.id ?? null);
     scheduleAutoSync();
   };
@@ -766,9 +830,25 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                     <CloseIcon />
                   </button>
                 </div>
-                <button className="btn primary full-width" onClick={onCreate}>
-                  New note
-                </button>
+                <div className="sidebar-actions">
+                  <button className="btn primary full-width" onClick={onCreate}>
+                    New note
+                  </button>
+                  <button
+                    className="btn secondary full-width"
+                    onClick={() => {
+                      let parentDir = '';
+                      if (selection?.kind === 'folder') parentDir = selection.dir;
+                      if (selection?.kind === 'note') {
+                        let n = notes.find((x) => x.id === selection.id);
+                        if (n) parentDir = (n.dir as string) || '';
+                      }
+                      onCreateFolder(parentDir);
+                    }}
+                  >
+                    New folder
+                  </button>
+                </div>
                 {route.kind === 'repo' && linked ? (
                   <div className="repo-autosync-toggle">
                     <Toggle
@@ -784,15 +864,28 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                   </div>
                 ) : null}
               </div>
-              <NoteList
+              <NoteTree
                 notes={notes}
+                folders={folders}
                 activeId={activeId}
-                onSelect={(id) => {
+                onSelectionChange={(sel) => setSelection(sel)}
+                onSelectNote={(id) => {
                   setActiveId(id);
                   setSidebarOpen(false);
                 }}
-                onRename={onRename}
-                onDelete={onDelete}
+                onRenameNote={onRename}
+                onDeleteNote={onDelete}
+                onRenameFolder={onRenameFolder}
+                onMoveFolder={(from, to) => onMoveFolder(from, to)}
+                onDeleteFolder={onDeleteFolder}
+                onCreateNoteIn={(dir) => {
+                  let id = store.createNote(undefined, '', dir);
+                  setNotes(store.listNotes());
+                  setFolders(store.listFolders());
+                  setActiveId(id);
+                  scheduleAutoSync();
+                }}
+                onCreateFolder={(dir) => onCreateFolder(dir)}
               />
             </aside>
             <section className="workspace">
