@@ -7,6 +7,10 @@ import {
   clearRepoLink,
   isRepoLinked,
   markRepoLinked,
+  isAutosyncEnabled,
+  setAutosyncEnabled,
+  getLastAutoSyncAt,
+  recordAutoSyncRun,
   type NoteMeta,
   type NoteDoc,
 } from '../storage/local';
@@ -24,6 +28,7 @@ import {
 import { ensureIntroReadme } from '../sync/readme';
 import { RepoSwitcher } from './RepoSwitcher';
 import { RepoConfigModal } from './RepoConfigModal';
+import { Toggle } from './Toggle';
 import { DeviceCodeModal } from './DeviceCodeModal';
 import type { Route } from './routing';
 
@@ -78,9 +83,17 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   );
   const [refreshTick, setRefreshTick] = useState(0);
   const initialPullRef = useState({ done: false })[0];
+  const [autosync, setAutosync] = useState<boolean>(() =>
+    slug !== 'new' ? isAutosyncEnabled(slug) : false
+  );
+  const autoSyncTimerRef = useState<{ id: number | null }>({ id: null })[0];
+  const autoSyncBusyRef = useState<{ busy: boolean }>({ busy: false })[0];
+  const AUTO_SYNC_MIN_INTERVAL_MS = 60_000; // not too often
+  const AUTO_SYNC_DEBOUNCE_MS = 1_500;
 
   useEffect(() => {
     setLinked(slug !== 'new' && isRepoLinked(slug));
+    setAutosync(slug !== 'new' && isAutosyncEnabled(slug));
   }, [slug]);
 
   useEffect(() => {
@@ -196,17 +209,57 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     };
   }, [slug, store]);
 
+  const scheduleAutoSync = (debounceMs: number = AUTO_SYNC_DEBOUNCE_MS) => {
+    if (!autosync) return;
+    if (route.kind !== 'repo') return;
+    if (!token || !linked || slug === 'new') return;
+    // Respect min interval across tabs
+    let last = getLastAutoSyncAt(slug) ?? 0;
+    let now = Date.now();
+    let dueIn = Math.max(0, AUTO_SYNC_MIN_INTERVAL_MS - (now - last));
+    let delay = Math.max(debounceMs, dueIn);
+    if (autoSyncTimerRef.id !== null) window.clearTimeout(autoSyncTimerRef.id);
+    autoSyncTimerRef.id = window.setTimeout(() => {
+      autoSyncTimerRef.id = null;
+      void runAutoSync();
+    }, delay);
+  };
+
+  const runAutoSync = async () => {
+    if (autoSyncBusyRef.busy) return;
+    autoSyncBusyRef.busy = true;
+    setSyncing(true);
+    try {
+      if (!token || !linked || slug === 'new') return;
+      let summary = await syncBidirectional(store, slug);
+      recordAutoSyncRun(slug);
+      setNotes(store.listNotes());
+      setDoc((prev) => (prev ? store.loadNote(prev.id) : null));
+      // Keep status banner quiet for background runs
+      // Optionally, we could set a subtle message only when changes were synced.
+      void summary;
+    } catch (err) {
+      // Quietly ignore background errors to avoid noise; console for developers
+      console.error(err);
+    } finally {
+      autoSyncBusyRef.busy = false;
+      setSyncing(false);
+    }
+  };
+
   const onCreate = () => {
     const id = store.createNote();
     setNotes(store.listNotes());
     setActiveId(id);
     setSidebarOpen(false);
+    scheduleAutoSync();
   };
 
   const onRename = (id: string, title: string) => {
     try {
       store.renameNote(id, title);
       setNotes(store.listNotes());
+      scheduleAutoSync();
     } catch (e) {
       console.error(e);
       setSyncMsg('Invalid title. Avoid / and control characters.');
@@ -218,6 +271,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     const list = store.listNotes();
     setNotes(list);
     if (activeId === id) setActiveId(list[0]?.id ?? null);
+    scheduleAutoSync();
   };
 
   const onConnect = async () => {
@@ -230,7 +284,12 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     }
   };
 
-  const onConfigSubmit = async (cfg: { owner: string; repo: string; branch: string }) => {
+  const onConfigSubmit = async (cfg: {
+    owner: string;
+    repo: string;
+    branch: string;
+    autosync: boolean;
+  }) => {
     setSyncMsg(null);
     setRepoModalError(null);
     setSyncing(true);
@@ -274,9 +333,11 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
       }
 
       markRepoLinked(targetSlug);
+      setAutosyncEnabled(targetSlug, cfg.autosync === true);
       onRecordRecent({ slug: targetSlug, owner: targetOwner, repo: targetRepo, connected: true });
       if (matchesCurrent) {
         setLinked(true);
+        setAutosync(cfg.autosync === true);
       }
 
       if (!existed) {
@@ -319,6 +380,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
         setNotes(syncedNotes);
         setActiveId(syncedNotes[0]?.id ?? null);
         setSyncMsg(statusMsg);
+        if (cfg.autosync === true) scheduleAutoSync(0); // run on page load/connect
       } else {
         setSyncMsg(statusMsg);
       }
@@ -459,6 +521,24 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     })();
   }, [token]);
 
+  // Kick off an autosync on load/connect when enabled
+  useEffect(() => {
+    if (route.kind !== 'repo') return;
+    if (!autosync) return;
+    if (!token || !linked || slug === 'new') return;
+    scheduleAutoSync(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.kind, autosync, token, linked, slug]);
+
+  // Periodic background autosync to pick up remote-only changes
+  useEffect(() => {
+    if (route.kind !== 'repo') return;
+    if (!autosync || !token || !linked || slug === 'new') return;
+    let id = window.setInterval(() => scheduleAutoSync(0), 180_000); // every 3 minutes
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.kind, autosync, token, linked, slug]);
+
   const onSignOut = () => {
     clearToken();
     clearRepoLink(slug);
@@ -482,6 +562,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
         return;
       }
       const summary = await syncBidirectional(store, slug);
+      recordAutoSyncRun(slug);
       const parts: string[] = [];
       if (summary.pulled) parts.push(`pulled ${summary.pulled}`);
       if (summary.merged) parts.push(`merged ${summary.merged}`);
@@ -644,6 +725,20 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                 <button className="btn primary full-width" onClick={onCreate}>
                   New note
                 </button>
+                {route.kind === 'repo' && linked ? (
+                  <div className="repo-autosync-toggle">
+                    <Toggle
+                      checked={autosync}
+                      onChange={(enabled) => {
+                        setAutosync(enabled);
+                        setAutosyncEnabled(slug, enabled);
+                        if (enabled) scheduleAutoSync(0);
+                      }}
+                      label="Autosync"
+                      description="Runs background sync after edits and periodically."
+                    />
+                  </div>
+                ) : null}
               </div>
               <NoteList
                 notes={notes}
@@ -660,7 +755,13 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
               <div className="workspace-body">
                 {doc ? (
                   <div className="workspace-panels">
-                    <Editor doc={doc} onChange={(text) => store.saveNote(doc.id, text)} />
+                    <Editor
+                      doc={doc}
+                      onChange={(text) => {
+                        store.saveNote(doc.id, text);
+                        scheduleAutoSync();
+                      }}
+                    />
                   </div>
                 ) : (
                   <div className="empty-state">
