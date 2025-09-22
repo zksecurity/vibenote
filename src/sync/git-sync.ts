@@ -2,16 +2,15 @@
 // Uses a stored OAuth token to read and write note files in a repository.
 
 import { getStoredToken } from '../auth/github';
-import type { NoteDoc, NoteMeta } from '../storage/local';
 import type { LocalStore } from '../storage/local';
 import {
   listTombstones,
-  type Tombstone,
   removeTombstones,
   findByPath,
   markSynced,
   updateNoteText,
   moveNotePath,
+  debugLog,
 } from '../storage/local';
 import { mergeMarkdown } from '../merge/merge';
 
@@ -452,20 +451,4 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
 function basename(p: string) {
   const i = p.lastIndexOf('/');
   return i >= 0 ? p.slice(i + 1) : p;
-}
-
-// Reuse local.ts debug flag if present
-const DEBUG_ENABLED: boolean = (() => {
-  try {
-    return localStorage.getItem('vibenote:debug') === '1';
-  } catch {
-    return false;
-  }
-})();
-function debugLog(slug: string, op: string, data: object) {
-  if (!DEBUG_ENABLED) return;
-  // eslint-disable-next-line no-console
-  console.debug('[VNDBG]', { slug, op, ...data });
-  // eslint-disable-next-line no-console
-  console.trace('[VNDBG trace]', op);
 }

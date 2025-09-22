@@ -11,6 +11,8 @@ export type NoteDoc = NoteMeta & {
   lastSyncedHash?: string;
 };
 
+export { debugLog };
+
 // --- Debug logging ---
 const DEBUG_ENABLED = true;
 
