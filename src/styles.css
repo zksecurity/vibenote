@@ -418,6 +418,38 @@ textarea {
   box-shadow: none;
 }
 
+.btn.repo-btn-empty {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--muted);
+  box-shadow: none;
+}
+
+.btn.repo-btn-empty:hover {
+  background: var(--surface-subtle);
+  border-color: var(--accent-border);
+  color: var(--text);
+  box-shadow: none;
+}
+
+.btn.repo-btn-empty:active {
+  background: var(--surface-subtle);
+  border-color: var(--accent-border);
+  box-shadow: none;
+}
+
+.btn.repo-btn-empty:disabled {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--muted);
+  opacity: 0.6;
+  box-shadow: none;
+}
+
+.repo-btn-empty .repo-label {
+  color: inherit;
+}
+
 .btn.subtle {
   background: rgba(15, 23, 42, 0.05);
   border-color: transparent;
@@ -968,6 +1000,71 @@ textarea:focus-visible {
   gap: 16px;
   width: min(520px, calc(100vw - 40px));
   box-shadow: var(--shadow-soft);
+}
+
+.repo-config-modal {
+  gap: 20px;
+}
+
+.repo-config-header h3 {
+  margin: 0;
+}
+
+.repo-config-header p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.repo-config-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.repo-config-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.repo-config-field span {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.repo-config-error {
+  color: var(--accent);
+  font-size: 0.9rem;
+}
+
+.repo-config-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.repo-config-actions {
+  display: flex;
+  gap: 8px;
+}
+
+@media (max-width: 520px) {
+  .repo-config-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .repo-config-actions {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  .repo-config-actions .btn {
+    width: 100%;
+  }
 }
 
 @media (max-width: 1200px) {

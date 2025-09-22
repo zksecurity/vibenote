@@ -23,6 +23,7 @@ import {
 } from '../sync/git-sync';
 import { ensureIntroReadme } from '../sync/readme';
 import { RepoSwitcher } from './RepoSwitcher';
+import { RepoConfigModal } from './RepoConfigModal';
 import { DeviceCodeModal } from './DeviceCodeModal';
 import type { Route } from './routing';
 
@@ -70,6 +71,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   const [menuOpen, setMenuOpen] = useState(false);
   const [toast, setToast] = useState<{ text: string; href?: string } | null>(null);
   const [repoModalMode, setRepoModalMode] = useState<'onboard' | 'manage'>('manage');
+  const [repoModalError, setRepoModalError] = useState<string | null>(null);
   const [showSwitcher, setShowSwitcher] = useState(false);
   const [accessState, setAccessState] = useState<'unknown' | 'reachable' | 'unreachable'>(
     'unknown'
@@ -230,11 +232,15 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
 
   const onConfigSubmit = async (cfg: { owner: string; repo: string; branch: string }) => {
     setSyncMsg(null);
+    setRepoModalError(null);
     setSyncing(true);
     try {
       let targetOwner = cfg.owner.trim();
       let targetRepo = cfg.repo.trim();
-      if (!targetOwner || !targetRepo) return;
+      if (!targetOwner || !targetRepo) {
+        setRepoModalError('Enter an owner and repository name.');
+        return;
+      }
 
       let targetSlug = `${targetOwner}/${targetRepo}`;
       let matchesCurrent = targetSlug === slug;
@@ -252,14 +258,17 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
       let existed = await repoExists(targetOwner, targetRepo);
       if (!existed) {
         if (!currentLogin || currentLogin !== targetOwner) {
-          setSyncMsg(
-            'Repository not found. VibeNote can only auto-create repositories under your username.'
-          );
+          const msg =
+            'Repository not found. VibeNote can only auto-create repositories under your username.';
+          setRepoModalError(msg);
+          setSyncMsg(msg);
           return;
         }
         let created = await ensureRepoExists(targetOwner, targetRepo, true);
         if (!created) {
-          setSyncMsg('Failed to create repository under your account.');
+          const msg = 'Failed to create repository under your account.';
+          setRepoModalError(msg);
+          setSyncMsg(msg);
           return;
         }
       }
@@ -314,13 +323,16 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
         setSyncMsg(statusMsg);
       }
 
+      setRepoModalError(null);
       setShowConfig(false);
       if (!matchesCurrent) {
         navigate({ kind: 'repo', owner: targetOwner, repo: targetRepo });
       }
     } catch (e) {
       console.error(e);
-      setSyncMsg('Failed to configure repository');
+      const msg = 'Failed to configure repository';
+      setRepoModalError(msg);
+      setSyncMsg(msg);
     } finally {
       setSyncing(false);
     }
@@ -534,11 +546,24 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                 <ExternalLinkIcon />
               </a>
             </span>
-          ) : (
-            <button className="btn primary repo-btn align-workspace" onClick={ensureOwnerAndOpen}>
-              Choose repository
+          ) : token ? (
+            <button
+              type="button"
+              className="btn ghost repo-btn align-workspace repo-btn-empty"
+              onClick={() => {
+                setRepoModalMode('manage');
+                setRepoModalError(null);
+                setShowConfig(true);
+              }}
+              disabled={syncing}
+              title="Choose repository"
+            >
+              <GitHubIcon />
+              <span className="repo-label">
+                <span>Choose repository</span>
+              </span>
             </button>
-          )}
+          ) : null}
         </div>
         <div className="topbar-actions">
           {!token ? (
@@ -700,6 +725,24 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
           onClose={() => setShowSwitcher(false)}
         />
       )}
+      {showConfig && (
+        <RepoConfigModal
+          mode={repoModalMode}
+          ownerLogin={ownerLogin}
+          syncing={syncing}
+          error={repoModalError}
+          onSubmit={onConfigSubmit}
+          onClose={() => {
+            setShowConfig(false);
+            setRepoModalError(null);
+          }}
+          onLinkExisting={() => {
+            setShowConfig(false);
+            setRepoModalError(null);
+            void ensureOwnerAndOpen();
+          }}
+        />
+      )}
       {device && (
         <DeviceCodeModal
           device={device}
@@ -707,12 +750,17 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
             if (t) {
               localStorage.setItem('vibenote:gh-token', t);
               setToken(t);
-              fetchCurrentUser().then((u) => {
-                setOwnerLogin(u?.login ?? null);
-                setUser(u);
-                setRepoModalMode('onboard');
-                setShowConfig(true);
-              });
+              fetchCurrentUser()
+                .then((u) => {
+                  setOwnerLogin(u?.login ?? null);
+                  setUser(u);
+                })
+                .catch(() => undefined)
+                .finally(() => {
+                  setRepoModalError(null);
+                  setRepoModalMode('onboard');
+                  setShowConfig(true);
+                });
             }
             setDevice(null);
           }}

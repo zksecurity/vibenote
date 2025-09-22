@@ -43,9 +43,11 @@ export function HomeView({ recents, navigate }: HomeViewProps) {
             <h1>Recent repositories</h1>
             <p>Jump back into your notes or connect a new GitHub repo.</p>
           </div>
-          <button className="btn primary" onClick={goCreateRepo}>
-            Create notes repository
-          </button>
+          {hasRepos && (
+            <button className="btn primary" onClick={goCreateRepo}>
+              Create notes repository
+            </button>
+          )}
         </section>
         {hasRepos ? (
           <ul className="home-recents">
