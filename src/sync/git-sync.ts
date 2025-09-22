@@ -393,10 +393,11 @@ const DEBUG_ENABLED: boolean = (() => {
     return false;
   }
 })();
-function debugLog(slug: string, op: string, data: unknown) {
+function debugLog(slug: string, op: string, data?: Record<string, unknown>) {
   if (!DEBUG_ENABLED) return;
   // eslint-disable-next-line no-console
-  console.debug('[VNDBG]', { slug, op, ...data });
+  const payload = data ? { slug, op, ...data } : { slug, op };
+  console.debug('[VNDBG]', payload);
   // eslint-disable-next-line no-console
   console.trace('[VNDBG trace]', op);
 }
