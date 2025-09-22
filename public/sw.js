@@ -47,9 +47,84 @@ async function flush(payload) {
   }
 }
 
+// Lightweight IndexedDB queue for retries
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('vibenote', 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains('flushQueue')) {
+        db.createObjectStore('flushQueue', { keyPath: 'id', autoIncrement: true });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function queuePayload(payload) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('flushQueue', 'readwrite');
+    tx.objectStore('flushQueue').add({ createdAt: Date.now(), payload });
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function readAllQueued() {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('flushQueue', 'readonly');
+    const req = tx.objectStore('flushQueue').getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function clearQueued(ids) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('flushQueue', 'readwrite');
+    const store = tx.objectStore('flushQueue');
+    ids.forEach((id) => store.delete(id));
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function processQueue() {
+  const items = await readAllQueued();
+  if (!Array.isArray(items) || items.length === 0) return;
+  for (const item of items) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await flush(item.payload);
+      await clearQueued([item.id]);
+    } catch {
+      // keep for next retry
+    }
+  }
+}
+
 self.addEventListener('message', (event) => {
   const data = event.data;
   if (!data || data.type !== 'vibenote-flush') return;
-  event.waitUntil(flush(data.payload));
+  event.waitUntil(
+    (async () => {
+      await queuePayload(data.payload);
+      try {
+        if ('sync' in self.registration) {
+          await self.registration.sync.register('vibenote-flush');
+        }
+      } catch {}
+      await flush(data.payload);
+    })()
+  );
 });
 
+self.addEventListener('sync', (event) => {
+  if (event.tag === 'vibenote-flush') {
+    event.waitUntil(processQueue());
+  }
+});

@@ -34,20 +34,16 @@ export function buildRemoteConfig(slug: string): RemoteConfig {
 }
 
 // Allow toggling fetch keepalive for final-sync attempts
-let USE_KEEPALIVE = false;
-// Internal toggle; use the sync options instead of calling this directly.
-function setGitHubFetchKeepalive(flag: boolean) {
-  USE_KEEPALIVE = flag;
-}
+type RequestOpts = { keepalive?: boolean };
 
-function ghFetch(url: string, init: RequestInit = {}): Promise<Response> {
-  const keepaliveInit = USE_KEEPALIVE ? { keepalive: true as boolean } : {};
-  return fetch(url, { ...init, ...keepaliveInit });
-}
-
-export async function repoExists(owner: string, repo: string): Promise<boolean> {
-  const res = await ghFetch(`https://api.github.com/repos/${owner}/${repo}`, {
+export async function repoExists(
+  owner: string,
+  repo: string,
+  opts: RequestOpts = {}
+): Promise<boolean> {
+  const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
     headers: authHeaders(),
+    keepalive: opts.keepalive === true,
   });
   return res.ok;
 }
@@ -64,11 +60,15 @@ function encodeApiPath(path: string): string {
   return path.split('/').map(encodeURIComponent).join('/');
 }
 
-export async function pullNote(config: RemoteConfig, path: string): Promise<RemoteFile | null> {
+export async function pullNote(
+  config: RemoteConfig,
+  path: string,
+  opts: RequestOpts = {}
+): Promise<RemoteFile | null> {
   const url = `https://api.github.com/repos/${config.owner}/${config.repo}/contents/${encodeApiPath(
     path
   )}?ref=${encodeURIComponent(config.branch)}`;
-  const res = await ghFetch(url, { headers: authHeaders() });
+  const res = await fetch(url, { headers: authHeaders(), keepalive: opts.keepalive === true });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error('Failed to fetch note');
   const data = await res.json();
@@ -85,11 +85,15 @@ export type SyncSummary = {
 };
 
 // Fetch raw blob content by SHA
-export async function fetchBlob(config: RemoteConfig, sha: string): Promise<string | null> {
+export async function fetchBlob(
+  config: RemoteConfig,
+  sha: string,
+  opts: RequestOpts = {}
+): Promise<string | null> {
   const url = `https://api.github.com/repos/${config.owner}/${
     config.repo
   }/git/blobs/${encodeURIComponent(sha)}`;
-  const res = await ghFetch(url, { headers: authHeaders() });
+  const res = await fetch(url, { headers: authHeaders(), keepalive: opts.keepalive === true });
   if (!res.ok) return null;
   const data = await res.json();
   const content = fromBase64((data.content as string).replace(/\n/g, ''));
@@ -100,12 +104,13 @@ export async function fetchBlob(config: RemoteConfig, sha: string): Promise<stri
 export async function putFile(
   config: RemoteConfig,
   file: { path: string; text: string; baseSha?: string },
-  message: string
+  message: string,
+  opts: RequestOpts = {}
 ): Promise<string> {
   const url = `https://api.github.com/repos/${config.owner}/${config.repo}/contents/${encodeApiPath(
     file.path
   )}`;
-  const res = await ghFetch(url, {
+  const res = await fetch(url, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({
@@ -114,6 +119,7 @@ export async function putFile(
       sha: file.baseSha,
       branch: config.branch,
     }),
+    keepalive: opts.keepalive === true,
   });
   if (!res.ok) throw new Error('Commit failed');
   const data = await res.json();
@@ -125,7 +131,8 @@ export async function putFile(
 export async function commitBatch(
   config: RemoteConfig,
   files: { path: string; text: string; baseSha?: string }[],
-  message: string
+  message: string,
+  opts: RequestOpts = {}
 ): Promise<string | null> {
   if (files.length === 0) return null;
   let commitSha: string | null = null;
@@ -133,7 +140,7 @@ export async function commitBatch(
     const url = `https://api.github.com/repos/${config.owner}/${
       config.repo
     }/contents/${encodeApiPath(f.path)}`;
-    const res = await ghFetch(url, {
+    const res = await fetch(url, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({
@@ -142,6 +149,7 @@ export async function commitBatch(
         sha: f.baseSha,
         branch: config.branch,
       }),
+      keepalive: opts.keepalive === true,
     });
     if (!res.ok) throw new Error('Commit failed');
     const data = await res.json();
@@ -152,14 +160,15 @@ export async function commitBatch(
 
 // List Markdown files under the configured notesDir at HEAD
 export async function listNoteFiles(
-  config: RemoteConfig
+  config: RemoteConfig,
+  opts: RequestOpts = {}
 ): Promise<{ path: string; sha: string }[]> {
   const dir = (config.notesDir || '').replace(/(^\/+|\/+?$)/g, '');
   const base = `https://api.github.com/repos/${config.owner}/${config.repo}/contents`;
   const url = `${base}${dir ? '/' + encodeApiPath(dir) : ''}?ref=${encodeURIComponent(
     config.branch
   )}`;
-  const res = await ghFetch(url, { headers: authHeaders() });
+  const res = await fetch(url, { headers: authHeaders(), keepalive: opts.keepalive === true });
   if (res.status === 404) return [];
   if (!res.ok) throw new Error('Failed to list notes directory');
   const data = await res.json();
@@ -187,7 +196,8 @@ function toBase64(input: string): string {
 export async function deleteFiles(
   config: RemoteConfig,
   files: { path: string; sha: string }[],
-  message: string
+  message: string,
+  opts: RequestOpts = {}
 ): Promise<string | null> {
   if (files.length === 0) return null;
   let commitSha: string | null = null;
@@ -195,7 +205,7 @@ export async function deleteFiles(
     const url = `https://api.github.com/repos/${config.owner}/${
       config.repo
     }/contents/${encodeApiPath(f.path)}`;
-    const res = await ghFetch(url, {
+    const res = await fetch(url, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({
@@ -203,6 +213,7 @@ export async function deleteFiles(
         sha: f.sha,
         branch: config.branch,
       }),
+      keepalive: opts.keepalive === true,
     });
     if (!res.ok) throw new Error('Delete failed');
     const data = await res.json();
@@ -223,16 +234,18 @@ function fromBase64(b64: string): string {
 export async function ensureRepoExists(
   owner: string,
   repo: string,
-  isPrivate = true
+  isPrivate = true,
+  opts: RequestOpts = {}
 ): Promise<boolean> {
   const token = getStoredToken();
   if (!token) return false;
-  const exists = await repoExists(owner, repo);
+  const exists = await repoExists(owner, repo, opts);
   if (exists) return true;
-  const res = await ghFetch(`https://api.github.com/user/repos`, {
+  const res = await fetch(`https://api.github.com/user/repos`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ name: repo, private: isPrivate, auto_init: true }),
+    keepalive: opts.keepalive === true,
   });
   return res.ok;
 }
@@ -248,8 +261,6 @@ export async function syncBidirectional(
   slug: string,
   opts: { keepalive?: boolean } = {}
 ): Promise<SyncSummary> {
-  const prevKeepalive = USE_KEEPALIVE;
-  if (opts.keepalive === true) setGitHubFetchKeepalive(true);
   let pulled = 0;
   let pushed = 0;
   let deletedRemote = 0;
@@ -258,7 +269,7 @@ export async function syncBidirectional(
 
   const config = buildRemoteConfig(slug);
   const storeSlug = store.getSlug();
-  const entries = await listNoteFiles(config);
+  const entries = await listNoteFiles(config, { keepalive: opts.keepalive });
   const remoteMap = new Map<string, string>(entries.map((e) => [e.path, e.sha] as const));
   const pending = listTombstones(storeSlug);
   const renameSources = new Set(pending.filter((t) => t.type === 'rename').map((t) => t.from));
@@ -270,7 +281,7 @@ export async function syncBidirectional(
     if (!local) {
       if (renameSources.has(e.path) || deleteSources.has(e.path)) continue;
       // New remote file → pull
-      const rf = await pullNote(config, e.path);
+      const rf = await pullNote(config, e.path, { keepalive: opts.keepalive });
       if (!rf) continue;
       // Create local note using the store so index stays consistent
       const title = e.path.slice(e.path.lastIndexOf('/') + 1).replace(/\.md$/i, '');
@@ -300,7 +311,9 @@ export async function syncBidirectional(
       // Remote changed; fetch remote content
       const rf = await pullNote(config, e.path);
       if (!rf) continue;
-      const base = lastRemoteSha ? await fetchBlob(config, lastRemoteSha) : '';
+      const base = lastRemoteSha
+        ? await fetchBlob(config, lastRemoteSha, { keepalive: opts.keepalive })
+        : '';
       const localText = doc.text || '';
       if (doc.lastSyncedHash !== hashText(localText)) {
         // both changed → merge
@@ -311,7 +324,8 @@ export async function syncBidirectional(
         const newSha = await putFile(
           config,
           { path: doc.path, text: mergedText, baseSha: rf.sha },
-          'vibenote: merge notes'
+          'vibenote: merge notes',
+          { keepalive: opts.keepalive }
         );
         markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: hashText(mergedText) });
         merged++;
@@ -341,7 +355,8 @@ export async function syncBidirectional(
         const newSha = await putFile(
           config,
           { path: doc.path, text: doc.text },
-          'vibenote: restore note'
+          'vibenote: restore note',
+          { keepalive: opts.keepalive }
         );
         markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: hashText(doc.text || '') });
         pushed++;
@@ -371,7 +386,9 @@ export async function syncBidirectional(
       }
       if (!t.lastRemoteSha || t.lastRemoteSha === sha) {
         // safe to delete remotely
-        await deleteFiles(config, [{ path: t.path, sha }], 'vibenote: delete removed notes');
+        await deleteFiles(config, [{ path: t.path, sha }], 'vibenote: delete removed notes', {
+          keepalive: opts.keepalive,
+        });
         deletedRemote++;
         removeTombstones(
           storeSlug,
@@ -400,7 +417,7 @@ export async function syncBidirectional(
       }
       let shaToDelete = remoteSha;
       if (!shaToDelete) {
-        const remoteFile = await pullNote(config, t.from);
+        const remoteFile = await pullNote(config, t.from, { keepalive: opts.keepalive });
         if (!remoteFile) {
           removeTombstones(
             storeSlug,
@@ -419,7 +436,8 @@ export async function syncBidirectional(
         await deleteFiles(
           config,
           [{ path: t.from, sha: shaToDelete }],
-          'vibenote: delete old path after rename'
+          'vibenote: delete old path after rename',
+          { keepalive: opts.keepalive }
         );
         deletedRemote++;
         remoteMap.delete(t.from);
@@ -433,7 +451,7 @@ export async function syncBidirectional(
       }
 
       const existing = findByPath(storeSlug, t.from);
-      const remoteFile = await pullNote(config, t.from);
+      const remoteFile = await pullNote(config, t.from, { keepalive: opts.keepalive });
       if (remoteFile) {
         if (existing) {
           if ((existing.doc.text || '') !== remoteFile.text) {
@@ -464,7 +482,6 @@ export async function syncBidirectional(
   }
 
   const summary = { pulled, pushed, deletedRemote, deletedLocal, merged };
-  if (opts.keepalive === true) setGitHubFetchKeepalive(prevKeepalive);
   return summary;
 }
 
