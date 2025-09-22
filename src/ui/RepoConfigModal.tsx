@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { repoExists } from '../sync/git-sync';
 
 type RepoConfigModalProps = {
   mode: 'onboard' | 'manage';
@@ -16,6 +17,8 @@ function RepoConfigModal({ mode, ownerLogin, syncing, error, onSubmit, onClose, 
   const [owner, setOwner] = useState(() => ownerLogin ?? '');
   const [repo, setRepo] = useState('notes');
   const repoInputRef = useRef<HTMLInputElement | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [exists, setExists] = useState<boolean | null>(null);
 
   useEffect(() => {
     if (ownerLogin && owner.trim() === '') {
@@ -27,11 +30,38 @@ function RepoConfigModal({ mode, ownerLogin, syncing, error, onSubmit, onClose, 
     repoInputRef.current?.focus();
   }, []);
 
-  const heading = mode === 'onboard' ? 'Create your notes repository' : 'Create or link a repository';
+  // Debounced repo existence check when both fields are filled
+  useEffect(() => {
+    let cancel = false;
+    const o = owner.trim();
+    const r = repo.trim();
+    if (o === '' || r === '') {
+      setExists(null);
+      setChecking(false);
+      return;
+    }
+    setChecking(true);
+    const t = setTimeout(async () => {
+      try {
+        const ok = await repoExists(o, r);
+        if (!cancel) setExists(ok);
+      } catch {
+        if (!cancel) setExists(null);
+      } finally {
+        if (!cancel) setChecking(false);
+      }
+    }, 300);
+    return () => {
+      cancel = true;
+      clearTimeout(t);
+    };
+  }, [owner, repo]);
+
+  const heading = mode === 'onboard' ? 'Create your notes repository' : 'Create or switch to a repository';
   const description =
     mode === 'onboard'
       ? 'VibeNote stores your notes in a private GitHub repository. Create one now to start syncing.'
-      : 'Set up a GitHub repository for your notes. You can create a new repo or link to an existing one.';
+      : 'Set up a GitHub repository for your notes. You can create a new repo or switch to an existing one.';
 
   const canSubmit = owner.trim() !== '' && repo.trim() !== '' && !syncing;
 
@@ -50,6 +80,8 @@ function RepoConfigModal({ mode, ownerLogin, syncing, error, onSubmit, onClose, 
     if (syncing) return;
     onLinkExisting();
   };
+
+  const showLinkExisting = owner.trim() === '' || repo.trim() === '';
 
   return (
     <div className="modal-backdrop" onClick={close}>
@@ -83,16 +115,25 @@ function RepoConfigModal({ mode, ownerLogin, syncing, error, onSubmit, onClose, 
             />
           </label>
           {error ? <div className="repo-config-error">{error}</div> : null}
+          {checking ? (
+            <div className="repo-config-hint">Checking repository…</div>
+          ) : exists === true ? (
+            <div className="repo-config-hint">Repository already exists — you can switch to it.</div>
+          ) : exists === false ? (
+            <div className="repo-config-hint">Repository not found — it will be created.</div>
+          ) : null}
           <div className="repo-config-footer">
             <button type="button" className="btn" onClick={close} disabled={syncing}>
               {mode === 'onboard' ? 'Skip for now' : 'Close'}
             </button>
             <div className="repo-config-actions">
-              <button type="button" className="btn secondary" onClick={linkExisting} disabled={syncing}>
-                Link existing repo
-              </button>
+              {showLinkExisting && (
+                <button type="button" className="btn secondary" onClick={linkExisting} disabled={syncing}>
+                  Switch to existing repo
+                </button>
+              )}
               <button type="submit" className="btn primary" disabled={!canSubmit}>
-                {syncing ? 'Setting up…' : 'Create repository'}
+                {syncing ? 'Setting up…' : exists === true ? 'Switch to repository' : 'Create repository'}
               </button>
             </div>
           </div>
