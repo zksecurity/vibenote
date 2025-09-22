@@ -80,6 +80,8 @@ textarea {
   height: var(--topbar-height);
   box-sizing: border-box;
   flex-wrap: nowrap;
+  /* Enable container queries for responsive decisions inside header */
+  container-type: inline-size;
 }
 
 .topbar-left {
@@ -89,6 +91,36 @@ textarea {
   min-width: 0;
   flex: 0 0 auto;
 }
+
+/* Small external-link anchor next to repo name */
+.repo-anchor {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.repo-open-link {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+  height: 40px; /* align with repo button */
+  padding: 0 4px;
+}
+
+.repo-open-link:focus-visible {
+  outline: 2px solid var(--accent-border);
+  outline-offset: 3px;
+  border-radius: 8px;
+}
+
+/* If the header gets tight, drop the external-link affordance first */
+@container (max-width: 400px) {
+  .repo-open-link {
+    display: none;
+  }
+}
+
+/* No special overrides needed for .repo-btn when paired with link */
 
 .brand {
   font-size: 20px;
@@ -114,7 +146,6 @@ textarea {
 .repo-btn {
   gap: 6px;
   max-width: clamp(180px, 42vw, 360px);
-  min-width: 160px;
   overflow: hidden;
   justify-content: flex-start;
   height: 40px;
@@ -1053,7 +1084,6 @@ textarea:focus-visible {
 @media (min-width: 720px) and (max-width: 1099.98px) {
   .repo-btn {
     max-width: min(48vw, 460px);
-    min-width: 240px;
   }
 }
 

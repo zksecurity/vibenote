@@ -71,7 +71,9 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   const [toast, setToast] = useState<{ text: string; href?: string } | null>(null);
   const [repoModalMode, setRepoModalMode] = useState<'onboard' | 'manage'>('manage');
   const [showSwitcher, setShowSwitcher] = useState(false);
-  const [accessState, setAccessState] = useState<'unknown' | 'reachable' | 'unreachable'>('unknown');
+  const [accessState, setAccessState] = useState<'unknown' | 'reachable' | 'unreachable'>(
+    'unknown'
+  );
   const [refreshTick, setRefreshTick] = useState(0);
   const initialPullRef = useState({ done: false })[0];
 
@@ -372,6 +374,13 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     </svg>
   );
 
+  const ExternalLinkIcon = () => (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+      <path d="M10.5 2a.5.5 0 0 0 0 1h2.293L7.146 8.646a.5.5 0 1 0 .708.708L13.5 3.707V6a.5.5 0 0 0 1 0V2.5a.5.5 0 0 0-.5-.5H10.5Z" />
+      <path d="M3.75 3A1.75 1.75 0 0 0 2 4.75v7.5C2 13.44 2.56 14 3.25 14h7.5c.69 0 1.25-.56 1.25-1.25V9.5a.5.5 0 0 0-1 0v3.25a.25.25 0 0 1-.25.25h-7.5a.25.25 0 0 1-.25-.25v-7.5c0-.138.112-.25.25-.25H7a.5.5 0 0 0 0-1H3.75Z" />
+    </svg>
+  );
+
   const NotesIcon = () => (
     <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
       <path d="M3 1.75A1.75 1.75 0 0 1 4.75 0h6.5A1.75 1.75 0 0 1 13 1.75v12.5A1.75 1.75 0 0 1 11.25 16h-6.5A1.75 1.75 0 0 1 3 14.25Zm1.5.75a.75.75 0 0 0-.75.75v10.5c0 .414.336.75.75.75h6.5a.75.75 0 0 0 .75-.75V3.25a.75.75 0 0 0-.75-.75ZM5 4.5A.5.5 0 0 1 5.5 4h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 5 4.5Zm0 2.75A.75.75 0 0 1 5.75 6.5h4.5a.75.75 0 0 1 0 1.5h-4.5A.75.75 0 0 1 5 7.25Zm0 2.75c0-.414.336-.75.75-.75h4.5a.75.75 0 0 1 0 1.5h-4.5A.75.75 0 0 1 5 10Z" />
@@ -502,19 +511,33 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
             <span className="brand">VibeNote</span>
           </button>
           {route.kind === 'repo' ? (
-            <button
-              className={`btn ghost repo-btn align-workspace`}
-              onClick={ensureOwnerAndOpen}
-              title={linked ? 'Change repository' : 'Choose repository'}
-            >
-              <GitHubIcon />
-              <span className="repo-label">
-                <span className="repo-owner">{route.owner}/</span>
-                <span>{route.repo}</span>
-              </span>
-            </button>
+            <span className="repo-anchor align-workspace">
+              <button
+                className={`btn ghost repo-btn`}
+                onClick={ensureOwnerAndOpen}
+                title={linked ? 'Change repository' : 'Choose repository'}
+              >
+                <GitHubIcon />
+                <span className="repo-label">
+                  <span className="repo-owner">{route.owner}/</span>
+                  <span>{route.repo}</span>
+                </span>
+              </button>
+              <a
+                className="repo-open-link"
+                href={`https://github.com/${route.owner}/${route.repo}`}
+                target="_blank"
+                rel="noreferrer"
+                title="Open on GitHub"
+                aria-label="Open on GitHub"
+              >
+                <ExternalLinkIcon />
+              </a>
+            </span>
           ) : (
-            <button className="btn primary repo-btn align-workspace" onClick={ensureOwnerAndOpen}>Choose repository</button>
+            <button className="btn primary repo-btn align-workspace" onClick={ensureOwnerAndOpen}>
+              Choose repository
+            </button>
           )}
         </div>
         <div className="topbar-actions">
@@ -567,10 +590,13 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
               <div className="empty-state">
                 <h2>Can’t access this repository</h2>
                 <p>
-                  You don’t have permission to view <strong>{route.kind === 'repo' ? `${route.owner}/${route.repo}` : ''}</strong> with the current GitHub device token.
+                  You don’t have permission to view{' '}
+                  <strong>{route.kind === 'repo' ? `${route.owner}/${route.repo}` : ''}</strong>{' '}
+                  with the current GitHub device token.
                 </p>
                 <p>
-                  Sign out and sign in with a token that has access, or switch to a different repository from the header.
+                  Sign out and sign in with a token that has access, or switch to a different
+                  repository from the header.
                 </p>
               </div>
             </div>
@@ -616,8 +642,8 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                     <h2>Welcome to VibeNote</h2>
                     <p>Select a note from the sidebar or create a new one to get started.</p>
                     <p>
-                      To sync with GitHub, connect your account and link a repository. Once connected,
-                      use <strong>Sync now</strong> anytime to pull and push updates.
+                      To sync with GitHub, connect your account and link a repository. Once
+                      connected, use <strong>Sync now</strong> anytime to pull and push updates.
                     </p>
                     {syncMsg && <p className="empty-state-status">{syncMsg}</p>}
                   </div>
