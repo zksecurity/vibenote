@@ -6,7 +6,7 @@ type RepoConfigModalProps = {
   ownerLogin: string | null;
   syncing: boolean;
   error: string | null;
-  onSubmit: (config: { owner: string; repo: string; branch: string }) => void;
+  onSubmit: (config: { owner: string; repo: string; branch: string; autosync: boolean }) => void;
   onClose: () => void;
   onLinkExisting: () => void;
 };
@@ -19,6 +19,8 @@ function RepoConfigModal({ mode, ownerLogin, syncing, error, onSubmit, onClose, 
   const repoInputRef = useRef<HTMLInputElement | null>(null);
   const [checking, setChecking] = useState(false);
   const [exists, setExists] = useState<boolean | null>(null);
+  // Default autosync on during onboarding; off otherwise
+  const [autosync, setAutosync] = useState(mode === 'onboard');
 
   useEffect(() => {
     if (ownerLogin && owner.trim() === '') {
@@ -68,7 +70,7 @@ function RepoConfigModal({ mode, ownerLogin, syncing, error, onSubmit, onClose, 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSubmit) return;
-    onSubmit({ owner: owner.trim(), repo: repo.trim(), branch: 'main' });
+    onSubmit({ owner: owner.trim(), repo: repo.trim(), branch: 'main', autosync });
   };
 
   const close = () => {
@@ -112,6 +114,16 @@ function RepoConfigModal({ mode, ownerLogin, syncing, error, onSubmit, onClose, 
               onChange={(e) => setRepo(e.target.value)}
               disabled={syncing}
               placeholder="notes"
+            />
+          </label>
+          <label className="repo-config-field" style={{ alignItems: 'center' }}>
+            <span>Enable autosync</span>
+            <input
+              className="input"
+              type="checkbox"
+              checked={autosync}
+              onChange={(e) => setAutosync(e.target.checked)}
+              disabled={syncing}
             />
           </label>
           {error ? <div className="repo-config-error">{error}</div> : null}

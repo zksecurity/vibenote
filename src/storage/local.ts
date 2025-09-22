@@ -19,6 +19,7 @@ const DEBUG_ENABLED = true;
 const NS = 'vibenote';
 const REPO_PREFIX = `${NS}:repo`;
 const LINK_PREFIX = `${NS}:repo-link`;
+const PREFS_SUFFIX = 'prefs';
 const LEGACY_INDEX_KEY = legacyKey('index');
 const LEGACY_TOMBSTONES_KEY = legacyKey('tombstones');
 const LEGACY_NOTE_PREFIX = legacyKey('note');
@@ -649,6 +650,52 @@ export function isRepoLinked(slug: string): boolean {
     return true;
   }
   return false;
+}
+
+// --- Per-repository preferences ---
+export type RepoPrefs = {
+  autosync?: boolean;
+  lastAutoSyncAt?: number;
+};
+
+function prefsKey(slug: string): string {
+  return repoKey(slug, PREFS_SUFFIX);
+}
+
+export function getRepoPrefs(slug: string): RepoPrefs {
+  let raw = localStorage.getItem(prefsKey(slug));
+  if (!raw) return {};
+  try {
+    let parsed = JSON.parse(raw) as RepoPrefs;
+    if (parsed && typeof parsed === 'object') return parsed;
+    return {};
+  } catch {
+    return {};
+  }
+}
+
+export function setRepoPrefs(slug: string, patch: Partial<RepoPrefs>) {
+  let current = getRepoPrefs(slug);
+  let next: RepoPrefs = { ...current, ...patch };
+  localStorage.setItem(prefsKey(slug), JSON.stringify(next));
+}
+
+export function isAutosyncEnabled(slug: string): boolean {
+  let prefs = getRepoPrefs(slug);
+  return prefs.autosync === true;
+}
+
+export function setAutosyncEnabled(slug: string, enabled: boolean) {
+  setRepoPrefs(slug, { autosync: enabled });
+}
+
+export function getLastAutoSyncAt(slug: string): number | undefined {
+  let prefs = getRepoPrefs(slug);
+  return prefs.lastAutoSyncAt;
+}
+
+export function recordAutoSyncRun(slug: string, at: number = Date.now()) {
+  setRepoPrefs(slug, { lastAutoSyncAt: at });
 }
 
 function hashText(text: string): string {
