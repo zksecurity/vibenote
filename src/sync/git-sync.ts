@@ -242,6 +242,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       // Mark sync metadata
       markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: hashText(rf.text) });
       pulled++;
+      debugLog(slug, 'sync:pull:new', { path: e.path });
       continue;
     }
     const { id, doc } = local;
@@ -253,6 +254,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         const newSha = await putFile(config, { path: doc.path, text: doc.text, baseSha: e.sha }, 'vibenote: update notes');
         markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: hashText(doc.text || '') });
         pushed++;
+        debugLog(slug, 'sync:push:unchanged-remote', { path: doc.path });
       }
     } else {
       // Remote changed; fetch remote content
@@ -270,11 +272,13 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: hashText(mergedText) });
         merged++;
         pushed++;
+        debugLog(slug, 'sync:merge', { path: doc.path });
       } else {
         // only remote changed → pull
         updateNoteText(storeSlug, id, rf.text);
         markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: hashText(rf.text) });
         pulled++;
+        debugLog(slug, 'sync:pull:remote-changed', { path: doc.path });
       }
     }
   }
@@ -293,10 +297,12 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         const newSha = await putFile(config, { path: doc.path, text: doc.text }, 'vibenote: restore note');
         markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: hashText(doc.text || '') });
         pushed++;
+        debugLog(slug, 'sync:restore-remote-missing', { path: doc.path });
       } else {
         // Delete locally (will record a tombstone, which we clear below)
         store.deleteNote(id);
         deletedLocal++;
+        debugLog(slug, 'sync:delete-local-remote-missing', { path: doc.path });
       }
     }
   }
@@ -309,6 +315,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       if (!sha) {
         // already gone remotely
         removeTombstones(storeSlug, (x) => x.type === 'delete' && x.path === t.path && x.deletedAt === t.deletedAt);
+        debugLog(slug, 'sync:tombstone:delete:remote-missing', { path: t.path });
         continue;
       }
       if (!t.lastRemoteSha || t.lastRemoteSha === sha) {
@@ -316,15 +323,18 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         await deleteFiles(config, [{ path: t.path, sha }], 'vibenote: delete removed notes');
         deletedRemote++;
         removeTombstones(storeSlug, (x) => x.type === 'delete' && x.path === t.path && x.deletedAt === t.deletedAt);
+        debugLog(slug, 'sync:tombstone:delete:remote-deleted', { path: t.path });
       } else {
         // remote changed since we deleted locally → keep remote (no action), clear tombstone
         removeTombstones(storeSlug, (x) => x.type === 'delete' && x.path === t.path && x.deletedAt === t.deletedAt);
+        debugLog(slug, 'sync:tombstone:delete:remote-changed-keep-remote', { path: t.path });
       }
     } else if (t.type === 'rename') {
       const remoteSha = remoteMap.get(t.from);
       if (!remoteSha && !t.lastRemoteSha) {
         // Nothing tracked for this rename: remote already missing
         removeTombstones(storeSlug, (x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt);
+        debugLog(slug, 'sync:tombstone:rename:remote-missing', { from: t.from, to: t.to });
         continue;
       }
       let shaToDelete = remoteSha;
@@ -342,6 +352,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         deletedRemote++;
         remoteMap.delete(t.from);
         removeTombstones(storeSlug, (x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt);
+        debugLog(slug, 'sync:tombstone:rename:remote-deleted', { from: t.from, to: t.to });
         continue;
       }
 
@@ -359,6 +370,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
           moveNotePath(storeSlug, newId, t.from);
           markSynced(storeSlug, newId, { remoteSha: remoteFile.sha, syncedHash: hashText(remoteFile.text) });
           pulled++;
+          debugLog(slug, 'sync:tombstone:rename:recreate-local', { from: t.from });
         }
       }
       removeTombstones(storeSlug, (x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt);
@@ -371,4 +383,20 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
 function basename(p: string) {
   const i = p.lastIndexOf('/');
   return i >= 0 ? p.slice(i + 1) : p;
+}
+
+// Reuse local.ts debug flag if present
+const DEBUG_ENABLED: boolean = (() => {
+  try {
+    return localStorage.getItem('vibenote:debug') === '1';
+  } catch {
+    return false;
+  }
+})();
+function debugLog(slug: string, op: string, data: unknown) {
+  if (!DEBUG_ENABLED) return;
+  // eslint-disable-next-line no-console
+  console.debug('[VNDBG]', { slug, op, ...data });
+  // eslint-disable-next-line no-console
+  console.trace('[VNDBG trace]', op);
 }

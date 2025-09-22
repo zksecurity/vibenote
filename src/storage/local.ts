@@ -11,6 +11,9 @@ export type NoteDoc = NoteMeta & {
   lastSyncedHash?: string;
 };
 
+// --- Debug logging ---
+const DEBUG_ENABLED = true;
+
 const NS = 'vibenote';
 const REPO_PREFIX = `${NS}:repo`;
 const LINK_PREFIX = `${NS}:repo-link`;
@@ -88,6 +91,9 @@ export class LocalStore {
   }
 
   listNotes(): NoteMeta[] {
+    // Defensive: refresh from storage to avoid returning stale data across tabs
+    // [VNDBG] This read is safe and avoids UI from showing entries that were removed elsewhere.
+    this.index = this.loadIndex();
     return this.index.slice().sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
@@ -103,6 +109,7 @@ export class LocalStore {
     let updatedAt = Date.now();
     let next: NoteDoc = { ...doc, text, updatedAt };
     localStorage.setItem(this.noteKey(id), JSON.stringify(next));
+    debugLog(this.slug, 'saveNote', { id, path: doc.path, updatedAt });
     this.touchIndex(id, { updatedAt });
   }
 
@@ -118,6 +125,7 @@ export class LocalStore {
     localStorage.setItem(this.indexKey, JSON.stringify(idx));
     localStorage.setItem(this.noteKey(id), JSON.stringify(doc));
     this.index = idx;
+    debugLog(this.slug, 'createNote', { id, path, title: displayTitle });
     return id;
   }
 
@@ -144,6 +152,7 @@ export class LocalStore {
         renamedAt: updatedAt,
       });
     }
+    debugLog(this.slug, 'renameNote', { id, fromPath, toPath: path, pathChanged });
   }
 
   deleteNote(id: string) {
@@ -159,6 +168,7 @@ export class LocalStore {
     }
     localStorage.removeItem(this.noteKey(id));
     this.index = idx;
+    debugLog(this.slug, 'deleteNote', { id, path: doc?.path });
   }
 
   resetToWelcome(): string {
@@ -197,6 +207,7 @@ export class LocalStore {
     }
     localStorage.setItem(this.indexKey, JSON.stringify(index));
     this.index = index;
+    debugLog(this.slug, 'replaceWithRemote', { count: files.length });
   }
 
   private loadIndex(): NoteMeta[] {
@@ -215,6 +226,7 @@ export class LocalStore {
     if (i >= 0) idx[i] = { ...idx[i], ...patch } as NoteMeta;
     localStorage.setItem(this.indexKey, JSON.stringify(idx));
     this.index = idx;
+    debugLog(this.slug, 'touchIndex', { id, patch });
   }
 
   private noteKey(id: string): string {
@@ -266,6 +278,7 @@ export function recordDeleteTombstone(
   let ts = listTombstones(slug);
   ts.push({ type: 'delete', path: t.path, lastRemoteSha: t.lastRemoteSha, deletedAt: t.deletedAt });
   saveTombstones(slug, ts);
+  debugLog(slug, 'tombstone:delete:add', { path: t.path });
 }
 
 export function recordRenameTombstone(
@@ -286,15 +299,18 @@ export function recordRenameTombstone(
     renamedAt: t.renamedAt,
   });
   saveTombstones(slug, ts);
+  debugLog(slug, 'tombstone:rename:add', { from: t.from, to: t.to });
 }
 
 export function removeTombstones(slug: string, predicate: (t: Tombstone) => boolean) {
   let ts = listTombstones(slug).filter((t) => !predicate(t));
   saveTombstones(slug, ts);
+  debugLog(slug, 'tombstone:remove:filtered', { remaining: ts.length });
 }
 
 export function clearAllTombstones(slug: string) {
   localStorage.removeItem(repoKey(slug, 'tombstones'));
+  debugLog(slug, 'tombstone:clearAll', {});
 }
 
 export function markSynced(
@@ -315,6 +331,7 @@ export function markSynced(
   if (patch.remoteSha !== undefined) next.lastRemoteSha = patch.remoteSha;
   if (patch.syncedHash !== undefined) next.lastSyncedHash = patch.syncedHash;
   localStorage.setItem(key, JSON.stringify(next));
+  debugLog(slug, 'markSynced', { id, patch });
 }
 
 export function updateNoteText(slug: string, id: string, text: string) {
@@ -331,12 +348,10 @@ export function updateNoteText(slug: string, id: string, text: string) {
   let next: NoteDoc = { ...doc, text, updatedAt };
   localStorage.setItem(key, JSON.stringify(next));
   touchIndexUpdatedAt(slug, id, updatedAt);
+  debugLog(slug, 'updateNoteText', { id, updatedAt });
 }
 
-export function findByPath(
-  slug: string,
-  path: string
-): { id: string; doc: NoteDoc } | null {
+export function findByPath(slug: string, path: string): { id: string; doc: NoteDoc } | null {
   let idxRaw = localStorage.getItem(repoKey(slug, 'index'));
   if (!idxRaw) return null;
   let idx: NoteMeta[];
@@ -379,6 +394,7 @@ export function moveNotePath(slug: string, id: string, toPath: string) {
     idx[j] = { id: old.id, path: toPath, title: old.title, updatedAt };
   }
   localStorage.setItem(repoKey(slug, 'index'), JSON.stringify(idx));
+  debugLog(slug, 'moveNotePath', { id, toPath });
 }
 
 function loadIndexForSlug(slug: string): NoteMeta[] {
@@ -440,6 +456,14 @@ function decodeSlug(encoded: string): string {
 
 function linkKey(slug: string): string {
   return `${LINK_PREFIX}:${encodeSlug(slug)}`;
+}
+
+function debugLog(slug: string, op: string, data: object) {
+  if (!DEBUG_ENABLED) return;
+  // eslint-disable-next-line no-console
+  console.debug('[VNDBG]', { slug, op, ...data });
+  // eslint-disable-next-line no-console
+  console.trace('[VNDBG trace]', op);
 }
 
 function normalizeSlug(slug: string): string {
@@ -540,7 +564,9 @@ function loadRecentRepos(): RecentRepo[] {
   try {
     let parsed = JSON.parse(raw) as RecentRepo[];
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter((item) => typeof item?.slug === 'string' && typeof item?.lastOpenedAt === 'number');
+    return parsed.filter(
+      (item) => typeof item?.slug === 'string' && typeof item?.lastOpenedAt === 'number'
+    );
   } catch {
     return [];
   }

@@ -3,7 +3,12 @@ import { LocalStore, listTombstones } from '../storage/local';
 
 declare const Buffer: { from(data: string, encoding: string): { toString(enc: string): string } };
 
-const globalAny = globalThis as { localStorage?: Storage; fetch?: typeof fetch; atob?: typeof atob; btoa?: typeof btoa };
+const globalAny = globalThis as {
+  localStorage?: Storage;
+  fetch?: typeof fetch;
+  atob?: typeof atob;
+  btoa?: typeof btoa;
+};
 
 if (!globalAny.atob) {
   globalAny.atob = (data: string) => Buffer.from(data, 'base64').toString('binary');
@@ -127,7 +132,9 @@ class MockRemoteRepo {
       }
       for (const file of this.files.values()) {
         if (file.sha === sha) {
-          return this.makeResponse(200, { content: Buffer.from(file.text, 'utf8').toString('base64') });
+          return this.makeResponse(200, {
+            content: Buffer.from(file.text, 'utf8').toString('base64'),
+          });
         }
       }
       return this.makeResponse(404, { message: 'not found' });
@@ -202,7 +209,12 @@ class MockRemoteRepo {
       } else if (path.includes('/')) {
         continue;
       }
-      entries.push({ type: 'file', name: path.slice(path.lastIndexOf('/') + 1), path, sha: file.sha });
+      entries.push({
+        type: 'file',
+        name: path.slice(path.lastIndexOf('/') + 1),
+        path,
+        sha: file.sha,
+      });
     }
     return entries;
   }
@@ -220,22 +232,23 @@ describe('syncBidirectional', () => {
   let remote: MockRemoteRepo;
   let syncBidirectional: typeof import('./git-sync').syncBidirectional;
 
-beforeEach(async () => {
-  globalAny.localStorage = new MemoryStorage();
-  remote = new MockRemoteRepo();
-  remote.configure('user', 'repo');
-  globalAny.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
-    const raw = typeof input === 'string'
-      ? input
-      : input instanceof URL
-        ? input.toString()
-        : (input as Request).url;
-    return remote.handleFetch(new URL(raw), init);
-  };
-  const mod = await import('./git-sync');
-  syncBidirectional = mod.syncBidirectional;
-  store = new LocalStore('user/repo', { seedWelcome: false });
-});
+  beforeEach(async () => {
+    globalAny.localStorage = new MemoryStorage();
+    remote = new MockRemoteRepo();
+    remote.configure('user', 'repo');
+    globalAny.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+      const raw =
+        typeof input === 'string'
+          ? input
+          : input instanceof URL
+          ? input.toString()
+          : (input as Request).url;
+      return remote.handleFetch(new URL(raw), init);
+    };
+    const mod = await import('./git-sync');
+    syncBidirectional = mod.syncBidirectional;
+    store = new LocalStore('user/repo', { seedWelcome: false });
+  });
 
   test('pushes new notes and remains stable', async () => {
     const firstId = store.createNote('First', 'first note');
@@ -292,7 +305,10 @@ beforeEach(async () => {
     const paths = [...remote.snapshot().keys()].sort();
     expect(paths).toEqual(['draft-renamed.md', 'draft.md']);
     expectParity(store, remote);
-    const localPaths = store.listNotes().map((n) => n.path).sort();
+    const localPaths = store
+      .listNotes()
+      .map((n) => n.path)
+      .sort();
     expect(localPaths).toEqual(['draft-renamed.md', 'draft.md']);
   });
 
