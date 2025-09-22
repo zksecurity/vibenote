@@ -570,10 +570,10 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
           return false;
         }
       };
-      // Try SW-based flush; if not available, do best-effort keepalive full sync
-      void sendViaSW().then((ok) => {
-        if (!ok) void syncBidirectional(store, slug, { keepalive: true });
-      });
+      // Try SW-based flush; if not available, we intentionally avoid
+      // firing a multi-request keepalive sync here since it's unlikely
+      // to complete during process teardown.
+      void sendViaSW();
     };
     const onVisibility = () => {
       if (document.visibilityState === 'hidden') onPageHide();
