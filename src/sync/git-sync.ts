@@ -33,8 +33,20 @@ export function buildRemoteConfig(slug: string): RemoteConfig {
   return { owner, repo, branch: 'main', notesDir: '' };
 }
 
+// Allow toggling fetch keepalive for final-sync attempts
+let USE_KEEPALIVE = false;
+// Internal toggle; use the sync options instead of calling this directly.
+function setGitHubFetchKeepalive(flag: boolean) {
+  USE_KEEPALIVE = flag;
+}
+
+function ghFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const keepaliveInit = USE_KEEPALIVE ? { keepalive: true as boolean } : {};
+  return fetch(url, { ...init, ...keepaliveInit });
+}
+
 export async function repoExists(owner: string, repo: string): Promise<boolean> {
-  const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+  const res = await ghFetch(`https://api.github.com/repos/${owner}/${repo}`, {
     headers: authHeaders(),
   });
   return res.ok;
@@ -56,7 +68,7 @@ export async function pullNote(config: RemoteConfig, path: string): Promise<Remo
   const url = `https://api.github.com/repos/${config.owner}/${config.repo}/contents/${encodeApiPath(
     path
   )}?ref=${encodeURIComponent(config.branch)}`;
-  const res = await fetch(url, { headers: authHeaders() });
+  const res = await ghFetch(url, { headers: authHeaders() });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error('Failed to fetch note');
   const data = await res.json();
@@ -77,7 +89,7 @@ export async function fetchBlob(config: RemoteConfig, sha: string): Promise<stri
   const url = `https://api.github.com/repos/${config.owner}/${
     config.repo
   }/git/blobs/${encodeURIComponent(sha)}`;
-  const res = await fetch(url, { headers: authHeaders() });
+  const res = await ghFetch(url, { headers: authHeaders() });
   if (!res.ok) return null;
   const data = await res.json();
   const content = fromBase64((data.content as string).replace(/\n/g, ''));
@@ -93,7 +105,7 @@ export async function putFile(
   const url = `https://api.github.com/repos/${config.owner}/${config.repo}/contents/${encodeApiPath(
     file.path
   )}`;
-  const res = await fetch(url, {
+  const res = await ghFetch(url, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({
@@ -121,7 +133,7 @@ export async function commitBatch(
     const url = `https://api.github.com/repos/${config.owner}/${
       config.repo
     }/contents/${encodeApiPath(f.path)}`;
-    const res = await fetch(url, {
+    const res = await ghFetch(url, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({
@@ -147,7 +159,7 @@ export async function listNoteFiles(
   const url = `${base}${dir ? '/' + encodeApiPath(dir) : ''}?ref=${encodeURIComponent(
     config.branch
   )}`;
-  const res = await fetch(url, { headers: authHeaders() });
+  const res = await ghFetch(url, { headers: authHeaders() });
   if (res.status === 404) return [];
   if (!res.ok) throw new Error('Failed to list notes directory');
   const data = await res.json();
@@ -183,7 +195,7 @@ export async function deleteFiles(
     const url = `https://api.github.com/repos/${config.owner}/${
       config.repo
     }/contents/${encodeApiPath(f.path)}`;
-    const res = await fetch(url, {
+    const res = await ghFetch(url, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({
@@ -217,7 +229,7 @@ export async function ensureRepoExists(
   if (!token) return false;
   const exists = await repoExists(owner, repo);
   if (exists) return true;
-  const res = await fetch(`https://api.github.com/user/repos`, {
+  const res = await ghFetch(`https://api.github.com/user/repos`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ name: repo, private: isPrivate, auto_init: true }),
@@ -231,7 +243,13 @@ function hashText(text: string): string {
   return (h >>> 0).toString(16);
 }
 
-export async function syncBidirectional(store: LocalStore, slug: string): Promise<SyncSummary> {
+export async function syncBidirectional(
+  store: LocalStore,
+  slug: string,
+  opts: { keepalive?: boolean } = {}
+): Promise<SyncSummary> {
+  const prevKeepalive = USE_KEEPALIVE;
+  if (opts.keepalive === true) setGitHubFetchKeepalive(true);
   let pulled = 0;
   let pushed = 0;
   let deletedRemote = 0;
@@ -445,7 +463,9 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
     }
   }
 
-  return { pulled, pushed, deletedRemote, deletedLocal, merged };
+  const summary = { pulled, pushed, deletedRemote, deletedLocal, merged };
+  if (opts.keepalive === true) setGitHubFetchKeepalive(prevKeepalive);
+  return summary;
 }
 
 function basename(p: string) {
