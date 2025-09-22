@@ -34,7 +34,7 @@ This app uses GitHub’s Device Authorization Flow via serverless proxy endpoint
 Steps:
 
 - Create a new GitHub OAuth App at https://github.com/settings/developers → New OAuth App.
-  - Homepage URL: your Vercel production URL (or `http://localhost:5173` for dev)
+  - Homepage URL: your Vercel production URL (or `http://localhost:3000` for dev)
   - Authorization callback URL: can be any valid URL (not used by device flow), e.g. your homepage URL
 - Copy the Client ID and set it as `GITHUB_CLIENT_ID` (server env var on Vercel; `.env` for `vercel dev`).
 - In the app, click “Connect GitHub” and follow the instructions; enter the user code in the opened GitHub page.
