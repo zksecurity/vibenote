@@ -1,19 +1,19 @@
 import { useMemo, useState, useEffect } from 'react';
 import { NoteList } from './NoteList';
 import { Editor } from './Editor';
-  import {
-    LocalStore,
-    clearAllTombstones,
-    clearRepoLink,
-    isRepoLinked,
-    markRepoLinked,
-    isAutosyncEnabled,
-    setAutosyncEnabled,
-    getLastAutoSyncAt,
-    recordAutoSyncRun,
-    type NoteMeta,
-    type NoteDoc,
-  } from '../storage/local';
+import {
+  LocalStore,
+  clearAllTombstones,
+  clearRepoLink,
+  isRepoLinked,
+  markRepoLinked,
+  isAutosyncEnabled,
+  setAutosyncEnabled,
+  getLastAutoSyncAt,
+  recordAutoSyncRun,
+  type NoteMeta,
+  type NoteDoc,
+} from '../storage/local';
 import { getStoredToken, requestDeviceCode, fetchCurrentUser, clearToken } from '../auth/github';
 import {
   buildRemoteConfig,
@@ -28,6 +28,7 @@ import {
 import { ensureIntroReadme } from '../sync/readme';
 import { RepoSwitcher } from './RepoSwitcher';
 import { RepoConfigModal } from './RepoConfigModal';
+import { Toggle } from './Toggle';
 import { DeviceCodeModal } from './DeviceCodeModal';
 import type { Route } from './routing';
 
@@ -82,7 +83,9 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   );
   const [refreshTick, setRefreshTick] = useState(0);
   const initialPullRef = useState({ done: false })[0];
-  const [autosync, setAutosync] = useState<boolean>(() => (slug !== 'new' ? isAutosyncEnabled(slug) : false));
+  const [autosync, setAutosync] = useState<boolean>(() =>
+    slug !== 'new' ? isAutosyncEnabled(slug) : false
+  );
   const autoSyncTimerRef = useState<{ id: number | null }>({ id: null })[0];
   const autoSyncBusyRef = useState<{ busy: boolean }>({ busy: false })[0];
   const AUTO_SYNC_MIN_INTERVAL_MS = 60_000; // not too often
@@ -279,7 +282,12 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     }
   };
 
-  const onConfigSubmit = async (cfg: { owner: string; repo: string; branch: string; autosync: boolean }) => {
+  const onConfigSubmit = async (cfg: {
+    owner: string;
+    repo: string;
+    branch: string;
+    autosync: boolean;
+  }) => {
     setSyncMsg(null);
     setRepoModalError(null);
     setSyncing(true);
@@ -716,19 +724,18 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                   New note
                 </button>
                 {route.kind === 'repo' && linked ? (
-                  <label className="repo-autosync-toggle" title="Automatically sync in the background">
-                    <input
-                      type="checkbox"
+                  <div className="repo-autosync-toggle">
+                    <Toggle
                       checked={autosync}
-                      onChange={(e) => {
-                        let enabled = e.target.checked;
+                      onChange={(enabled) => {
                         setAutosync(enabled);
                         setAutosyncEnabled(slug, enabled);
                         if (enabled) scheduleAutoSync(0);
                       }}
+                      label="Autosync"
+                      description="Runs background sync after edits and periodically."
                     />
-                    <span>Autosync</span>
-                  </label>
+                  </div>
                 ) : null}
               </div>
               <NoteList

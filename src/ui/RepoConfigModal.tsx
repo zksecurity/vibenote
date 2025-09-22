@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { repoExists } from '../sync/git-sync';
+import { Toggle } from './Toggle';
 
 type RepoConfigModalProps = {
   mode: 'onboard' | 'manage';
@@ -13,7 +14,15 @@ type RepoConfigModalProps = {
 
 export { RepoConfigModal };
 
-function RepoConfigModal({ mode, ownerLogin, syncing, error, onSubmit, onClose, onLinkExisting }: RepoConfigModalProps) {
+function RepoConfigModal({
+  mode,
+  ownerLogin,
+  syncing,
+  error,
+  onSubmit,
+  onClose,
+  onLinkExisting,
+}: RepoConfigModalProps) {
   const [owner, setOwner] = useState(() => ownerLogin ?? '');
   const [repo, setRepo] = useState('notes');
   const repoInputRef = useRef<HTMLInputElement | null>(null);
@@ -59,7 +68,8 @@ function RepoConfigModal({ mode, ownerLogin, syncing, error, onSubmit, onClose, 
     };
   }, [owner, repo]);
 
-  const heading = mode === 'onboard' ? 'Create your notes repository' : 'Create or switch to a repository';
+  const heading =
+    mode === 'onboard' ? 'Create your notes repository' : 'Create or switch to a repository';
   const description =
     mode === 'onboard'
       ? 'VibeNote stores your notes in a private GitHub repository. Create one now to start syncing.'
@@ -116,21 +126,22 @@ function RepoConfigModal({ mode, ownerLogin, syncing, error, onSubmit, onClose, 
               placeholder="notes"
             />
           </label>
-          <label className="repo-config-field" style={{ alignItems: 'center' }}>
-            <span>Enable autosync</span>
-            <input
-              className="input"
-              type="checkbox"
+          <div className="repo-config-field">
+            <Toggle
               checked={autosync}
-              onChange={(e) => setAutosync(e.target.checked)}
+              onChange={setAutosync}
+              label="Enable autosync"
+              description="Runs background sync after edits and periodically."
               disabled={syncing}
             />
-          </label>
+          </div>
           {error ? <div className="repo-config-error">{error}</div> : null}
           {checking ? (
             <div className="repo-config-hint">Checking repository…</div>
           ) : exists === true ? (
-            <div className="repo-config-hint">Repository already exists — you can switch to it.</div>
+            <div className="repo-config-hint">
+              Repository already exists — you can switch to it.
+            </div>
           ) : exists === false ? (
             <div className="repo-config-hint">Repository not found — it will be created.</div>
           ) : null}
@@ -140,12 +151,21 @@ function RepoConfigModal({ mode, ownerLogin, syncing, error, onSubmit, onClose, 
             </button>
             <div className="repo-config-actions">
               {showLinkExisting && (
-                <button type="button" className="btn secondary" onClick={linkExisting} disabled={syncing}>
+                <button
+                  type="button"
+                  className="btn secondary"
+                  onClick={linkExisting}
+                  disabled={syncing}
+                >
                   Switch to existing repo
                 </button>
               )}
               <button type="submit" className="btn primary" disabled={!canSubmit}>
-                {syncing ? 'Setting up…' : exists === true ? 'Switch to repository' : 'Create repository'}
+                {syncing
+                  ? 'Setting up…'
+                  : exists === true
+                  ? 'Switch to repository'
+                  : 'Create repository'}
               </button>
             </div>
           </div>
