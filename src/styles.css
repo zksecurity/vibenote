@@ -130,10 +130,12 @@ textarea {
 .repo-label {
   display: inline-flex;
   align-items: baseline;
-  gap: 2px;
+  gap: 0px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* Ensure label content aligns left even inside a centered button */
+  text-align: left;
   max-width: 100%;
   flex: 1 1 auto;
   font-size: 1rem;
@@ -141,9 +143,12 @@ textarea {
 }
 
 .repo-label span:last-child {
-  flex: 1 1 auto;
+  /* Do not grow to fill; allow shrink + ellipsis */
+  flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0; /* allow flex item to shrink and avoid visual gaps */
+  text-align: left; /* avoid centered text inside the flex item */
 }
 
 .repo-owner {
