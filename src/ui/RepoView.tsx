@@ -228,6 +228,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   const runAutoSync = async () => {
     if (autoSyncBusyRef.busy) return;
     autoSyncBusyRef.busy = true;
+    setSyncing(true);
     try {
       if (!token || !linked || slug === 'new') return;
       let summary = await syncBidirectional(store, slug);
@@ -242,6 +243,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
       console.error(err);
     } finally {
       autoSyncBusyRef.busy = false;
+      setSyncing(false);
     }
   };
 
