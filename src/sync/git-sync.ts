@@ -2,9 +2,16 @@
 // Uses a stored OAuth token to read and write note files in a repository.
 
 import { getStoredToken } from '../auth/github';
-import type { NoteDoc, NoteMeta } from '../storage/local';
 import type { LocalStore } from '../storage/local';
-import { listTombstones, type Tombstone, removeTombstones, findByPath, markSynced, updateNoteText, moveNotePath } from '../storage/local';
+import {
+  listTombstones,
+  removeTombstones,
+  findByPath,
+  markSynced,
+  updateNoteText,
+  moveNotePath,
+  debugLog,
+} from '../storage/local';
 import { mergeMarkdown } from '../merge/merge';
 
 export interface RemoteConfig {
@@ -67,7 +74,9 @@ export type SyncSummary = {
 
 // Fetch raw blob content by SHA
 export async function fetchBlob(config: RemoteConfig, sha: string): Promise<string | null> {
-  const url = `https://api.github.com/repos/${config.owner}/${config.repo}/git/blobs/${encodeURIComponent(sha)}`;
+  const url = `https://api.github.com/repos/${config.owner}/${
+    config.repo
+  }/git/blobs/${encodeURIComponent(sha)}`;
   const res = await fetch(url, { headers: authHeaders() });
   if (!res.ok) return null;
   const data = await res.json();
@@ -81,11 +90,18 @@ export async function putFile(
   file: { path: string; text: string; baseSha?: string },
   message: string
 ): Promise<string> {
-  const url = `https://api.github.com/repos/${config.owner}/${config.repo}/contents/${encodeApiPath(file.path)}`;
+  const url = `https://api.github.com/repos/${config.owner}/${config.repo}/contents/${encodeApiPath(
+    file.path
+  )}`;
   const res = await fetch(url, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ message, content: toBase64(file.text), sha: file.baseSha, branch: config.branch }),
+    body: JSON.stringify({
+      message,
+      content: toBase64(file.text),
+      sha: file.baseSha,
+      branch: config.branch,
+    }),
   });
   if (!res.ok) throw new Error('Commit failed');
   const data = await res.json();
@@ -123,7 +139,9 @@ export async function commitBatch(
 }
 
 // List Markdown files under the configured notesDir at HEAD
-export async function listNoteFiles(config: RemoteConfig): Promise<{ path: string; sha: string }[]> {
+export async function listNoteFiles(
+  config: RemoteConfig
+): Promise<{ path: string; sha: string }[]> {
   const dir = (config.notesDir || '').replace(/(^\/+|\/+?$)/g, '');
   const base = `https://api.github.com/repos/${config.owner}/${config.repo}/contents`;
   const url = `${base}${dir ? '/' + encodeApiPath(dir) : ''}?ref=${encodeURIComponent(
@@ -251,7 +269,11 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       // Remote unchanged since base
       const changedLocally = doc.lastSyncedHash !== hashText(doc.text || '');
       if (changedLocally) {
-        const newSha = await putFile(config, { path: doc.path, text: doc.text, baseSha: e.sha }, 'vibenote: update notes');
+        const newSha = await putFile(
+          config,
+          { path: doc.path, text: doc.text, baseSha: e.sha },
+          'vibenote: update notes'
+        );
         markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: hashText(doc.text || '') });
         pushed++;
         debugLog(slug, 'sync:push:unchanged-remote', { path: doc.path });
@@ -268,7 +290,11 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         if (mergedText !== localText) {
           updateNoteText(storeSlug, id, mergedText);
         }
-        const newSha = await putFile(config, { path: doc.path, text: mergedText, baseSha: rf.sha }, 'vibenote: merge notes');
+        const newSha = await putFile(
+          config,
+          { path: doc.path, text: mergedText, baseSha: rf.sha },
+          'vibenote: merge notes'
+        );
         markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: hashText(mergedText) });
         merged++;
         pushed++;
@@ -294,7 +320,11 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       const changedLocally = doc.lastSyncedHash !== hashText(doc.text || '');
       if (changedLocally) {
         // Restore to remote
-        const newSha = await putFile(config, { path: doc.path, text: doc.text }, 'vibenote: restore note');
+        const newSha = await putFile(
+          config,
+          { path: doc.path, text: doc.text },
+          'vibenote: restore note'
+        );
         markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: hashText(doc.text || '') });
         pushed++;
         debugLog(slug, 'sync:restore-remote-missing', { path: doc.path });
@@ -314,7 +344,10 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       const sha = remoteMap.get(t.path);
       if (!sha) {
         // already gone remotely
-        removeTombstones(storeSlug, (x) => x.type === 'delete' && x.path === t.path && x.deletedAt === t.deletedAt);
+        removeTombstones(
+          storeSlug,
+          (x) => x.type === 'delete' && x.path === t.path && x.deletedAt === t.deletedAt
+        );
         debugLog(slug, 'sync:tombstone:delete:remote-missing', { path: t.path });
         continue;
       }
@@ -322,18 +355,28 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         // safe to delete remotely
         await deleteFiles(config, [{ path: t.path, sha }], 'vibenote: delete removed notes');
         deletedRemote++;
-        removeTombstones(storeSlug, (x) => x.type === 'delete' && x.path === t.path && x.deletedAt === t.deletedAt);
+        removeTombstones(
+          storeSlug,
+          (x) => x.type === 'delete' && x.path === t.path && x.deletedAt === t.deletedAt
+        );
         debugLog(slug, 'sync:tombstone:delete:remote-deleted', { path: t.path });
       } else {
         // remote changed since we deleted locally → keep remote (no action), clear tombstone
-        removeTombstones(storeSlug, (x) => x.type === 'delete' && x.path === t.path && x.deletedAt === t.deletedAt);
+        removeTombstones(
+          storeSlug,
+          (x) => x.type === 'delete' && x.path === t.path && x.deletedAt === t.deletedAt
+        );
         debugLog(slug, 'sync:tombstone:delete:remote-changed-keep-remote', { path: t.path });
       }
     } else if (t.type === 'rename') {
       const remoteSha = remoteMap.get(t.from);
       if (!remoteSha && !t.lastRemoteSha) {
         // Nothing tracked for this rename: remote already missing
-        removeTombstones(storeSlug, (x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt);
+        removeTombstones(
+          storeSlug,
+          (x) =>
+            x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt
+        );
         debugLog(slug, 'sync:tombstone:rename:remote-missing', { from: t.from, to: t.to });
         continue;
       }
@@ -341,17 +384,32 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       if (!shaToDelete) {
         const remoteFile = await pullNote(config, t.from);
         if (!remoteFile) {
-          removeTombstones(storeSlug, (x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt);
+          removeTombstones(
+            storeSlug,
+            (x) =>
+              x.type === 'rename' &&
+              x.from === t.from &&
+              x.to === t.to &&
+              x.renamedAt === t.renamedAt
+          );
           continue;
         }
         shaToDelete = remoteFile.sha;
         remoteMap.set(t.from, shaToDelete);
       }
       if (!t.lastRemoteSha || t.lastRemoteSha === shaToDelete) {
-        await deleteFiles(config, [{ path: t.from, sha: shaToDelete }], 'vibenote: delete old path after rename');
+        await deleteFiles(
+          config,
+          [{ path: t.from, sha: shaToDelete }],
+          'vibenote: delete old path after rename'
+        );
         deletedRemote++;
         remoteMap.delete(t.from);
-        removeTombstones(storeSlug, (x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt);
+        removeTombstones(
+          storeSlug,
+          (x) =>
+            x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt
+        );
         debugLog(slug, 'sync:tombstone:rename:remote-deleted', { from: t.from, to: t.to });
         continue;
       }
@@ -363,17 +421,27 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
           if ((existing.doc.text || '') !== remoteFile.text) {
             updateNoteText(storeSlug, existing.id, remoteFile.text);
           }
-          markSynced(storeSlug, existing.id, { remoteSha: remoteFile.sha, syncedHash: hashText(remoteFile.text) });
+          markSynced(storeSlug, existing.id, {
+            remoteSha: remoteFile.sha,
+            syncedHash: hashText(remoteFile.text),
+          });
         } else {
           const title = basename(t.from).replace(/\.md$/i, '');
           const newId = store.createNote(title, remoteFile.text);
           moveNotePath(storeSlug, newId, t.from);
-          markSynced(storeSlug, newId, { remoteSha: remoteFile.sha, syncedHash: hashText(remoteFile.text) });
+          markSynced(storeSlug, newId, {
+            remoteSha: remoteFile.sha,
+            syncedHash: hashText(remoteFile.text),
+          });
           pulled++;
           debugLog(slug, 'sync:tombstone:rename:recreate-local', { from: t.from });
         }
       }
-      removeTombstones(storeSlug, (x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt);
+      removeTombstones(
+        storeSlug,
+        (x) =>
+          x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt
+      );
     }
   }
 
@@ -383,21 +451,4 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
 function basename(p: string) {
   const i = p.lastIndexOf('/');
   return i >= 0 ? p.slice(i + 1) : p;
-}
-
-// Reuse local.ts debug flag if present
-const DEBUG_ENABLED: boolean = (() => {
-  try {
-    return localStorage.getItem('vibenote:debug') === '1';
-  } catch {
-    return false;
-  }
-})();
-function debugLog(slug: string, op: string, data?: Record<string, unknown>) {
-  if (!DEBUG_ENABLED) return;
-  // eslint-disable-next-line no-console
-  const payload = data ? { slug, op, ...data } : { slug, op };
-  console.debug('[VNDBG]', payload);
-  // eslint-disable-next-line no-console
-  console.trace('[VNDBG trace]', op);
 }
