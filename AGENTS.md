@@ -6,9 +6,14 @@ Development Setup
 
 - Prereqs: Node 18+, npm
 - Install: `npm install`
-- Run UI: `npm run dev` (Vite on `http://localhost:3000`, including `/api` routes)
+- Run dev (UI + API): `npm start` (Vercel dev on `http://localhost:3000`)
 - Env: copy `.env.example` → `.env` and set `GITHUB_CLIENT_ID` (GitHub OAuth App Client ID)
-- Proxy: Vite proxies `/api/*` → `http://localhost:3000` (see `vite.config.ts`)
+- Routing: `vercel dev` runs Vite on the same origin and serves `/api/*` via its router. Vite’s `/api` proxy is automatically disabled in this mode (see `vite.config.ts`).
+ 
+Local dev
+
+- Single command: `npm start`
+  - Opens `http://localhost:3000/` for the UI; `/api/*` served by Vercel functions.
 - Node runs TypeScript directly (2025+): use `node path/to/file.ts` for quick scripts; no ts-node/tsx needed.
 
 Local Auth (Device Flow)
