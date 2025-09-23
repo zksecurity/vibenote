@@ -981,7 +981,7 @@ textarea:focus-visible {
 
 /* --- File tree (GitHub-like) --- */
 .file-tree { font-size: 14px; user-select: none; }
-.tree-row { display: flex; align-items: center; gap: 8px; height: 28px; line-height: 28px; border-radius: 6px; padding-right: 8px; color: var(--text); cursor: default; }
+.tree-row { display: flex; align-items: center; gap: 6px; height: 28px; line-height: 28px; border-radius: 6px; padding-right: 8px; color: var(--text); cursor: default; }
 .tree-row:hover { background: #f6f8fa; }
 .tree-row.is-active { background: #eaeef2; }
 .tree-disclosure { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border: 0; background: transparent; color: #6e7781; cursor: pointer; }

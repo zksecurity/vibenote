@@ -192,7 +192,7 @@ export function FileTree(props: FileTreeProps) {
   return (
     <div className="file-tree" tabIndex={0} ref={containerRef} onKeyDown={onKeyDown}>
       {props.newEntry && props.newEntry.parentDir === '' && (
-        <div className="tree-row is-new" style={{ paddingLeft: 8 }}>
+        <div className="tree-row is-new" style={{ paddingLeft: 6 }}>
           <span className="tree-disclosure-spacer" />
           <Icon kind={props.newEntry.kind} open={true} />
           <form
@@ -277,7 +277,7 @@ function Row(props: {
       <div className="tree-folder">
         <div
           className={`tree-row ${isActive ? 'is-active' : ''}`}
-          style={{ paddingLeft: 8 + depth * 12 }}
+          style={{ paddingLeft: 6 + depth * 10 }}
           onClick={() => props.onSelectFolder(node.dir)}
         >
           <button
@@ -319,7 +319,7 @@ function Row(props: {
           )}
         </div>
         {!isCollapsed && props.newEntry && props.newEntry.parentDir === node.dir && (
-          <div className="tree-row is-new" style={{ paddingLeft: 8 + (depth + 1) * 12 }}>
+          <div className="tree-row is-new" style={{ paddingLeft: 6 + (depth + 1) * 10 }}>
             <span className="tree-disclosure-spacer" />
             <Icon kind={props.newEntry.kind} open={true} />
             <form
@@ -380,7 +380,7 @@ function Row(props: {
   return (
     <div
       className={`tree-row ${isActive || isSelected ? 'is-active' : ''}`}
-      style={{ paddingLeft: 8 + depth * 12 }}
+      style={{ paddingLeft: 6 + depth * 10 }}
       onClick={() => props.onSelectFile(node.id)}
       onDoubleClick={() => props.onSelectFile(node.id)}
     >
