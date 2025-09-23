@@ -29,7 +29,12 @@ type FileTreeProps = {
   onFinishCreate?: () => void;
 };
 
-type FolderNode = { kind: 'folder'; dir: string; name: string; children: (FolderNode | FileNode)[] };
+type FolderNode = {
+  kind: 'folder';
+  dir: string;
+  name: string;
+  children: (FolderNode | FileNode)[];
+};
 type FileNode = { kind: 'file'; id: string; name: string; dir: string; path: string };
 
 export function FileTree(props: FileTreeProps) {
@@ -40,7 +45,9 @@ export function FileTree(props: FileTreeProps) {
   let [editText, setEditText] = useState('');
   let containerRef = useRef<HTMLDivElement | null>(null);
 
-  type FlatItem = { kind: 'folder'; dir: string; depth: number } | { kind: 'file'; id: string; depth: number };
+  type FlatItem =
+    | { kind: 'folder'; dir: string; depth: number }
+    | { kind: 'file'; id: string; depth: number };
   const visibleItems = useMemo<FlatItem[]>(() => {
     const list: FlatItem[] = [];
     const walk = (node: FolderNode, depth: number) => {
@@ -72,7 +79,8 @@ export function FileTree(props: FileTreeProps) {
     setEditing({ kind: props.newEntry.kind === 'file' ? 'file' : 'folder', id: '' } as any);
     setEditText('');
     // Expand parent folder
-    if (props.newEntry.parentDir) setCollapsed((m) => ({ ...m, [props.newEntry!.parentDir]: false }));
+    if (props.newEntry.parentDir)
+      setCollapsed((m) => ({ ...m, [props.newEntry!.parentDir]: false }));
   }, [props.newEntry?.key]);
 
   // Keyboard bindings
@@ -85,9 +93,10 @@ export function FileTree(props: FileTreeProps) {
       if (visibleItems.length === 0) return;
       let index = -1;
       if (selected) {
-        index = visibleItems.findIndex((it) =>
-          (it.kind === 'folder' && selected.kind === 'folder' && it.dir === selected.dir) ||
-          (it.kind === 'file' && selected.kind === 'file' && it.id === selected.id)
+        index = visibleItems.findIndex(
+          (it) =>
+            (it.kind === 'folder' && selected.kind === 'folder' && it.dir === selected.dir) ||
+            (it.kind === 'file' && selected.kind === 'file' && it.id === selected.id)
         );
       }
       if (index < 0) index = 0;
@@ -121,9 +130,15 @@ export function FileTree(props: FileTreeProps) {
       if (selected.kind === 'file') props.onSelectFile(selected.id);
       else toggleCollapse(selected.dir);
     } else if (e.key === 'ArrowLeft') {
-      if (selected.kind === 'folder') { e.preventDefault(); collapse(selected.dir); }
+      if (selected.kind === 'folder') {
+        e.preventDefault();
+        collapse(selected.dir);
+      }
     } else if (e.key === 'ArrowRight') {
-      if (selected.kind === 'folder') { e.preventDefault(); expand(selected.dir); }
+      if (selected.kind === 'folder') {
+        e.preventDefault();
+        expand(selected.dir);
+      }
     }
   };
 
@@ -139,7 +154,9 @@ export function FileTree(props: FileTreeProps) {
   const expand = (dir: string) => setCollapsed((m) => ({ ...m, [dir]: false }));
   const toggleCollapse = (dir: string) => setCollapsed((m) => ({ ...m, [dir]: !m[dir] }));
 
-  const submitEdit = (context: { kind: 'file'; id?: string; dir?: string } | { kind: 'folder'; dir?: string }) => {
+  const submitEdit = (
+    context: { kind: 'file'; id?: string; dir?: string } | { kind: 'folder'; dir?: string }
+  ) => {
     const name = editText.trim();
     if (name === '') {
       setEditing(null);
@@ -177,14 +194,25 @@ export function FileTree(props: FileTreeProps) {
       {props.newEntry && props.newEntry.parentDir === '' && (
         <div className="tree-row is-new" style={{ paddingLeft: 24 }}>
           <Icon kind={props.newEntry.kind} open={true} />
-          <form onSubmit={(e) => { e.preventDefault(); submitEdit({ kind: props.newEntry!.kind === 'file' ? 'file' : 'folder' }); }} className="tree-edit-form">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              submitEdit({ kind: props.newEntry!.kind === 'file' ? 'file' : 'folder' });
+            }}
+            className="tree-edit-form"
+          >
             <input
               className="tree-input"
               value={editText}
               onChange={(e) => setEditText(e.target.value)}
               autoFocus
               onBlur={cancelEdit}
-              onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); } }}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  cancelEdit();
+                }
+              }}
               placeholder={props.newEntry.kind === 'file' ? 'New file' : 'New folder'}
             />
           </form>
@@ -201,9 +229,15 @@ export function FileTree(props: FileTreeProps) {
           editing={editing}
           editText={editText}
           onSelectFolder={(dir) => setSelected({ kind: 'folder', dir })}
-          onSelectFile={(id) => { setSelected({ kind: 'file', id }); props.onSelectFile(id); }}
+          onSelectFile={(id) => {
+            setSelected({ kind: 'file', id });
+            props.onSelectFile(id);
+          }}
           onToggleFolder={toggleCollapse}
-          onStartEdit={(sel, text) => { setEditing(sel); setEditText(text); }}
+          onStartEdit={(sel, text) => {
+            setEditing(sel);
+            setEditText(text);
+          }}
           onEditTextChange={setEditText}
           onSubmitEdit={submitEdit}
           newEntry={props.newEntry ?? null}
@@ -227,7 +261,9 @@ function Row(props: {
   onToggleFolder: (dir: string) => void;
   onStartEdit: (sel: Selection, text: string) => void;
   onEditTextChange: (t: string) => void;
-  onSubmitEdit: (ctx: { kind: 'file'; id?: string; dir?: string } | { kind: 'folder'; dir?: string }) => void;
+  onSubmitEdit: (
+    ctx: { kind: 'file'; id?: string; dir?: string } | { kind: 'folder'; dir?: string }
+  ) => void;
   newEntry: NewEntry | null;
   onCancelEditing: () => void;
 }) {
@@ -243,19 +279,38 @@ function Row(props: {
           style={{ paddingLeft: 8 + depth * 12 }}
           onClick={() => props.onSelectFolder(node.dir)}
         >
-          <button className="tree-disclosure" onClick={(e) => { e.stopPropagation(); props.onToggleFolder(node.dir); }} aria-label="Toggle folder">
+          <button
+            className="tree-disclosure"
+            onClick={(e) => {
+              e.stopPropagation();
+              props.onToggleFolder(node.dir);
+            }}
+            aria-label="Toggle folder"
+          >
             {isCollapsed ? '▸' : '▾'}
           </button>
           <Icon kind="folder" open={!isCollapsed} />
           {isEditing ? (
-            <form className="tree-edit-form" onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); props.onSubmitEdit({ kind: 'folder', dir: node.dir }); }}>
+            <form
+              className="tree-edit-form"
+              onClick={(e) => e.stopPropagation()}
+              onSubmit={(e) => {
+                e.preventDefault();
+                props.onSubmitEdit({ kind: 'folder', dir: node.dir });
+              }}
+            >
               <input
                 className="tree-input"
                 value={props.editText}
                 onChange={(e) => props.onEditTextChange(e.target.value)}
                 autoFocus
                 onBlur={props.onCancelEditing}
-                onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); props.onCancelEditing(); } }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    props.onCancelEditing();
+                  }
+                }}
               />
             </form>
           ) : (
@@ -265,39 +320,55 @@ function Row(props: {
         {!isCollapsed && props.newEntry && props.newEntry.parentDir === node.dir && (
           <div className="tree-row is-new" style={{ paddingLeft: 24 + (depth + 1) * 12 }}>
             <Icon kind={props.newEntry.kind} open={true} />
-            <form className="tree-edit-form" onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); props.onSubmitEdit({ kind: props.newEntry!.kind === 'file' ? 'file' : 'folder', dir: node.dir }); }}>
+            <form
+              className="tree-edit-form"
+              onClick={(e) => e.stopPropagation()}
+              onSubmit={(e) => {
+                e.preventDefault();
+                props.onSubmitEdit({
+                  kind: props.newEntry!.kind === 'file' ? 'file' : 'folder',
+                  dir: node.dir,
+                });
+              }}
+            >
               <input
                 className="tree-input"
                 value={props.editText}
                 onChange={(e) => props.onEditTextChange(e.target.value)}
                 autoFocus
                 onBlur={props.onCancelEditing}
-                onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); props.onCancelEditing(); } }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    props.onCancelEditing();
+                  }
+                }}
                 placeholder={props.newEntry.kind === 'file' ? 'New file' : 'New folder'}
               />
             </form>
           </div>
         )}
-        {!isCollapsed && node.children.map((c) => (
-          <Row
-            key={c.kind === 'folder' ? 'd:' + c.dir : 'f:' + c.id}
-            node={c}
-            depth={depth + 1}
-            collapsed={props.collapsed}
-            activeId={props.activeId}
-            selected={props.selected}
-            editing={props.editing}
-            editText={props.editText}
-            onSelectFolder={props.onSelectFolder}
-            onSelectFile={props.onSelectFile}
-            onToggleFolder={props.onToggleFolder}
-            onStartEdit={props.onStartEdit}
-            onEditTextChange={props.onEditTextChange}
-            onSubmitEdit={props.onSubmitEdit}
-            newEntry={props.newEntry}
-            onCancelEditing={props.onCancelEditing}
-          />
-        ))}
+        {!isCollapsed &&
+          node.children.map((c) => (
+            <Row
+              key={c.kind === 'folder' ? 'd:' + c.dir : 'f:' + c.id}
+              node={c}
+              depth={depth + 1}
+              collapsed={props.collapsed}
+              activeId={props.activeId}
+              selected={props.selected}
+              editing={props.editing}
+              editText={props.editText}
+              onSelectFolder={props.onSelectFolder}
+              onSelectFile={props.onSelectFile}
+              onToggleFolder={props.onToggleFolder}
+              onStartEdit={props.onStartEdit}
+              onEditTextChange={props.onEditTextChange}
+              onSubmitEdit={props.onSubmitEdit}
+              newEntry={props.newEntry}
+              onCancelEditing={props.onCancelEditing}
+            />
+          ))}
       </div>
     );
   }
@@ -313,14 +384,26 @@ function Row(props: {
     >
       <Icon kind="file" />
       {isEditing ? (
-        <form className="tree-edit-form" onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); props.onSubmitEdit({ kind: 'file', id: node.id }); }}>
+        <form
+          className="tree-edit-form"
+          onClick={(e) => e.stopPropagation()}
+          onSubmit={(e) => {
+            e.preventDefault();
+            props.onSubmitEdit({ kind: 'file', id: node.id });
+          }}
+        >
           <input
             className="tree-input"
             value={props.editText}
             onChange={(e) => props.onEditTextChange(e.target.value)}
             autoFocus
             onBlur={props.onCancelEditing}
-            onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); props.onCancelEditing(); } }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                props.onCancelEditing();
+              }
+            }}
           />
         </form>
       ) : (
@@ -330,10 +413,19 @@ function Row(props: {
   );
 }
 
-function Icon({ kind, open }: { kind: 'file' | 'folder' | 'folder-open' | 'file-leaf' | 'file-md' | 'folder-closed' | 'folder' ; open?: boolean }) {
+function Icon({
+  kind,
+  open,
+}: {
+  kind: 'file' | 'folder' | 'folder-open' | 'file-leaf' | 'file-md' | 'folder-closed' | 'folder';
+  open?: boolean;
+}) {
   const isFolder = kind === 'folder';
   return (
-    <span className={`tree-icon ${isFolder ? (open ? 'folder-open' : 'folder') : 'file'}`} aria-hidden />
+    <span
+      className={`tree-icon ${isFolder ? (open ? 'folder-open' : 'folder') : 'file'}`}
+      aria-hidden
+    />
   );
 }
 
@@ -346,7 +438,12 @@ function buildTree(files: FileEntry[], folders: string[]): FolderNode {
     if (folderMap.has(d)) return folderMap.get(d)!;
     let parent = d.includes('/') ? d.slice(0, d.lastIndexOf('/')) : '';
     let parentNode = addFolder(parent);
-    let node: FolderNode = { kind: 'folder', dir: d, name: d.slice(d.lastIndexOf('/') + 1), children: [] };
+    let node: FolderNode = {
+      kind: 'folder',
+      dir: d,
+      name: d.slice(d.lastIndexOf('/') + 1),
+      children: [],
+    };
     parentNode.children.push(node);
     folderMap.set(d, node);
     return node;
