@@ -994,7 +994,7 @@ textarea:focus-visible {
 
 /* --- File tree (GitHub-like) --- */
 .file-tree { font-size: 14px; user-select: none; }
-.tree-row { display: flex; align-items: center; gap: 6px; height: 28px; line-height: 28px; border-radius: 6px; padding-right: 8px; color: var(--text); cursor: default; }
+.tree-row { position: relative; display: flex; align-items: center; gap: 6px; height: 28px; line-height: 28px; border-radius: 6px; padding-right: 8px; color: var(--text); cursor: default; }
 .tree-row:hover { background: #f6f8fa; }
 .tree-row.is-active { background: #eaeef2; }
 .tree-disclosure { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border: 0; background: transparent; color: #6e7781; cursor: pointer; }
@@ -1019,6 +1019,22 @@ textarea:focus-visible {
 .tree-edit-form { display: inline-flex; flex: 1; }
 .tree-input { width: 180px; height: 24px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; outline: none; }
 .tree-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+/* Inline context menu for mobile long-press or desktop right-click */
+.tree-menu {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 4px;
+  display: flex;
+  gap: 6px;
+  z-index: 2;
+}
 
 .account-menu {
   position: fixed;
