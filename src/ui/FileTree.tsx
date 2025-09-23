@@ -190,13 +190,17 @@ export function FileTree(props: FileTreeProps) {
     }
   };
 
-  const onPointerDownCapture = (e: React.PointerEvent) => {
-    if (!menuSel) return;
-    const el = e.target as HTMLElement;
-    if (el.closest('.tree-menu')) return;
-    // Close any open inline menu when user interacts anywhere in the tree
-    setMenuSel(null);
-  };
+  // Dismiss inline menu when clicking anywhere outside the tree (e.g., closing sidebar)
+  useEffect(() => {
+    const onGlobalPointerDown = (e: Event) => {
+      if (!menuSel) return;
+      const el = e.target as HTMLElement | null;
+      // Close menu when clicking/tapping anywhere that is not the inline menu itself
+      if (!el || !el.closest('.tree-menu')) setMenuSel(null);
+    };
+    window.addEventListener('pointerdown', onGlobalPointerDown, true);
+    return () => window.removeEventListener('pointerdown', onGlobalPointerDown, true);
+  }, [menuSel]);
 
   return (
     <div
@@ -211,7 +215,6 @@ export function FileTree(props: FileTreeProps) {
         }
         onKeyDown(e);
       }}
-      onPointerDownCapture={onPointerDownCapture}
     >
       {props.newEntry && props.newEntry.parentDir === '' && (
         <div className="tree-row is-new" style={{ paddingLeft: 6 }}>
