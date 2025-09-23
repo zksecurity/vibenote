@@ -162,13 +162,31 @@ export function FileTree(props: FileTreeProps) {
     setEditText('');
   };
 
+  const cancelEdit = () => {
+    // Cancel inline rename or creation without committing
+    setEditing(null);
+    setEditText('');
+    if (createKey !== null) {
+      setCreateKey(null);
+      props.onFinishCreate?.();
+    }
+  };
+
   return (
     <div className="file-tree" tabIndex={0} ref={containerRef} onKeyDown={onKeyDown}>
       {props.newEntry && props.newEntry.parentDir === '' && (
         <div className="tree-row is-new" style={{ paddingLeft: 24 }}>
           <Icon kind={props.newEntry.kind} open={true} />
           <form onSubmit={(e) => { e.preventDefault(); submitEdit({ kind: props.newEntry!.kind === 'file' ? 'file' : 'folder' }); }} className="tree-edit-form">
-            <input className="tree-input" value={editText} onChange={(e) => setEditText(e.target.value)} autoFocus placeholder={props.newEntry.kind === 'file' ? 'New file' : 'New folder'} />
+            <input
+              className="tree-input"
+              value={editText}
+              onChange={(e) => setEditText(e.target.value)}
+              autoFocus
+              onBlur={cancelEdit}
+              onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); } }}
+              placeholder={props.newEntry.kind === 'file' ? 'New file' : 'New folder'}
+            />
           </form>
         </div>
       )}
@@ -189,6 +207,7 @@ export function FileTree(props: FileTreeProps) {
           onEditTextChange={setEditText}
           onSubmitEdit={submitEdit}
           newEntry={props.newEntry ?? null}
+          onCancelEditing={cancelEdit}
         />
       ))}
     </div>
@@ -210,6 +229,7 @@ function Row(props: {
   onEditTextChange: (t: string) => void;
   onSubmitEdit: (ctx: { kind: 'file'; id?: string; dir?: string } | { kind: 'folder'; dir?: string }) => void;
   newEntry: NewEntry | null;
+  onCancelEditing: () => void;
 }) {
   const { node, depth } = props;
   if (node.kind === 'folder') {
@@ -229,7 +249,14 @@ function Row(props: {
           <Icon kind="folder" open={!isCollapsed} />
           {isEditing ? (
             <form className="tree-edit-form" onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); props.onSubmitEdit({ kind: 'folder', dir: node.dir }); }}>
-              <input className="tree-input" value={props.editText} onChange={(e) => props.onEditTextChange(e.target.value)} autoFocus />
+              <input
+                className="tree-input"
+                value={props.editText}
+                onChange={(e) => props.onEditTextChange(e.target.value)}
+                autoFocus
+                onBlur={props.onCancelEditing}
+                onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); props.onCancelEditing(); } }}
+              />
             </form>
           ) : (
             <span className="tree-title">{node.name || 'Root'}</span>
@@ -239,7 +266,15 @@ function Row(props: {
           <div className="tree-row is-new" style={{ paddingLeft: 24 + (depth + 1) * 12 }}>
             <Icon kind={props.newEntry.kind} open={true} />
             <form className="tree-edit-form" onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); props.onSubmitEdit({ kind: props.newEntry!.kind === 'file' ? 'file' : 'folder', dir: node.dir }); }}>
-              <input className="tree-input" value={props.editText} onChange={(e) => props.onEditTextChange(e.target.value)} autoFocus placeholder={props.newEntry.kind === 'file' ? 'New file' : 'New folder'} />
+              <input
+                className="tree-input"
+                value={props.editText}
+                onChange={(e) => props.onEditTextChange(e.target.value)}
+                autoFocus
+                onBlur={props.onCancelEditing}
+                onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); props.onCancelEditing(); } }}
+                placeholder={props.newEntry.kind === 'file' ? 'New file' : 'New folder'}
+              />
             </form>
           </div>
         )}
@@ -260,6 +295,7 @@ function Row(props: {
             onEditTextChange={props.onEditTextChange}
             onSubmitEdit={props.onSubmitEdit}
             newEntry={props.newEntry}
+            onCancelEditing={props.onCancelEditing}
           />
         ))}
       </div>
@@ -278,7 +314,14 @@ function Row(props: {
       <Icon kind="file" />
       {isEditing ? (
         <form className="tree-edit-form" onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); props.onSubmitEdit({ kind: 'file', id: node.id }); }}>
-          <input className="tree-input" value={props.editText} onChange={(e) => props.onEditTextChange(e.target.value)} autoFocus />
+          <input
+            className="tree-input"
+            value={props.editText}
+            onChange={(e) => props.onEditTextChange(e.target.value)}
+            autoFocus
+            onBlur={props.onCancelEditing}
+            onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); props.onCancelEditing(); } }}
+          />
         </form>
       ) : (
         <span className="tree-title">{node.name}</span>
