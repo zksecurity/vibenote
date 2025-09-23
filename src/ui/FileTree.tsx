@@ -40,6 +40,25 @@ export function FileTree(props: FileTreeProps) {
   let [editText, setEditText] = useState('');
   let containerRef = useRef<HTMLDivElement | null>(null);
 
+  type FlatItem = { kind: 'folder'; dir: string; depth: number } | { kind: 'file'; id: string; depth: number };
+  const visibleItems = useMemo<FlatItem[]>(() => {
+    const list: FlatItem[] = [];
+    const walk = (node: FolderNode, depth: number) => {
+      if (node.dir !== '' || depth === 0) {
+        // root folder entry is not clickable label; still include for navigation to root folder
+        list.push({ kind: 'folder', dir: node.dir, depth });
+      }
+      const isCollapsed = collapsed[node.dir] === true;
+      if (isCollapsed) return;
+      for (const c of node.children) {
+        if (c.kind === 'folder') walk(c, depth + 1);
+        else list.push({ kind: 'file', id: c.id, depth: depth + 1 });
+      }
+    };
+    walk(tree, 0);
+    return list;
+  }, [tree, collapsed]);
+
   // Sync selection to active file
   useEffect(() => {
     if (props.activeId) setSelected({ kind: 'file', id: props.activeId });
@@ -60,6 +79,27 @@ export function FileTree(props: FileTreeProps) {
   const onKeyDown = (e: React.KeyboardEvent) => {
     // When inline-editing, let inputs handle keys (Backspace, Enter, etc.)
     if (editing) return;
+    // Arrow navigation operates inside the tree only when focused
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (visibleItems.length === 0) return;
+      let index = -1;
+      if (selected) {
+        index = visibleItems.findIndex((it) =>
+          (it.kind === 'folder' && selected.kind === 'folder' && it.dir === selected.dir) ||
+          (it.kind === 'file' && selected.kind === 'file' && it.id === selected.id)
+        );
+      }
+      if (index < 0) index = 0;
+      index += e.key === 'ArrowDown' ? 1 : -1;
+      if (index < 0) index = 0;
+      if (index >= visibleItems.length) index = visibleItems.length - 1;
+      const it = visibleItems[index];
+      if (!it) return;
+      if (it.kind === 'folder') setSelected({ kind: 'folder', dir: (it as any).dir });
+      else setSelected({ kind: 'file', id: (it as any).id });
+      return;
+    }
     if (!selected) return;
     if (e.key === 'F2') {
       e.preventDefault();
@@ -81,9 +121,9 @@ export function FileTree(props: FileTreeProps) {
       if (selected.kind === 'file') props.onSelectFile(selected.id);
       else toggleCollapse(selected.dir);
     } else if (e.key === 'ArrowLeft') {
-      if (selected.kind === 'folder') collapse(selected.dir);
+      if (selected.kind === 'folder') { e.preventDefault(); collapse(selected.dir); }
     } else if (e.key === 'ArrowRight') {
-      if (selected.kind === 'folder') expand(selected.dir);
+      if (selected.kind === 'folder') { e.preventDefault(); expand(selected.dir); }
     }
   };
 
