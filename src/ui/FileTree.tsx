@@ -192,7 +192,8 @@ export function FileTree(props: FileTreeProps) {
   return (
     <div className="file-tree" tabIndex={0} ref={containerRef} onKeyDown={onKeyDown}>
       {props.newEntry && props.newEntry.parentDir === '' && (
-        <div className="tree-row is-new" style={{ paddingLeft: 24 }}>
+        <div className="tree-row is-new" style={{ paddingLeft: 8 }}>
+          <span className="tree-disclosure-spacer" />
           <Icon kind={props.newEntry.kind} open={true} />
           <form
             onSubmit={(e) => {
@@ -318,7 +319,8 @@ function Row(props: {
           )}
         </div>
         {!isCollapsed && props.newEntry && props.newEntry.parentDir === node.dir && (
-          <div className="tree-row is-new" style={{ paddingLeft: 24 + (depth + 1) * 12 }}>
+          <div className="tree-row is-new" style={{ paddingLeft: 8 + (depth + 1) * 12 }}>
+            <span className="tree-disclosure-spacer" />
             <Icon kind={props.newEntry.kind} open={true} />
             <form
               className="tree-edit-form"
@@ -378,10 +380,11 @@ function Row(props: {
   return (
     <div
       className={`tree-row ${isActive || isSelected ? 'is-active' : ''}`}
-      style={{ paddingLeft: 24 + depth * 12 }}
+      style={{ paddingLeft: 8 + depth * 12 }}
       onClick={() => props.onSelectFile(node.id)}
       onDoubleClick={() => props.onSelectFile(node.id)}
     >
+      <span className="tree-disclosure-spacer" />
       <Icon kind="file" />
       {isEditing ? (
         <form

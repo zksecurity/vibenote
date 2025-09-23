@@ -985,6 +985,7 @@ textarea:focus-visible {
 .tree-row:hover { background: #f6f8fa; }
 .tree-row.is-active { background: #eaeef2; }
 .tree-disclosure { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border: 0; background: transparent; color: #6e7781; cursor: pointer; }
+.tree-disclosure-spacer { display: inline-block; width: 18px; height: 18px; }
 .tree-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tree-icon { width: 16px; height: 16px; display: inline-block; background-repeat: no-repeat; background-size: 16px 16px; }
 .tree-icon.folder,
