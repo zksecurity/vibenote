@@ -13,14 +13,14 @@ This document captures the core architecture, sync logic, and decisions so anoth
 ## High‑level Architecture
 
 - UI: React + TypeScript + Vite, SPA, mobile‑friendly.
-- CRDT: Y.js with a Y.Text per note; markdown text is the canonical content from/to Git.
+- Merge: Y.js is used for three‑way merges during sync. The in‑app editor is a simple controlled textarea (non‑collaborative); Markdown text is the canonical content persisted locally and pushed to Git.
 - Storage:
   - Local: localStorage for MVP (swap to IndexedDB later via `idb-keyval` or `y-indexeddb`).
   - Remote: GitHub REST API (contents + commits) invoked directly from the client using the stored OAuth token.
   - Sync:
-  - Optimistic apply to local CRDT + persist to local storage immediately.
+  - Optimistic apply: edit the plain text and persist to local storage immediately.
   - Manual `Sync now` trigger today; background sync loop is still planned.
-  - Merge strategy: pull remote md, import both local and remote into Y.Text, use Y.js to converge, export md, commit the result. (See “CRDT merge with plain text” below.)
+  - Merge strategy: pull remote md, use a Y.js‑backed three‑way merge (ephemeral Y.Doc/Y.Text in memory) to converge local and remote, export md, commit the result. (See “Merge with Y.js” below.)
 
 ## Repository Layout
 
@@ -79,17 +79,13 @@ Goal: least‑privilege access limited to user‑selected repositories, cleaner 
   - The app’s private key stays on the server; clients never see it.
   - Rate limits: prefer per‑installation tokens and batch writes where possible.
 
-## CRDT merge with plain text
+## Merge with Y.js
 
-- Local state: a `Y.Doc` with one `Y.Text` per note (keyed by note id/path).
-- Import/export:
-  - Import md → set the Y.Text string to the markdown content.
-  - Export md ← read the Y.Text string.
-- Merge:
-  - For a note: create three Y.Text values: base (from last synced), local, remote.
-  - Apply Y.js updates to converge local and remote; export the result to text.
-  - Since Y.Text is a conflict‑free replicated data type, concurrent insertions/deletions converge deterministically.
-- The repo still stores Markdown (not CRDT ops). We re‑create CRDT state from text on load; that’s acceptable because Y.Text convergence for plain text is defined by the current document content.
+- Merge engine (during sync):
+  - Create an ephemeral `Y.Doc` and `Y.Text` instances for base, ours (local), and theirs (remote).
+  - Use Y.js to converge concurrent insertions/deletions deterministically and export the merged Markdown string.
+  - This CRDT state lives only for the duration of the merge; nothing CRDT‑related is persisted.
+  - The repository still stores Markdown (not CRDT ops).
 
 ## Sync Algorithm (MVP)
 
@@ -97,7 +93,7 @@ Goal: least‑privilege access limited to user‑selected repositories, cleaner 
    - Instantiate `LocalStore`, which seeds a welcome note if none exist and materialises the local index from `localStorage`.
    - Load any existing GitHub token (`vibenote:gh-token`) and remote config (`vibenote:config`).
 2. Editing a note:
-   - Apply the edit through a Y.Text instance and immediately persist the new Markdown to `localStorage`.
+   - Apply the edit to the plain text and immediately persist the new Markdown to `localStorage`.
    - `LocalStore` updates `updatedAt` and leaves tombstones when notes are deleted or renamed.
 3. Sync (Manual for now):
    - User clicks “Sync now”, which calls `syncBidirectional(LocalStore)`.
@@ -109,7 +105,7 @@ Goal: least‑privilege access limited to user‑selected repositories, cleaner 
 Notes:
 
 - Batch commits: we can aggregate multiple note updates into one commit per sync window.
-- Conflict policy: CRDT decides; no manual three‑way textual conflict markers.
+- Conflict policy: the Y.js merge engine decides; no manual three‑way textual conflict markers.
 - If remote changed but merge produces identical text, skip committing.
 
 ## Git Operations
@@ -133,20 +129,18 @@ Key namespace: `vibenote:*`
 - `vibenote:folders` – JSON list of folder paths under `notesDir` (e.g., `['a', 'a/b']`).
 - `vibenote:tombstones` – Array of delete/rename markers used to reconcile remote deletions safely.
 
-We avoid storing Y.js updates to keep it simple; instead, we reconstruct `Y.Text` from `text` on open. Later we can store Y updates in `y-indexeddb` for faster loads.
-
 ## UI Outline
 
 - Header: repo selector (owner/repo/branch), sync status (idle/syncing/error).
 - Sidebar: collapsible folder tree with notes; keyboard actions (F2 rename, Del delete). README.md is ignored only at repo root; nested README.md are notes.
-- Editor: minimal Markdown editor (textarea for MVP), bound to Y.Text.
+- Editor: minimal Markdown editor (textarea).
 - Mobile: sidebar overlays; editor is primary.
 
 ## Error Handling & Resilience
 
 - Offline: no remote calls, local edits continue.
 - Token invalid: show a subtle banner; continue offline.
-- Merge failure: unlikely with Y.Text; if remote file deleted, confirm recreate.
+- Merge failure: unlikely with the Y.js merge engine; if a remote file is deleted, confirm recreate.
 - Sign out clears the token/config, resets local notes to the welcome state, and removes tombstones.
 
 ## Security

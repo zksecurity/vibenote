@@ -5,7 +5,7 @@ VibeNote is a lightweight, mobile‑friendly, offline‑first note editor that t
 - Frontend only (no persistent server required)
 - Offline‑first via in‑browser storage + optimistic UI
 - Periodic background sync commits to GitHub (or any Git host API)
-- CRDT merge (Y.js) for plain‑text collaboration and conflict resolution
+- Y.js‑backed merge for conflict resolution during sync (no live collaboration)
 
 See DESIGN.md for a detailed architecture and sync/merge logic.
 
@@ -18,7 +18,7 @@ See `AGENTS.md` for local setup, environment variables, and serverless API instr
 - `src/ui/` React UI, modals, and the app shell
 - `src/auth/` GitHub Device Flow helpers used by the client
 - `src/storage/` local offline storage (localStorage for MVP, plus tombstones, folder index)
-- `src/merge/` Y.js-backed merge helpers for Markdown
+- `src/merge/` Y.js‑backed merge helpers for Markdown
 - `src/sync/` GitHub REST integration for pull/push/delete and bidirectional sync
 - `api/` Vercel serverless endpoints that proxy GitHub's device code/token APIs
 - `DESIGN.md` Deep dive into syncing, CRDT merge, file layout, and future serverless options
@@ -82,5 +82,5 @@ To use it:
 Notes:
 
 - Notes can be nested in folders; the sidebar shows a collapsible tree. README.md is ignored only at the repository root; nested README.md files are treated as notes.
-- For the MVP, conflict resolution relies on full‑text replace and optional Y.Text merging in memory; real background batching is planned.
+- Conflict resolution uses a Y.js three‑way merge during sync. The in‑app editor is not collaborative and does not use Y.js.
 - If a remote file does not exist, the app will create it.
