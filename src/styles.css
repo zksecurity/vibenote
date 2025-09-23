@@ -592,6 +592,13 @@ textarea:focus-visible {
   z-index: 1;
 }
 
+.sidebar-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.sidebar-actions .btn { flex: 1; }
+
 .sidebar-title {
   display: flex;
   align-items: center;

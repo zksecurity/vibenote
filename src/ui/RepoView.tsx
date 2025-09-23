@@ -814,11 +814,11 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                   </button>
                 </div>
                 <div className="sidebar-actions">
-                  <button className="btn primary full-width" onClick={onCreate}>
+                  <button className="btn primary" onClick={onCreate}>
                     New note
                   </button>
                   <button
-                    className="btn secondary full-width"
+                    className="btn secondary"
                     onClick={() => {
                       let parentDir = '';
                       if (selection?.kind === 'folder') parentDir = selection.dir;
