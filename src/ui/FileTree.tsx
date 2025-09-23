@@ -58,6 +58,8 @@ export function FileTree(props: FileTreeProps) {
 
   // Keyboard bindings
   const onKeyDown = (e: React.KeyboardEvent) => {
+    // When inline-editing, let inputs handle keys (Backspace, Enter, etc.)
+    if (editing) return;
     if (!selected) return;
     if (e.key === 'F2') {
       e.preventDefault();
@@ -71,7 +73,7 @@ export function FileTree(props: FileTreeProps) {
         setEditing(selected);
         setEditText(name || '');
       }
-    } else if (e.key === 'Delete' || e.key === 'Backspace') {
+    } else if (e.key === 'Delete') {
       e.preventDefault();
       if (selected.kind === 'file') props.onDeleteFile(selected.id);
       else if (selected.dir !== '') props.onDeleteFolder(selected.dir);
@@ -280,4 +282,3 @@ function normalizeDir(dir: string): string {
   if (d === '.' || d === '..') d = '';
   return d;
 }
-
