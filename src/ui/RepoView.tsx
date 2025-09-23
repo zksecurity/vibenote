@@ -888,9 +888,11 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                 {doc ? (
                   <div className="workspace-panels">
                     <Editor
+                      key={doc.id}
                       doc={doc}
-                      onChange={(text) => {
-                        store.saveNote(doc.id, text);
+                      onChange={(id, text) => {
+                        // Persist precisely to the note that produced the change
+                        store.saveNote(id, text);
                         scheduleAutoSync();
                       }}
                     />
