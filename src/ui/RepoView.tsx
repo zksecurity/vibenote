@@ -1,6 +1,5 @@
 import { useMemo, useState, useEffect } from 'react';
-// Replaces flat NoteList with a collapsible tree
-import { NoteTree } from './NoteTree';
+import { FileTree, type FileEntry } from './FileTree';
 import { Editor } from './Editor';
 import {
   LocalStore,
@@ -66,7 +65,8 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     return firstId ? store.loadNote(firstId) : null;
   });
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [selection, setSelection] = useState<{ kind: 'folder'; dir: string } | { kind: 'note'; id: string } | null>(null);
+  const [selection, setSelection] = useState<{ kind: 'folder'; dir: string } | { kind: 'file'; id: string } | null>(null);
+  const [newEntry, setNewEntry] = useState<{ kind: 'file' | 'folder'; parentDir: string; key: number } | null>(null);
   const [token, setToken] = useState<string | null>(getStoredToken());
   const [showConfig, setShowConfig] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -256,30 +256,17 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   };
 
   const onCreate = () => {
-    let targetDir = '';
-    if (selection?.kind === 'folder') targetDir = selection.dir;
-    if (selection?.kind === 'note') {
+    let parentDir = '';
+    if (selection?.kind === 'folder') parentDir = selection.dir;
+    if (selection?.kind === 'file') {
       let n = notes.find((x) => x.id === selection.id);
-      if (n) targetDir = (n.dir as string) || '';
+      if (n) parentDir = (n.dir as string) || '';
     }
-    const id = store.createNote(undefined, '', targetDir);
-    setNotes(store.listNotes());
-    setFolders(store.listFolders());
-    setActiveId(id);
-    setSidebarOpen(false);
-    scheduleAutoSync();
+    setNewEntry({ kind: 'file', parentDir, key: Date.now() });
   };
 
   const onCreateFolder = (parentDir: string) => {
-    let name = window.prompt('New folder name');
-    if (!name) return;
-    try {
-      store.createFolder(parentDir, name);
-      setFolders(store.listFolders());
-    } catch (e) {
-      console.error(e);
-      setSyncMsg('Invalid folder name.');
-    }
+    setNewEntry({ kind: 'folder', parentDir, key: Date.now() });
   };
 
   const onRenameFolder = (dir: string, newName: string) => {
@@ -294,19 +281,8 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     }
   };
 
-  const onMoveFolder = (fromDir: string, toDir?: string) => {
-    let target = toDir ?? window.prompt('Move folder to (parent path, empty for root)') ?? undefined;
-    if (target === undefined) return;
-    try {
-      store.moveFolder(fromDir, target);
-      setNotes(store.listNotes());
-      setFolders(store.listFolders());
-      scheduleAutoSync();
-    } catch (e) {
-      console.error(e);
-      setSyncMsg('Unable to move folder.');
-    }
-  };
+  // Move is deferred to later (drag & drop); not supported for now
+  const onMoveFolder = (_fromDir: string, _toDir?: string) => {};
 
   const onDeleteFolder = (dir: string) => {
     if (!window.confirm('Delete folder and all contained notes?')) return;
@@ -839,7 +815,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                     onClick={() => {
                       let parentDir = '';
                       if (selection?.kind === 'folder') parentDir = selection.dir;
-                      if (selection?.kind === 'note') {
+                      if (selection?.kind === 'file') {
                         let n = notes.find((x) => x.id === selection.id);
                         if (n) parentDir = (n.dir as string) || '';
                       }
@@ -864,28 +840,38 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                   </div>
                 ) : null}
               </div>
-              <NoteTree
-                notes={notes}
+              <FileTree
+                files={notes.map((n) => ({ id: n.id, name: n.title || 'Untitled', path: n.path, dir: (n.dir as string) || '' })) as FileEntry[]}
                 folders={folders}
                 activeId={activeId}
-                onSelectionChange={(sel) => setSelection(sel)}
-                onSelectNote={(id) => {
+                onSelectionChange={(sel) => setSelection(sel as any)}
+                onSelectFile={(id) => {
                   setActiveId(id);
                   setSidebarOpen(false);
                 }}
-                onRenameNote={onRename}
-                onDeleteNote={onDelete}
-                onRenameFolder={onRenameFolder}
-                onMoveFolder={(from, to) => onMoveFolder(from, to)}
-                onDeleteFolder={onDeleteFolder}
-                onCreateNoteIn={(dir) => {
-                  let id = store.createNote(undefined, '', dir);
+                onRenameFile={onRename}
+                onDeleteFile={onDelete}
+                onCreateFile={(dir, name) => {
+                  let id = store.createNote(name, '', dir);
                   setNotes(store.listNotes());
                   setFolders(store.listFolders());
                   setActiveId(id);
                   scheduleAutoSync();
+                  return id;
                 }}
-                onCreateFolder={(dir) => onCreateFolder(dir)}
+                onCreateFolder={(parentDir, name) => {
+                  try {
+                    store.createFolder(parentDir, name);
+                    setFolders(store.listFolders());
+                  } catch (e) {
+                    console.error(e);
+                    setSyncMsg('Invalid folder name.');
+                  }
+                }}
+                onRenameFolder={onRenameFolder}
+                onDeleteFolder={onDeleteFolder}
+                newEntry={newEntry}
+                onFinishCreate={() => setNewEntry(null)}
               />
             </aside>
             <section className="workspace">
