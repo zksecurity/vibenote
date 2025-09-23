@@ -33,7 +33,29 @@ export function Editor({ doc, onChange }: Props) {
     const out = marked.parse(text, { async: false });
     const raw = typeof out === 'string' ? out : '';
     // Sanitize to prevent XSS from malicious markdown or embedded HTML
-    return DOMPurify.sanitize(raw, { USE_PROFILES: { html: true } });
+    const sanitized = DOMPurify.sanitize(raw, { USE_PROFILES: { html: true } });
+    // Post-process links: external links open in a new tab with safe rel
+    try {
+      const wrapper = document.createElement('div');
+      wrapper.innerHTML = sanitized;
+      const anchors = wrapper.querySelectorAll('a[href]');
+      anchors.forEach((a) => {
+        const href = a.getAttribute('href') || '';
+        try {
+          const url = new URL(href, window.location.href);
+          const isExternal = url.origin !== window.location.origin;
+          if (isExternal) {
+            a.setAttribute('target', '_blank');
+            a.setAttribute('rel', 'noopener noreferrer');
+          }
+        } catch {
+          // ignore malformed URLs
+        }
+      });
+      return wrapper.innerHTML;
+    } catch {
+      return sanitized;
+    }
   }, [text]);
 
   return (
