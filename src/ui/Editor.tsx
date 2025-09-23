@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 import type { NoteDoc } from '../storage/local';
 
 interface Props {
@@ -28,7 +29,12 @@ export function Editor({ doc, onChange }: Props) {
     onChange(doc.id, val);
   };
 
-  const html = useMemo(() => marked.parse(text), [text]);
+  const html = useMemo(() => {
+    const out = marked.parse(text, { async: false });
+    const raw = typeof out === 'string' ? out : '';
+    // Sanitize to prevent XSS from malicious markdown or embedded HTML
+    return DOMPurify.sanitize(raw, { USE_PROFILES: { html: true } });
+  }, [text]);
 
   return (
     <>
