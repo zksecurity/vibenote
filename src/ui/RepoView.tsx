@@ -832,21 +832,8 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                     New folder
                   </button>
                 </div>
-                {route.kind === 'repo' && linked ? (
-                  <div className="repo-autosync-toggle">
-                    <Toggle
-                      checked={autosync}
-                      onChange={(enabled) => {
-                        setAutosync(enabled);
-                        setAutosyncEnabled(slug, enabled);
-                        if (enabled) scheduleAutoSync(0);
-                      }}
-                      label="Autosync"
-                      description="Runs background sync after edits and periodically."
-                    />
-                  </div>
-                ) : null}
               </div>
+              <div className="sidebar-body">
               <FileTree
                 files={notes.map((n) => ({ id: n.id, name: n.title || 'Untitled', path: n.path, dir: (n.dir as string) || '' })) as FileEntry[]}
                 folders={folders}
@@ -880,6 +867,21 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                 newEntry={newEntry}
                 onFinishCreate={() => setNewEntry(null)}
               />
+              </div>
+              {route.kind === 'repo' && linked ? (
+                <div className="repo-autosync-toggle">
+                  <Toggle
+                    checked={autosync}
+                    onChange={(enabled) => {
+                      setAutosync(enabled);
+                      setAutosyncEnabled(slug, enabled);
+                      if (enabled) scheduleAutoSync(0);
+                    }}
+                    label="Autosync"
+                    description="Runs background sync after edits and periodically."
+                  />
+                </div>
+              ) : null}
             </aside>
             <section className="workspace">
               <div className="workspace-body">

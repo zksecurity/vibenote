@@ -574,6 +574,12 @@ textarea:focus-visible {
   transition: transform 0.25s ease;
 }
 
+.sidebar-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .sidebar-header {
   position: sticky;
   top: 0;
