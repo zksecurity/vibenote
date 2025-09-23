@@ -2,6 +2,8 @@ export type NoteMeta = {
   id: string;
   path: string;
   title: string;
+  // Relative directory path inside notesDir; '' for root
+  dir?: string;
   updatedAt: number;
 };
 
@@ -20,6 +22,7 @@ const NS = 'vibenote';
 const REPO_PREFIX = `${NS}:repo`;
 const LINK_PREFIX = `${NS}:repo-link`;
 const PREFS_SUFFIX = 'prefs';
+const FOLDERS_SUFFIX = 'folders';
 const LEGACY_INDEX_KEY = legacyKey('index');
 const LEGACY_TOMBSTONES_KEY = legacyKey('tombstones');
 const LEGACY_NOTE_PREFIX = legacyKey('note');
@@ -61,6 +64,7 @@ export class LocalStore {
   private notesDir: string;
   private indexKey: string;
   private notePrefix: string;
+  private foldersKey: string;
 
   constructor(slugOrOpts: string | LocalStoreOptions = {}, maybeOpts: LocalStoreOptions = {}) {
     let slug: string;
@@ -76,8 +80,11 @@ export class LocalStore {
     this.notesDir = opts.notesDir ?? '';
     this.indexKey = repoKey(this.slug, 'index');
     this.notePrefix = `${repoKey(this.slug, 'note')}:`;
+    this.foldersKey = repoKey(this.slug, FOLDERS_SUFFIX);
     migrateLegacyNamespaceIfNeeded(this.slug);
     this.index = this.loadIndex();
+    // Migration/backfill: ensure dir is present and folders index is built
+    this.backfillDirsAndFolders();
     let shouldSeed = opts.seedWelcome ?? true;
     if (shouldSeed && this.index.length === 0) {
       this.createNote('Welcome', WELCOME_NOTE);
@@ -116,18 +123,21 @@ export class LocalStore {
     this.touchIndex(id, { updatedAt });
   }
 
-  createNote(title = 'Untitled', text = ''): string {
+  createNote(title = 'Untitled', text = '', dir: string = ''): string {
     let id = crypto.randomUUID();
     let safe = ensureValidTitle(title || 'Untitled');
     let displayTitle = title.trim() || 'Untitled';
-    let path = joinPath(this.notesDir, `${safe}.md`);
-    let meta: NoteMeta = { id, path, title: displayTitle, updatedAt: Date.now() };
+    let normDir = normalizeDir(dir);
+    let relPath = joinPath(normDir, `${safe}.md`);
+    let path = joinPath(this.notesDir, relPath);
+    let meta: NoteMeta = { id, path, title: displayTitle, dir: normDir, updatedAt: Date.now() };
     let doc: NoteDoc = { ...meta, text };
     let idx = this.loadIndex();
     idx.push(meta);
     localStorage.setItem(this.indexKey, JSON.stringify(idx));
     localStorage.setItem(this.noteKey(id), JSON.stringify(doc));
     this.index = idx;
+    this.addFolder(normDir);
     debugLog(this.slug, 'createNote', { id, path, title: displayTitle });
     return id;
   }
@@ -137,16 +147,18 @@ export class LocalStore {
     if (!doc) return;
     let fromPath = doc.path;
     let safe = ensureValidTitle(title || 'Untitled');
-    let path = joinPath(this.notesDir, `${safe}.md`);
+    let normDir = normalizeDir(doc.dir ?? extractDir(this.notesDir, fromPath));
+    let relPath = joinPath(normDir, `${safe}.md`);
+    let path = joinPath(this.notesDir, relPath);
     let updatedAt = Date.now();
-    let next: NoteDoc = { ...doc, title: safe, path, updatedAt };
+    let next: NoteDoc = { ...doc, title: safe, path, dir: normDir, updatedAt };
     let pathChanged = fromPath !== path;
     if (pathChanged) {
       delete next.lastRemoteSha;
       delete next.lastSyncedHash;
     }
     localStorage.setItem(this.noteKey(id), JSON.stringify(next));
-    this.touchIndex(id, { title: safe, path, updatedAt });
+    this.touchIndex(id, { title: safe, path, dir: normDir, updatedAt });
     if (pathChanged) {
       recordRenameTombstone(this.slug, {
         from: fromPath,
@@ -195,10 +207,13 @@ export class LocalStore {
     }
     let now = Date.now();
     let index: NoteMeta[] = [];
+    let folderSet = new Set<string>();
     for (let file of files) {
       let id = crypto.randomUUID();
       let title = basename(file.path).replace(/\.md$/i, '');
-      let meta: NoteMeta = { id, path: file.path, title, updatedAt: now };
+      let dir = extractDir(this.notesDir, file.path);
+      if (dir !== '') folderSet.add(dir);
+      let meta: NoteMeta = { id, path: file.path, title, dir, updatedAt: now };
       let doc: NoteDoc = {
         ...meta,
         text: file.text,
@@ -209,8 +224,127 @@ export class LocalStore {
       localStorage.setItem(this.noteKey(id), JSON.stringify(doc));
     }
     localStorage.setItem(this.indexKey, JSON.stringify(index));
+    localStorage.setItem(this.foldersKey, JSON.stringify(Array.from(folderSet).sort()));
     this.index = index;
     debugLog(this.slug, 'replaceWithRemote', { count: files.length });
+  }
+
+  // --- Folder APIs ---
+  listFolders(): string[] {
+    let raw = localStorage.getItem(this.foldersKey);
+    if (!raw) return [];
+    try {
+      let arr = JSON.parse(raw) as string[];
+      if (!Array.isArray(arr)) return [];
+      return arr.filter((d) => typeof d === 'string');
+    } catch {
+      return [];
+    }
+  }
+
+  createFolder(parentDir: string, name: string) {
+    let parent = normalizeDir(parentDir);
+    let folderName = ensureValidFolderName(name);
+    let target = normalizeDir(joinPath(parent, folderName));
+    if (target === '') return; // no root creation
+    let folders = new Set(this.listFolders());
+    // Prevent duplicates at same path
+    if (folders.has(target)) return;
+    // Prevent creating nested parents without hierarchy; add all ancestor segments
+    for (let p of ancestorsOf(target)) folders.add(p);
+    localStorage.setItem(this.foldersKey, JSON.stringify(Array.from(folders).sort()));
+    debugLog(this.slug, 'folder:create', { target });
+  }
+
+  renameFolder(oldDir: string, newName: string) {
+    let from = normalizeDir(oldDir);
+    if (from === '') return;
+    let parent = parentDirOf(from);
+    let to = normalizeDir(joinPath(parent, ensureValidFolderName(newName)));
+    this.moveFolder(from, to);
+  }
+
+  moveFolder(fromDir: string, toDir: string) {
+    let from = normalizeDir(fromDir);
+    let to = normalizeDir(toDir);
+    if (from === '' || to === '') return;
+    // Prevent moving into own subtree
+    if (to === from || to.startsWith(from + '/')) return;
+    let folders = new Set(this.listFolders());
+    if (!folders.has(from)) return;
+    // Move folder entries under from → to
+    let updated = new Set<string>();
+    for (let d of folders) {
+      if (d === from || d.startsWith(from + '/')) {
+        let rest = d.slice(from.length);
+        let next = normalizeDir(to + rest);
+        updated.add(next);
+      } else {
+        updated.add(d);
+      }
+    }
+    // Update notes under moved folder
+    let idx = this.loadIndex();
+    for (let meta of idx) {
+      let dir = normalizeDir(meta.dir ?? extractDir(this.notesDir, meta.path));
+      if (dir === from || dir.startsWith(from + '/')) {
+        let rest = dir.slice(from.length);
+        let nextDir = normalizeDir(to + rest);
+        this.moveNoteToDir(meta.id, nextDir);
+      }
+    }
+    localStorage.setItem(this.foldersKey, JSON.stringify(Array.from(updated).sort()));
+    debugLog(this.slug, 'folder:move', { from, to });
+  }
+
+  deleteFolder(dir: string) {
+    let target = normalizeDir(dir);
+    if (target === '') return;
+    let folders = new Set(this.listFolders());
+    if (!folders.has(target)) return;
+    // Gather all folders to remove
+    let toRemove: string[] = [];
+    for (let d of folders) {
+      if (d === target || d.startsWith(target + '/')) toRemove.push(d);
+    }
+    for (let d of toRemove) folders.delete(d);
+    localStorage.setItem(this.foldersKey, JSON.stringify(Array.from(folders).sort()));
+    // Delete contained notes (record tombstones)
+    let idx = this.loadIndex();
+    for (let meta of idx.slice()) {
+      let dir = normalizeDir(meta.dir ?? extractDir(this.notesDir, meta.path));
+      if (dir === target || dir.startsWith(target + '/')) {
+        this.deleteNote(meta.id);
+      }
+    }
+    debugLog(this.slug, 'folder:delete', { dir: target });
+  }
+
+  moveNoteToDir(id: string, dir: string) {
+    let doc = this.loadNote(id);
+    if (!doc) return;
+    let fromPath = doc.path;
+    let normDir = normalizeDir(dir);
+    let relPath = joinPath(normDir, `${ensureValidTitle(doc.title)}.md`);
+    let toPath = joinPath(this.notesDir, relPath);
+    if (toPath === fromPath) return;
+    let updatedAt = Date.now();
+    let next: NoteDoc = { ...doc, dir: normDir, path: toPath, updatedAt };
+    delete next.lastRemoteSha;
+    delete next.lastSyncedHash;
+    localStorage.setItem(this.noteKey(id), JSON.stringify(next));
+    this.touchIndex(id, { dir: normDir, path: toPath, updatedAt });
+    recordRenameTombstone(this.slug, {
+      from: fromPath,
+      to: toPath,
+      lastRemoteSha: doc.lastRemoteSha,
+      renamedAt: updatedAt,
+    });
+    // Ensure folder index contains target and ancestors
+    let folders = new Set(this.listFolders());
+    for (let a of ancestorsOf(normDir)) folders.add(a);
+    localStorage.setItem(this.foldersKey, JSON.stringify(Array.from(folders).sort()));
+    debugLog(this.slug, 'note:moveDir', { id, toDir: normDir });
   }
 
   private loadIndex(): NoteMeta[] {
@@ -232,9 +366,92 @@ export class LocalStore {
     debugLog(this.slug, 'touchIndex', { id, patch });
   }
 
+  private backfillDirsAndFolders() {
+    let idx = this.loadIndex();
+    let changed = false;
+    let folderSet = new Set<string>(this.listFolders());
+    for (let i = 0; i < idx.length; i++) {
+      let meta = idx[i];
+      if (!meta) continue;
+      let needDir = meta.dir === undefined;
+      if (needDir) {
+        let dir = extractDir(this.notesDir, meta.path);
+        if (dir !== '') folderSet.add(dir);
+        idx[i] = { ...meta, dir } as NoteMeta;
+        // Also patch the stored document
+        let dr = localStorage.getItem(this.noteKey(meta.id));
+        if (dr) {
+          try {
+            let doc = JSON.parse(dr) as NoteDoc;
+            let next: NoteDoc = { ...doc, dir };
+            localStorage.setItem(this.noteKey(meta.id), JSON.stringify(next));
+          } catch {}
+        }
+        changed = true;
+      } else if ((meta.dir ?? '') !== '') {
+        folderSet.add(normalizeDir(meta.dir ?? ''));
+      }
+    }
+    if (changed) localStorage.setItem(this.indexKey, JSON.stringify(idx));
+    localStorage.setItem(this.foldersKey, JSON.stringify(Array.from(folderSet).sort()));
+  }
+
+  private addFolder(dir: string) {
+    let d = normalizeDir(dir);
+    if (d === '') return;
+    let set = new Set<string>(this.listFolders());
+    for (let a of ancestorsOf(d)) set.add(a);
+    localStorage.setItem(this.foldersKey, JSON.stringify(Array.from(set).sort()));
+  }
+
   private noteKey(id: string): string {
     return `${this.notePrefix}${id}`;
   }
+}
+
+// --- Internal helpers for LocalStore ---
+
+function extractDir(notesDir: string, fullPath: string): string {
+  let p = fullPath;
+  if (notesDir) {
+    let prefix = notesDir.replace(/\/+$/, '') + '/';
+    if (p.startsWith(prefix)) p = p.slice(prefix.length);
+  }
+  let i = p.lastIndexOf('/');
+  let dir = i >= 0 ? p.slice(0, i) : '';
+  return normalizeDir(dir);
+}
+
+function normalizeDir(dir: string): string {
+  let d = (dir || '').trim();
+  d = d.replace(/(^\/+|\/+?$)/g, '');
+  if (d === '.' || d === '..') d = '';
+  return d;
+}
+
+function ensureValidFolderName(name: string): string {
+  let t = name.trim();
+  if (t === '' || t === '.' || t === '..') throw new Error('Invalid folder name');
+  if (/[\\/\0]/.test(t)) throw new Error('Invalid folder name');
+  return t;
+}
+
+function parentDirOf(dir: string): string {
+  let d = normalizeDir(dir);
+  if (d === '') return '';
+  let i = d.lastIndexOf('/');
+  return i >= 0 ? d.slice(0, i) : '';
+}
+
+function ancestorsOf(dir: string): string[] {
+  let d = normalizeDir(dir);
+  if (d === '') return [];
+  let parts = d.split('/');
+  let out: string[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    out.push(parts.slice(0, i + 1).join('/'));
+  }
+  return out;
 }
 
 export type DeleteTombstone = {
@@ -388,13 +605,14 @@ export function moveNotePath(slug: string, id: string, toPath: string) {
     return;
   }
   let updatedAt = Date.now();
-  let next: NoteDoc = { ...doc, path: toPath, updatedAt };
+  let nextDir = extractDir('', toPath);
+  let next: NoteDoc = { ...doc, path: toPath, dir: nextDir, updatedAt };
   localStorage.setItem(key, JSON.stringify(next));
   let idx = loadIndexForSlug(slug);
   let j = idx.findIndex((n) => n.id === id);
   if (j >= 0) {
     let old = idx[j] as NoteMeta;
-    idx[j] = { id: old.id, path: toPath, title: old.title, updatedAt };
+    idx[j] = { id: old.id, path: toPath, title: old.title, dir: nextDir, updatedAt } as NoteMeta;
   }
   localStorage.setItem(repoKey(slug, 'index'), JSON.stringify(idx));
   debugLog(slug, 'moveNotePath', { id, toPath });

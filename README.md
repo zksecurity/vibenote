@@ -17,7 +17,7 @@ See `AGENTS.md` for local setup, environment variables, and serverless API instr
 
 - `src/ui/` React UI, modals, and the app shell
 - `src/auth/` GitHub Device Flow helpers used by the client
-- `src/storage/` local offline storage (localStorage for MVP, plus tombstones)
+- `src/storage/` local offline storage (localStorage for MVP, plus tombstones, folder index)
 - `src/merge/` Y.js-backed merge helpers for Markdown
 - `src/sync/` GitHub REST integration for pull/push/delete and bidirectional sync
 - `api/` Vercel serverless endpoints that proxy GitHub's device code/token APIs
@@ -81,5 +81,6 @@ To use it:
 
 Notes:
 
+- Notes can be nested in folders; the sidebar shows a collapsible tree. README.md is ignored only at the repository root; nested README.md files are treated as notes.
 - For the MVP, conflict resolution relies on full‑text replace and optional Y.Text merging in memory; real background batching is planned.
 - If a remote file does not exist, the app will create it.

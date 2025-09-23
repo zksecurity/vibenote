@@ -128,8 +128,9 @@ Key namespace: `vibenote:*`
 
 - `vibenote:gh-token` – GitHub OAuth access token (device flow output).
 - `vibenote:config` – JSON: `{ owner, repo, branch, notesDir }`.
-- `vibenote:index` – JSON list: `[{ id, path, title, updatedAt }]`.
-- `vibenote:note:<id>` – JSON: `{ id, path, title, text, updatedAt, lastRemoteSha, lastSyncedHash }`.
+- `vibenote:index` – JSON list: `[{ id, path, title, dir, updatedAt }]`.
+- `vibenote:note:<id>` – JSON: `{ id, path, title, dir, text, updatedAt, lastRemoteSha, lastSyncedHash }`.
+- `vibenote:folders` – JSON list of folder paths under `notesDir` (e.g., `['a', 'a/b']`).
 - `vibenote:tombstones` – Array of delete/rename markers used to reconcile remote deletions safely.
 
 We avoid storing Y.js updates to keep it simple; instead, we reconstruct `Y.Text` from `text` on open. Later we can store Y updates in `y-indexeddb` for faster loads.
@@ -137,7 +138,7 @@ We avoid storing Y.js updates to keep it simple; instead, we reconstruct `Y.Text
 ## UI Outline
 
 - Header: repo selector (owner/repo/branch), sync status (idle/syncing/error).
-- Sidebar: list of notes (search, new, sort), collapsible.
+- Sidebar: collapsible folder tree with notes; keyboard actions (F2 rename, Del delete). README.md is ignored only at repo root; nested README.md are notes.
 - Editor: minimal Markdown editor (textarea for MVP), bound to Y.Text.
 - Mobile: sidebar overlays; editor is primary.
 
@@ -163,11 +164,10 @@ We avoid storing Y.js updates to keep it simple; instead, we reconstruct `Y.Text
 
 - [x] Wire GitHub REST API for real pull/commit
 - [ ] Switch to IndexedDB for local storage
-- [ ] Automatic background sync loop (manual “Sync now” remains as manual override)
+- [x] Automatic background sync loop (manual “Sync now” remains as manual override)
 - [ ] Better editor (CodeMirror + y-codemirror)
 - [ ] Presence & collaboration (y-webrtc or y-websocket)
 - [ ] Repository browser (folders, images)
-- [ ] Webhooks (optional small server) to hint at remote updates
 - [ ] GitHub App mode (selected repos, least-privilege permissions, short-lived installation tokens)
 
 ### Repo rename handling (future)

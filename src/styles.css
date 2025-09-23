@@ -574,6 +574,12 @@ textarea:focus-visible {
   transition: transform 0.25s ease;
 }
 
+.sidebar-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .sidebar-header {
   position: sticky;
   top: 0;
@@ -585,6 +591,13 @@ textarea:focus-visible {
   border-bottom: 1px solid rgba(208, 215, 222, 0.6);
   z-index: 1;
 }
+
+.sidebar-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.sidebar-actions .btn { flex: 1; }
 
 .sidebar-title {
   display: flex;
@@ -977,6 +990,50 @@ textarea:focus-visible {
   margin-top: 10px;
   border-top: 1px solid var(--border);
   padding-top: 10px;
+}
+
+/* --- File tree (GitHub-like) --- */
+.file-tree { font-size: 14px; user-select: none; }
+.tree-row { position: relative; display: flex; align-items: center; gap: 6px; height: 28px; line-height: 28px; border-radius: 6px; padding-right: 8px; color: var(--text); cursor: default; }
+.tree-row:hover { background: #f6f8fa; }
+.tree-row.is-active { background: #eaeef2; }
+.tree-disclosure { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border: 0; background: transparent; color: #6e7781; cursor: pointer; }
+.tree-disclosure-spacer { display: inline-block; width: 18px; height: 18px; }
+.tree-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tree-icon { width: 16px; height: 16px; display: inline-block; background-repeat: no-repeat; background-size: 16px 16px; }
+.tree-icon.folder,
+.tree-icon.folder-open {
+  /* Octicon-like closed folder silhouette */
+  -webkit-mask-image: url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\"><path d=\"M1.75 3A1.75 1.75 0 0 0 0 4.75v6.5C0 12.216.784 13 1.75 13h12.5A1.75 1.75 0 0 0 16 11.25V5.5A1.5 1.5 0 0 0 14.5 4h-6L7.22 2.72A1.75 1.75 0 0 0 6 2H1.75Z\"/></svg>');
+  mask-image: url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\"><path d=\"M1.75 3A1.75 1.75 0 0 0 0 4.75v6.5C0 12.216.784 13 1.75 13h12.5A1.75 1.75 0 0 0 16 11.25V5.5A1.5 1.5 0 0 0 14.5 4h-6L7.22 2.72A1.75 1.75 0 0 0 6 2H1.75Z\"/></svg>');
+  background-color: #218bff; /* GitHub blue */
+}
+.tree-icon.folder { background-color: #0969da; } /* closed: darker */
+.tree-icon.folder-open { background-color: #218bff; } /* open: lighter */
+
+/* File: outlined gray document for contrast */
+.tree-icon.file {
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"%2357606a\" stroke-width=\"1.2\" stroke-linejoin=\"round\" stroke-linecap=\"round\"><path d=\"M3.25 2.25h5.1l3.4 3.4v8.1c0 .69-.56 1.25-1.25 1.25H4.5c-.69 0-1.25-.56-1.25-1.25v-10.5Z\"/><path d=\"M8.35 2.25V5.9h3.4\"/></svg>');
+  background-color: transparent;
+}
+.tree-edit-form { display: inline-flex; flex: 1; }
+.tree-input { width: 180px; height: 24px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; outline: none; }
+.tree-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+/* Inline context menu for mobile long-press or desktop right-click */
+.tree-menu {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 4px;
+  display: flex;
+  gap: 6px;
+  z-index: 2;
 }
 
 .account-menu {

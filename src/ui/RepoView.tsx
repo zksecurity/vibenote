@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect } from 'react';
-import { NoteList } from './NoteList';
+import { FileTree, type FileEntry } from './FileTree';
 import { Editor } from './Editor';
 import {
   LocalStore,
@@ -54,6 +54,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     return new LocalStore(slug);
   }, [slug, route.kind]);
   const [notes, setNotes] = useState<NoteMeta[]>(() => store.listNotes());
+  const [folders, setFolders] = useState<string[]>(() => store.listFolders());
   const [activeId, setActiveId] = useState<string | null>(() => {
     let initialNotes = store.listNotes();
     return initialNotes[0]?.id ?? null;
@@ -64,6 +65,8 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     return firstId ? store.loadNote(firstId) : null;
   });
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [selection, setSelection] = useState<{ kind: 'folder'; dir: string } | { kind: 'file'; id: string } | null>(null);
+  const [newEntry, setNewEntry] = useState<{ kind: 'file' | 'folder'; parentDir: string; key: number } | null>(null);
   const [token, setToken] = useState<string | null>(getStoredToken());
   const [showConfig, setShowConfig] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -166,7 +169,9 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
 
   useEffect(() => {
     let nextNotes = store.listNotes();
+    let nextFolders = store.listFolders();
     setNotes(nextNotes);
+    setFolders(nextFolders);
     setActiveId((prev) => {
       if (prev && nextNotes.some((n) => n.id === prev)) return prev;
       return nextNotes[0]?.id ?? null;
@@ -188,7 +193,9 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
         timer = null;
         // Re-read index and doc to reflect changes
         const nextNotes = store.listNotes();
+        const nextFolders = store.listFolders();
         setNotes(nextNotes);
+        setFolders(nextFolders);
         setActiveId((prev) => {
           if (prev && nextNotes.some((n) => n.id === prev)) return prev;
           return nextNotes[0]?.id ?? null;
@@ -249,10 +256,48 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   };
 
   const onCreate = () => {
-    const id = store.createNote();
-    setNotes(store.listNotes());
-    setActiveId(id);
-    setSidebarOpen(false);
+    let parentDir = '';
+    if (selection?.kind === 'folder') parentDir = selection.dir;
+    if (selection?.kind === 'file') {
+      let n = notes.find((x) => x.id === selection.id);
+      if (n) parentDir = (n.dir as string) || '';
+    }
+    setNewEntry({ kind: 'file', parentDir, key: Date.now() });
+  };
+
+  const onCreateFolder = (parentDir: string) => {
+    setNewEntry({ kind: 'folder', parentDir, key: Date.now() });
+  };
+
+  const onRenameFolder = (dir: string, newName: string) => {
+    try {
+      store.renameFolder(dir, newName);
+      setNotes(store.listNotes());
+      setFolders(store.listFolders());
+      scheduleAutoSync();
+    } catch (e) {
+      console.error(e);
+      setSyncMsg('Invalid folder name.');
+    }
+  };
+
+  // Move is deferred to later (drag & drop); not supported for now
+  const onMoveFolder = (_fromDir: string, _toDir?: string) => {};
+
+  const onDeleteFolder = (dir: string) => {
+    // Skip confirmation if folder (and subtree) contains no files
+    let hasNotes = notes.some((n) => {
+      let d = (n.dir as string) || '';
+      return d === dir || d.startsWith(dir + '/');
+    });
+    if (hasNotes) {
+      if (!window.confirm('Delete folder and all contained notes?')) return;
+    }
+    store.deleteFolder(dir);
+    const list = store.listNotes();
+    setNotes(list);
+    setFolders(store.listFolders());
+    if (activeId && !list.some((n) => n.id === activeId)) setActiveId(list[0]?.id ?? null);
     scheduleAutoSync();
   };
 
@@ -260,6 +305,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     try {
       store.renameNote(id, title);
       setNotes(store.listNotes());
+      setFolders(store.listFolders());
       scheduleAutoSync();
     } catch (e) {
       console.error(e);
@@ -271,6 +317,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     store.deleteNote(id);
     const list = store.listNotes();
     setNotes(list);
+    setFolders(store.listFolders());
     if (activeId === id) setActiveId(list[0]?.id ?? null);
     scheduleAutoSync();
   };
@@ -766,34 +813,75 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                     <CloseIcon />
                   </button>
                 </div>
-                <button className="btn primary full-width" onClick={onCreate}>
-                  New note
-                </button>
-                {route.kind === 'repo' && linked ? (
-                  <div className="repo-autosync-toggle">
-                    <Toggle
-                      checked={autosync}
-                      onChange={(enabled) => {
-                        setAutosync(enabled);
-                        setAutosyncEnabled(slug, enabled);
-                        if (enabled) scheduleAutoSync(0);
-                      }}
-                      label="Autosync"
-                      description="Runs background sync after edits and periodically."
-                    />
-                  </div>
-                ) : null}
+                <div className="sidebar-actions">
+                  <button className="btn primary" onClick={onCreate}>
+                    New note
+                  </button>
+                  <button
+                    className="btn secondary"
+                    onClick={() => {
+                      let parentDir = '';
+                      if (selection?.kind === 'folder') parentDir = selection.dir;
+                      if (selection?.kind === 'file') {
+                        let n = notes.find((x) => x.id === selection.id);
+                        if (n) parentDir = (n.dir as string) || '';
+                      }
+                      onCreateFolder(parentDir);
+                    }}
+                  >
+                    New folder
+                  </button>
+                </div>
               </div>
-              <NoteList
-                notes={notes}
+              <div className="sidebar-body">
+              <FileTree
+                files={notes.map((n) => ({ id: n.id, name: n.title || 'Untitled', path: n.path, dir: (n.dir as string) || '' })) as FileEntry[]}
+                folders={folders}
                 activeId={activeId}
-                onSelect={(id) => {
+                onSelectionChange={(sel) => setSelection(sel as any)}
+                onSelectFile={(id) => {
                   setActiveId(id);
                   setSidebarOpen(false);
                 }}
-                onRename={onRename}
-                onDelete={onDelete}
+                onRenameFile={onRename}
+                onDeleteFile={onDelete}
+                onCreateFile={(dir, name) => {
+                  let id = store.createNote(name, '', dir);
+                  setNotes(store.listNotes());
+                  setFolders(store.listFolders());
+                  setActiveId(id);
+                  scheduleAutoSync();
+                  return id;
+                }}
+                onCreateFolder={(parentDir, name) => {
+                  try {
+                    store.createFolder(parentDir, name);
+                    setFolders(store.listFolders());
+                  } catch (e) {
+                    console.error(e);
+                    setSyncMsg('Invalid folder name.');
+                  }
+                }}
+                onRenameFolder={onRenameFolder}
+                onDeleteFolder={onDeleteFolder}
+                newEntry={newEntry}
+                onFinishCreate={() => setNewEntry(null)}
               />
+              </div>
+              {route.kind === 'repo' && linked ? (
+                <div className="repo-autosync-toggle">
+                  <Toggle
+                    checked={autosync}
+                    onChange={(enabled) => {
+                      setAutosync(enabled);
+                      setAutosyncEnabled(slug, enabled);
+                      if (enabled) scheduleAutoSync(0);
+                    }}
+                    label="Autosync"
+                    description="Runs background sync after edits and periodically."
+                  />
+                </div>
+              ) : null}
             </aside>
             <section className="workspace">
               <div className="workspace-body">

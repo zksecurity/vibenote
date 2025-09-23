@@ -140,25 +140,38 @@ export async function commitBatch(
 
 // List Markdown files under the configured notesDir at HEAD
 export async function listNoteFiles(config: RemoteConfig): Promise<{ path: string; sha: string }[]> {
-  const dir = (config.notesDir || '').replace(/(^\/+|\/+?$)/g, '');
-  const base = `https://api.github.com/repos/${config.owner}/${config.repo}/contents`;
-  const url = `${base}${dir ? '/' + encodeApiPath(dir) : ''}?ref=${encodeURIComponent(
-    config.branch
-  )}`;
-  const res = await fetch(url, { headers: authHeaders() });
-  if (res.status === 404) return [];
-  if (!res.ok) throw new Error('Failed to list notes directory');
-  const data = await res.json();
-  if (!Array.isArray(data)) return [];
-  return data
-    .filter((e: any) => {
-      if (e.type !== 'file' || typeof e.path !== 'string') return false;
-      const name: string = e.name || '';
-      if (!/\.md$/i.test(name)) return false;
-      if (name.toLowerCase() === 'readme.md') return false; // not a note
-      return true;
-    })
-    .map((e: any) => ({ path: e.path as string, sha: e.sha as string }));
+  const rootDir = (config.notesDir || '').replace(/(^\/+|\/+?$)/g, '');
+  const results: { path: string; sha: string }[] = [];
+  async function walk(dir: string, depth: number) {
+    const base = `https://api.github.com/repos/${config.owner}/${config.repo}/contents`;
+    const url = `${base}${dir ? '/' + encodeApiPath(dir) : ''}?ref=${encodeURIComponent(
+      config.branch
+    )}`;
+    const res = await fetch(url, { headers: authHeaders() });
+    if (res.status === 404) return;
+    if (!res.ok) throw new Error('Failed to list notes directory');
+    const data = await res.json();
+    if (!Array.isArray(data)) return;
+    for (const e of data) {
+      if (!e || typeof e !== 'object') continue;
+      const type = (e as any).type as string | undefined;
+      const path = (e as any).path as string | undefined;
+      const name = (e as any).name as string | undefined;
+      const sha = (e as any).sha as string | undefined;
+      if (!type || !name || !path) continue;
+      if (type === 'dir') {
+        await walk(path, depth + 1);
+        continue;
+      }
+      if (type !== 'file' || !/\.md$/i.test(name)) continue;
+      // Exclude README.md only at the root level relative to notesDir
+      if (depth === 0 && name.toLowerCase() === 'readme.md') continue;
+      if (!sha) continue;
+      results.push({ path, sha });
+    }
+  }
+  await walk(rootDir, 0);
+  return results;
 }
 
 // --- base64 helpers that safely handle UTF-8 ---
@@ -254,7 +267,11 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       if (!rf) continue;
       // Create local note using the store so index stays consistent
       const title = e.path.slice(e.path.lastIndexOf('/') + 1).replace(/\.md$/i, '');
-      const id = store.createNote(title, rf.text);
+      const dir = (() => {
+        const i = e.path.lastIndexOf('/');
+        return i >= 0 ? e.path.slice(0, i) : '';
+      })();
+      const id = (store as any).createNote(title, rf.text, dir);
       // Mark sync metadata
       markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: hashText(rf.text) });
       pulled++;
@@ -413,7 +430,8 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
           });
         } else {
           const title = basename(t.from).replace(/\.md$/i, '');
-          const newId = store.createNote(title, remoteFile.text);
+          const dir = t.from.includes('/') ? t.from.slice(0, t.from.lastIndexOf('/')) : '';
+          const newId = (store as any).createNote(title, remoteFile.text, dir);
           moveNotePath(storeSlug, newId, t.from);
           markSynced(storeSlug, newId, {
             remoteSha: remoteFile.sha,
