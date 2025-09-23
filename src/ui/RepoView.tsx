@@ -285,7 +285,14 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   const onMoveFolder = (_fromDir: string, _toDir?: string) => {};
 
   const onDeleteFolder = (dir: string) => {
-    if (!window.confirm('Delete folder and all contained notes?')) return;
+    // Skip confirmation if folder (and subtree) contains no files
+    let hasNotes = notes.some((n) => {
+      let d = (n.dir as string) || '';
+      return d === dir || d.startsWith(dir + '/');
+    });
+    if (hasNotes) {
+      if (!window.confirm('Delete folder and all contained notes?')) return;
+    }
     store.deleteFolder(dir);
     const list = store.listNotes();
     setNotes(list);
