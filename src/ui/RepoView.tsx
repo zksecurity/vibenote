@@ -217,13 +217,13 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
         const meta = await apiGetRepoMetadata(route.owner, route.repo);
         if (!cancelled) {
           setRepoMeta(meta);
-          if (meta.installed === true || meta.isPrivate === false) {
+          if (meta.repoSelected) {
             setAccessState('reachable');
-            if (meta.installed) {
-              setPublicRepoMeta(null);
-              setPublicRateLimited(false);
-              setPublicMetaError(null);
-            }
+            setPublicRepoMeta(null);
+            setPublicRateLimited(false);
+            setPublicMetaError(null);
+          } else if (meta.isPrivate === false) {
+            setAccessState('reachable');
           } else if (meta.isPrivate === true) {
             setAccessState('unreachable');
           } else {
@@ -244,7 +244,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
 
   useEffect(() => {
     if (route.kind !== 'repo') return;
-    if (repoMeta?.installed) return;
+    if (repoMeta?.repoSelected) return;
     if (repoMeta?.isPrivate === true) return;
     if (publicRepoMeta || publicRateLimited) return;
     let cancelled = false;
