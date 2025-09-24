@@ -729,8 +729,27 @@ textarea:focus-visible {
   text-transform: uppercase;
 }
 
+
+.alert .alert-text {
+  flex: 1 1 auto;
+}
+
 .alert .btn {
   margin-left: auto;
+}
+
+@media (max-width: 600px) {
+  .alert {
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: space-between;
+  }
+  .alert .alert-text {
+    display: none;
+  }
+  .alert .btn {
+    margin-left: 0;
+  }
 }
 
 .workspace-panels {

@@ -865,7 +865,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                     {isPublicReadonly && (
                       <div className="alert">
                         <span className="badge">Read-only</span>
-                        <span>Install VibeNote to enable editing.</span>
+                        <span className="alert-text">Install VibeNote to enable editing.</span>
                         <button
                           className="btn primary"
                           onClick={() => {
