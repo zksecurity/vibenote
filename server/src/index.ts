@@ -22,7 +22,7 @@ app.use(
       return cb(new Error('CORS not allowed'));
     },
     credentials: true,
-  }),
+  })
 );
 
 app.get('/v1/healthz', (_req: express.Request, res: express.Response) => res.json({ ok: true }));
@@ -74,7 +74,7 @@ app.get('/v1/auth/github/callback', async (req: express.Request, res: express.Re
         avatarUrl: (u.avatar_url as string) ?? null,
         name: (u.name as string | null) ?? null,
       },
-      env.SESSION_JWT_SECRET,
+      env.SESSION_JWT_SECRET
     );
 
     const rt = new URL(returnTo, returnTo.startsWith('http') ? undefined : `https://${req.headers.host}`);
@@ -83,12 +83,12 @@ app.get('/v1/auth/github/callback', async (req: express.Request, res: express.Re
       (function(){
         try {
           const msg = { type: 'vibenote:auth', sessionToken: ${JSON.stringify(
-            sessionToken,
+            sessionToken
           )}, user: { id: ${JSON.stringify(String(u.id))}, login: ${JSON.stringify(
-            String(u.login),
-          )}, name: ${JSON.stringify((u.name as string | null) ?? null)}, avatarUrl: ${JSON.stringify(
-            u.avatar_url ?? null,
-          )}, avatarDataUrl: null } };
+      String(u.login)
+    )}, name: ${JSON.stringify((u.name as string | null) ?? null)}, avatarUrl: ${JSON.stringify(
+      u.avatar_url ?? null
+    )}, avatarDataUrl: null } };
           if (window.opener && '${origin}') { window.opener.postMessage(msg, '${origin}'); }
         } catch (e) {}
         setTimeout(function(){ window.close(); }, 50);
@@ -108,7 +108,7 @@ app.get('/v1/app/install-url', async (req: express.Request, res: express.Respons
   const returnTo = String(req.query.returnTo ?? '');
   const state = await signState({ owner, repo, returnTo, t: Date.now() }, env.SESSION_JWT_SECRET, 60 * 30);
   const url = `https://github.com/apps/${env.GITHUB_APP_SLUG}/installations/new?state=${encodeURIComponent(
-    state,
+    state
   )}`;
   res.json({ url });
 });
@@ -182,35 +182,17 @@ app.get('/v1/repos/:owner/:repo/tree', async (req: express.Request, res: express
   const ref = req.query.ref ? String(req.query.ref) : null;
   const appClient = makeApp(env);
   try {
-    let kit: any = null;
-    let useAuth = false;
     const repoInst = await getRepositoryInstallation(appClient, owner, repo);
-    if (repoInst) {
-      kit = await getInstallationOctokit(appClient, repoInst.id);
-      useAuth = true;
-    }
+    if (!repoInst) return res.status(403).json({ error: 'app not installed for this repo' });
+    const kit = await getInstallationOctokit(appClient, repoInst.id);
     let branch = ref;
     if (!branch) {
-      if (useAuth) {
-        branch = await getDefaultBranch(appClient, repoInst!.id, owner, repo);
-      } else {
-        return res.status(400).json({ error: 'ref missing' });
-      }
+      branch = await getDefaultBranch(appClient, repoInst.id, owner, repo);
     }
     if (!branch) return res.status(400).json({ error: 'ref missing' });
     const url = `GET /repos/{owner}/{repo}/git/trees/{tree_sha}`;
-    if (useAuth) {
-      const r = await kit.request(url, { owner, repo, tree_sha: branch, recursive: '1' as any });
-      return res.json({ entries: r.data.tree });
-    } else {
-      const unauth = await fetch(
-        `https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
-        { headers: { Accept: 'application/vnd.github+json' } },
-      );
-      if (!unauth.ok) return res.status(unauth.status).json({ error: `github: ${unauth.status}` });
-      const data: any = await unauth.json();
-      return res.json({ entries: data.tree });
-    }
+    const r = await kit.request(url, { owner, repo, tree_sha: branch, recursive: '1' as any });
+    return res.json({ entries: r.data.tree });
   } catch (e: any) {
     res.status(500).json({ error: String(e?.message ?? e) });
   }
@@ -226,24 +208,16 @@ app.get('/v1/repos/:owner/:repo/file', async (req: express.Request, res: express
   const appClient = makeApp(env);
   try {
     const repoInst = await getRepositoryInstallation(appClient, owner, repo);
-    if (repoInst) {
-      const kit = await getInstallationOctokit(appClient, repoInst.id);
-      const r: any = await kit.request('GET /repos/{owner}/{repo}/contents/{path}', {
-        owner,
-        repo,
-        path,
-        ref,
-      });
-      const file: any = Array.isArray(r.data) ? null : r.data;
-      if (!file) return res.status(400).json({ error: 'path refers to a directory' });
-      return res.json({ contentBase64: file.content, sha: file.sha });
-    }
-    // unauth for public
-    const u = new URL(`https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`);
-    if (ref) u.searchParams.set('ref', ref);
-    const r = await fetch(u, { headers: { Accept: 'application/vnd.github+json' } });
-    if (!r.ok) return res.status(r.status).json({ error: `github: ${r.status}` });
-    const file: any = await r.json();
+    if (!repoInst) return res.status(403).json({ error: 'app not installed for this repo' });
+    const kit = await getInstallationOctokit(appClient, repoInst.id);
+    const r: any = await kit.request('GET /repos/{owner}/{repo}/contents/{path}', {
+      owner,
+      repo,
+      path,
+      ref,
+    });
+    const file: any = Array.isArray(r.data) ? null : r.data;
+    if (!file) return res.status(400).json({ error: 'path refers to a directory' });
     return res.json({ contentBase64: file.content, sha: file.sha });
   } catch (e: any) {
     res.status(500).json({ error: String(e?.message ?? e) });
@@ -399,7 +373,7 @@ app.post(
     } catch (e: any) {
       res.status(500).json({ error: String(e?.message ?? e) });
     }
-  },
+  }
 );
 
 // Optional webhooks placeholder (no-op for v1)

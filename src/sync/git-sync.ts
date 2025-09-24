@@ -10,6 +10,7 @@ import {
   commit as backendCommit,
   type CommitResponse,
 } from '../lib/backend';
+import { fetchPublicFile, fetchPublicTree, PublicFetchError } from '../lib/github-public';
 import type { LocalStore } from '../storage/local';
 import {
   listTombstones,
@@ -65,26 +66,25 @@ function authHeaders() {
   };
 }
 
-function encodeApiPath(path: string): string {
-  return path.split('/').map(encodeURIComponent).join('/');
-}
-
 export async function pullNote(config: RemoteConfig, path: string): Promise<RemoteFile | null> {
   try {
     const f = await backendGetFile(config.owner, config.repo, path, config.branch);
     const content = fromBase64((f.contentBase64 || '').replace(/\n/g, ''));
     return { path, text: content, sha: f.sha };
   } catch (e: any) {
-    // fallback to legacy path when backend not available
-    const url = `https://api.github.com/repos/${config.owner}/${config.repo}/contents/${encodeApiPath(
-      path,
-    )}?ref=${encodeURIComponent(config.branch)}`;
-    const res = await fetch(url, { headers: authHeaders() });
-    if (res.status === 404) return null;
-    if (!res.ok) throw new Error('Failed to fetch note');
-    const data = await res.json();
-    const content = fromBase64((data.content as string).replace(/\n/g, ''));
-    return { path, text: content, sha: data.sha };
+    const status = typeof e === 'object' && e && 'status' in e ? Number((e as any).status) : null;
+    if (status === 403 || status === 404) {
+      const ref = config.branch || 'main';
+      try {
+        const publicFile = await fetchPublicFile(config.owner, config.repo, path, ref);
+        const content = fromBase64((publicFile.contentBase64 || '').replace(/\n/g, ''));
+        return { path, text: content, sha: publicFile.sha };
+      } catch (pubErr: unknown) {
+        if (pubErr instanceof PublicFetchError && pubErr.status === 404) return null;
+        throw pubErr;
+      }
+    }
+    throw e;
   }
 }
 
@@ -131,20 +131,34 @@ export async function commitBatch(
 // List Markdown files under the configured notesDir at HEAD
 export async function listNoteFiles(config: RemoteConfig): Promise<{ path: string; sha: string }[]> {
   const rootDir = (config.notesDir || '').replace(/(^\/+|\/+?$)/g, '');
-  const entries = await backendGetTree(config.owner, config.repo, config.branch);
-  const results: { path: string; sha: string }[] = [];
-  for (const e of entries) {
-    const type = (e as any).type as string | undefined;
-    const path = (e as any).path as string | undefined;
-    const sha = (e as any).sha as string | undefined;
-    if (type !== 'blob' || !path || !sha) continue;
-    if (rootDir && !path.startsWith(rootDir + '/')) continue;
-    if (!/\.md$/i.test(path)) continue;
-    const name = path.slice(path.lastIndexOf('/') + 1);
-    if (!rootDir && name.toLowerCase() === 'readme.md') continue;
-    results.push({ path, sha });
+  const filterEntries = (entries: Array<{ path?: string; sha?: string; type?: string }>) => {
+    const results: { path: string; sha: string }[] = [];
+    for (const e of entries) {
+      const type = e.type;
+      const path = e.path;
+      const sha = e.sha;
+      if (type !== 'blob' || !path || !sha) continue;
+      if (rootDir && !path.startsWith(rootDir + '/')) continue;
+      if (!/\.md$/i.test(path)) continue;
+      const name = path.slice(path.lastIndexOf('/') + 1);
+      if (!rootDir && name.toLowerCase() === 'readme.md') continue;
+      results.push({ path, sha });
+    }
+    return results;
+  };
+
+  try {
+    const entries = await backendGetTree(config.owner, config.repo, config.branch);
+    return filterEntries(entries);
+  } catch (e: any) {
+    const status = typeof e === 'object' && e && 'status' in e ? Number((e as any).status) : null;
+    if (status === 403 || status === 404) {
+      const ref = config.branch || 'main';
+      const entries = await fetchPublicTree(config.owner, config.repo, ref);
+      return filterEntries(entries.map((entry) => ({ path: entry.path, sha: entry.sha, type: 'blob' })));
+    }
+    throw e;
   }
-  return results;
 }
 
 // --- base64 helpers that safely handle UTF-8 ---

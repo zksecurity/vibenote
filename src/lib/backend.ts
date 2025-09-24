@@ -35,7 +35,11 @@ export async function getTree(
   const url = new URL(`${base}/v1/repos/${encode(owner)}/${encode(repo)}/tree`);
   if (ref) url.searchParams.set('ref', ref);
   const res = await fetch(url);
-  if (!res.ok) throw new Error('tree fetch failed');
+  if (!res.ok) {
+    const err = new Error('tree fetch failed');
+    (err as any).status = res.status;
+    throw err;
+  }
   const data = await res.json();
   return Array.isArray(data.entries) ? data.entries : [];
 }
@@ -51,7 +55,11 @@ export async function getFile(
   url.searchParams.set('path', path);
   if (ref) url.searchParams.set('ref', ref);
   const res = await fetch(url);
-  if (!res.ok) throw new Error('file fetch failed');
+  if (!res.ok) {
+    const err = new Error('file fetch failed');
+    (err as any).status = res.status;
+    throw err;
+  }
   return (await res.json()) as { contentBase64: string; sha: string };
 }
 

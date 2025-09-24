@@ -7,6 +7,14 @@ type CacheEntry = {
 };
 
 const cache = new Map<string, CacheEntry>();
+const treeCache = new Map<
+  string,
+  { entries: Array<{ path: string; sha: string }> | null; expiresAt: number }
+>();
+const fileCache = new Map<
+  string,
+  { file: { contentBase64: string; sha: string } | null; expiresAt: number }
+>();
 
 export type PublicRepoInfo = {
   ok: boolean;
@@ -82,8 +90,78 @@ export async function fetchPublicRepoInfo(owner: string, repo: string): Promise<
 
 export function clearPublicRepoInfoCache() {
   cache.clear();
+  treeCache.clear();
+  fileCache.clear();
 }
 
 function cacheKey(owner: string, repo: string): string {
   return `${owner.toLowerCase()}/${repo.toLowerCase()}`;
+}
+
+export async function fetchPublicTree(
+  owner: string,
+  repo: string,
+  ref: string,
+): Promise<Array<{ path: string; sha: string }>> {
+  const key = `tree:${cacheKey(owner, repo)}@${ref}`;
+  const now = Date.now();
+  const cached = treeCache.get(key);
+  if (cached && cached.expiresAt > now && cached.entries) return cached.entries;
+  const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+    repo,
+  )}/git/trees/${encodeURIComponent(ref)}?recursive=1`;
+  const res = await fetch(url, { headers: { Accept: 'application/vnd.github+json' } });
+  if (!res.ok) {
+    const entries: Array<{ path: string; sha: string }> = [];
+    treeCache.set(key, { entries, expiresAt: now + CACHE_TTL_ERROR });
+    throw new PublicFetchError('tree', res.status);
+  }
+  const json: any = await res.json();
+  const entries = Array.isArray(json?.tree)
+    ? (json.tree as Array<any>)
+        .filter((n) => n && n.type === 'blob' && typeof n.path === 'string' && typeof n.sha === 'string')
+        .map((n) => ({ path: String(n.path), sha: String(n.sha) }))
+    : [];
+  treeCache.set(key, { entries, expiresAt: now + CACHE_TTL_OK });
+  return entries;
+}
+
+export async function fetchPublicFile(
+  owner: string,
+  repo: string,
+  path: string,
+  ref?: string,
+): Promise<{ contentBase64: string; sha: string }> {
+  const key = `file:${cacheKey(owner, repo)}:${path}@${ref ?? ''}`;
+  const now = Date.now();
+  const cached = fileCache.get(key);
+  if (cached && cached.expiresAt > now && cached.file) return cached.file;
+  const url = new URL(
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+      repo,
+    )}/contents/${encodeURIComponent(path)}`,
+  );
+  if (ref) url.searchParams.set('ref', ref);
+  const res = await fetch(url, { headers: { Accept: 'application/vnd.github+json' } });
+  if (!res.ok) {
+    fileCache.set(key, { file: null, expiresAt: now + CACHE_TTL_ERROR });
+    throw new PublicFetchError('file', res.status);
+  }
+  const json: any = await res.json();
+  if (!json || typeof json.content !== 'string' || typeof json.sha !== 'string') {
+    throw new Error('invalid public file response');
+  }
+  const file = { contentBase64: String(json.content), sha: String(json.sha) };
+  fileCache.set(key, { file, expiresAt: now + CACHE_TTL_OK });
+  return file;
+}
+
+export class PublicFetchError extends Error {
+  status: number;
+  kind: 'tree' | 'file' | 'repo';
+  constructor(kind: 'tree' | 'file' | 'repo', status: number) {
+    super(`${kind} fetch failed (${status})`);
+    this.kind = kind;
+    this.status = status;
+  }
 }
