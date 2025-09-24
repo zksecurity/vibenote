@@ -1082,7 +1082,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                       <div className="alert warning">
                         <span className="badge">Offline</span>
                         <span className="alert-text">
-                          Can’t reach GitHub right now. Showing cached notes only.
+                          Could not reach GitHub. You can still edit notes offline.
                         </span>
                       </div>
                     )}
