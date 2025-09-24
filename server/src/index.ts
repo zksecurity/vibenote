@@ -11,6 +11,18 @@ import {
   getRepoDetailsViaInstallation,
 } from './github.ts';
 
+declare module 'express-serve-static-core' {
+  interface Request {
+    sessionUser?: SessionClaims;
+  }
+}
+
+type CommitChange = {
+  path: string;
+  contentBase64?: string;
+  delete?: boolean;
+};
+
 const env = getEnv();
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -45,8 +57,8 @@ app.get('/v1/auth/github/callback', async (req: express.Request, res: express.Re
   try {
     const code = String(req.query.code ?? '');
     const stateToken = String(req.query.state ?? '');
-    const state = (await verifyState(stateToken, env.SESSION_JWT_SECRET)) as any;
-    const returnTo = typeof state?.returnTo === 'string' && state.returnTo ? state.returnTo : '/';
+    const state = await verifyState(stateToken, env.SESSION_JWT_SECRET);
+    const returnTo = getOptionalString(state, 'returnTo') ?? '/';
     const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
       method: 'POST',
       headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
@@ -59,20 +71,19 @@ app.get('/v1/auth/github/callback', async (req: express.Request, res: express.Re
       }),
     });
     if (!tokenRes.ok) throw new Error(`token exchange failed: ${tokenRes.status}`);
-    const tokenJson = (await tokenRes.json()) as any;
-    const accessToken = String(tokenJson.access_token ?? '');
-    if (!accessToken) throw new Error('no access token');
+    const tokenJson = await tokenRes.json();
+    const accessToken = parseAccessToken(tokenJson);
     const ures = await fetch('https://api.github.com/user', {
       headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/vnd.github+json' },
     });
     if (!ures.ok) throw new Error(`user fetch failed: ${ures.status}`);
-    const u: any = await ures.json();
+    const u = parseGitHubUser(await ures.json());
     const sessionToken = await signSession(
       {
-        sub: String(u.id),
-        login: String(u.login),
-        avatarUrl: (u.avatar_url as string) ?? null,
-        name: (u.name as string | null) ?? null,
+        sub: u.id,
+        login: u.login,
+        avatarUrl: u.avatarUrl,
+        name: u.name,
       },
       env.SESSION_JWT_SECRET
     );
@@ -84,10 +95,10 @@ app.get('/v1/auth/github/callback', async (req: express.Request, res: express.Re
         try {
           const msg = { type: 'vibenote:auth', sessionToken: ${JSON.stringify(
             sessionToken
-          )}, user: { id: ${JSON.stringify(String(u.id))}, login: ${JSON.stringify(
-      String(u.login)
-    )}, name: ${JSON.stringify((u.name as string | null) ?? null)}, avatarUrl: ${JSON.stringify(
-      u.avatar_url ?? null
+          )}, user: { id: ${JSON.stringify(u.id)}, login: ${JSON.stringify(
+      u.login
+    )}, name: ${JSON.stringify(u.name)}, avatarUrl: ${JSON.stringify(
+      u.avatarUrl
     )}, avatarDataUrl: null } };
           if (window.opener && '${origin}') { window.opener.postMessage(msg, '${origin}'); }
         } catch (e) {}
@@ -96,8 +107,8 @@ app.get('/v1/auth/github/callback', async (req: express.Request, res: express.Re
     </script>
     <p>Signed in. You can close this window. <a href="${rt.toString()}">Continue</a></p>`;
     res.status(200).type('html').send(html);
-  } catch (e: any) {
-    res.status(400).json({ error: String(e?.message ?? e) });
+  } catch (error: unknown) {
+    res.status(400).json({ error: getErrorMessage(error) });
   }
 });
 
@@ -119,14 +130,14 @@ app.get('/v1/app/setup', async (req: express.Request, res: express.Response) => 
     const installationId = req.query.installation_id ? String(req.query.installation_id) : null;
     const setupAction = req.query.setup_action ? String(req.query.setup_action) : null;
     const stateToken = String(req.query.state ?? '');
-    const state = (await verifyState(stateToken, env.SESSION_JWT_SECRET)) as any;
-    const returnTo = typeof state?.returnTo === 'string' && state.returnTo ? state.returnTo : '/';
+    const state = await verifyState(stateToken, env.SESSION_JWT_SECRET);
+    const returnTo = getOptionalString(state, 'returnTo') ?? '/';
     const url = new URL(returnTo, returnTo.startsWith('http') ? undefined : `https://${req.headers.host}`);
     if (installationId) url.searchParams.set('installation_id', installationId);
     if (setupAction) url.searchParams.set('setup_action', setupAction);
     res.redirect(url.toString());
-  } catch (e: any) {
-    res.status(400).json({ error: String(e?.message ?? e) });
+  } catch (error: unknown) {
+    res.status(400).json({ error: getErrorMessage(error) });
   }
 });
 
@@ -170,8 +181,8 @@ app.get('/v1/repos/:owner/:repo/metadata', async (req: express.Request, res: exp
     }
 
     return res.json({ isPrivate, installed, repoSelected, repositorySelection, defaultBranch });
-  } catch (e: any) {
-    res.status(500).json({ error: String(e?.message ?? e) });
+  } catch (error: unknown) {
+    res.status(500).json({ error: getErrorMessage(error) });
   }
 });
 
@@ -190,11 +201,15 @@ app.get('/v1/repos/:owner/:repo/tree', async (req: express.Request, res: express
       branch = await getDefaultBranch(appClient, repoInst.id, owner, repo);
     }
     if (!branch) return res.status(400).json({ error: 'ref missing' });
-    const url = `GET /repos/{owner}/{repo}/git/trees/{tree_sha}`;
-    const r = await kit.request(url, { owner, repo, tree_sha: branch, recursive: '1' as any });
-    return res.json({ entries: r.data.tree });
-  } catch (e: any) {
-    res.status(500).json({ error: String(e?.message ?? e) });
+    const { data } = await kit.request('GET /repos/{owner}/{repo}/git/trees/{tree_sha}', {
+      owner,
+      repo,
+      tree_sha: branch,
+      recursive: '1',
+    });
+    return res.json({ entries: data.tree });
+  } catch (error: unknown) {
+    res.status(500).json({ error: getErrorMessage(error) });
   }
 });
 
@@ -210,17 +225,21 @@ app.get('/v1/repos/:owner/:repo/file', async (req: express.Request, res: express
     const repoInst = await getRepositoryInstallation(appClient, owner, repo);
     if (!repoInst) return res.status(403).json({ error: 'app not installed for this repo' });
     const kit = await getInstallationOctokit(appClient, repoInst.id);
-    const r: any = await kit.request('GET /repos/{owner}/{repo}/contents/{path}', {
+    const response = await kit.request('GET /repos/{owner}/{repo}/contents/{path}', {
       owner,
       repo,
       path,
       ref,
     });
-    const file: any = Array.isArray(r.data) ? null : r.data;
-    if (!file) return res.status(400).json({ error: 'path refers to a directory' });
-    return res.json({ contentBase64: file.content, sha: file.sha });
-  } catch (e: any) {
-    res.status(500).json({ error: String(e?.message ?? e) });
+    if (Array.isArray(response.data)) {
+      return res.status(400).json({ error: 'path refers to a directory' });
+    }
+    if (response.data.type !== 'file') {
+      return res.status(400).json({ error: 'unsupported content type' });
+    }
+    return res.json({ contentBase64: response.data.content, sha: response.data.sha });
+  } catch (error: unknown) {
+    res.status(500).json({ error: getErrorMessage(error) });
   }
 });
 
@@ -234,15 +253,14 @@ app.get('/v1/repos/:owner/:repo/blob/:sha', async (req: express.Request, res: ex
     const repoInst = await getRepositoryInstallation(appClient, owner, repo);
     if (!repoInst) return res.status(403).json({ error: 'app not installed for this repo' });
     const kit = await getInstallationOctokit(appClient, repoInst.id);
-    const r: any = await kit.request('GET /repos/{owner}/{repo}/git/blobs/{file_sha}', {
+    const { data } = await kit.request('GET /repos/{owner}/{repo}/git/blobs/{file_sha}', {
       owner,
       repo,
       file_sha: sha,
     });
-    // r.data.content is base64
-    return res.json({ contentBase64: r.data.content, encoding: r.data.encoding });
-  } catch (e: any) {
-    res.status(500).json({ error: String(e?.message ?? e) });
+    return res.json({ contentBase64: data.content, encoding: data.encoding });
+  } catch (error: unknown) {
+    res.status(500).json({ error: getErrorMessage(error) });
   }
 });
 
@@ -253,7 +271,7 @@ function requireSession(req: express.Request, res: express.Response, next: expre
   const token = h.slice(7).trim();
   verifySession(token, env.SESSION_JWT_SECRET)
     .then((claims) => {
-      (req as any).sessionUser = claims;
+      req.sessionUser = claims;
       next();
     })
     .catch(() => res.status(401).json({ error: 'invalid session' }));
@@ -266,19 +284,9 @@ app.post(
   async (req: express.Request, res: express.Response) => {
     const owner = String(req.params.owner);
     const repo = String(req.params.repo);
-    const body = req.body as any;
-    const branch = String(body.branch ?? '');
-    let message = String(body.message ?? 'Update from VibeNote');
-    const changes = Array.isArray(body.changes)
-      ? (body.changes as Array<{
-          path: string;
-          contentBase64?: string;
-          sha?: string;
-          delete?: boolean;
-        }>)
-      : [];
-    if (!branch || changes.length === 0)
-      return res.status(400).json({ error: 'branch and changes required' });
+    const { branch, message: bodyMessage, changes } = parseCommitRequestBody(req.body);
+    let message = bodyMessage ?? 'Update from VibeNote';
+    message = message.trim().length > 0 ? message.trim() : 'Update from VibeNote';
 
     try {
       const appClient = makeApp(env);
@@ -287,18 +295,21 @@ app.post(
       const kit = await getInstallationOctokit(appClient, repoInst.id);
 
       // Resolve HEAD commit sha
-      const ref = await kit.request('GET /repos/{owner}/{repo}/git/ref/{ref}', {
+      const { data: refData } = await kit.request('GET /repos/{owner}/{repo}/git/ref/{ref}', {
         owner,
         repo,
         ref: `heads/${branch}`,
       });
-      const headSha = String((ref.data.object as any).sha);
-      const headCommit = await kit.request('GET /repos/{owner}/{repo}/git/commits/{commit_sha}', {
+      if (!refData.object || typeof refData.object !== 'object' || refData.object.type !== 'commit') {
+        throw new Error('unexpected ref target');
+      }
+      const headSha = refData.object.sha;
+      const { data: headCommitData } = await kit.request('GET /repos/{owner}/{repo}/git/commits/{commit_sha}', {
         owner,
         repo,
-        commit_sha: headSha!,
+        commit_sha: headSha,
       });
-      const baseTreeSha = String(headCommit.data.tree.sha);
+      const baseTreeSha = headCommitData.tree.sha;
 
       const treeItems: Array<{
         path?: string;
@@ -306,7 +317,7 @@ app.post(
         type?: 'blob' | 'tree' | 'commit';
         sha?: string | null;
         content?: string;
-        encoding?: 'utf-8' | 'base64';
+        encoding?: 'utf-8';
       }> = [];
       const trackedPaths = new Set<string>();
       for (const ch of changes) {
@@ -332,7 +343,7 @@ app.post(
         trackedPaths.add(ch.path);
       }
 
-      const session = (req as any).sessionUser as SessionClaims | undefined;
+      const session = req.sessionUser;
       if (session && session.login && session.sub) {
         const display = session.name && session.name.trim().length > 0 ? session.name : session.login;
         const coAuthorLine = `Co-authored-by: ${display} <${session.sub}+${session.login}@users.noreply.github.com>`;
@@ -341,37 +352,37 @@ app.post(
         }
       }
 
-      const newTree: any = await kit.request('POST /repos/{owner}/{repo}/git/trees', {
+      const { data: newTreeData } = await kit.request('POST /repos/{owner}/{repo}/git/trees', {
         owner,
         repo,
         base_tree: baseTreeSha,
-        tree: treeItems as any,
+        tree: treeItems,
       });
       const blobByPath: Record<string, string> = {};
-      if (Array.isArray(newTree.data?.tree)) {
-        for (const entry of newTree.data.tree as Array<any>) {
+      if (Array.isArray(newTreeData.tree)) {
+        for (const entry of newTreeData.tree) {
           if (!entry || entry.type !== 'blob') continue;
-          if (typeof entry.path !== 'string' || typeof entry.sha !== 'string') continue;
+          if (!entry.path || !entry.sha) continue;
           if (trackedPaths.has(entry.path)) blobByPath[entry.path] = entry.sha;
         }
       }
-      const newCommit: any = await kit.request('POST /repos/{owner}/{repo}/git/commits', {
+      const { data: newCommitData } = await kit.request('POST /repos/{owner}/{repo}/git/commits', {
         owner,
         repo,
         message,
-        tree: String(newTree.data.sha),
+        tree: newTreeData.sha,
         parents: [headSha],
       });
       await kit.request('PATCH /repos/{owner}/{repo}/git/refs/{ref}', {
         owner,
         repo,
         ref: `heads/${branch}`,
-        sha: String(newCommit.data.sha),
+        sha: newCommitData.sha,
         force: false,
       });
-      res.json({ commitSha: newCommit.data.sha, blobShas: blobByPath });
-    } catch (e: any) {
-      res.status(500).json({ error: String(e?.message ?? e) });
+      res.json({ commitSha: newCommitData.sha, blobShas: blobByPath });
+    } catch (error: unknown) {
+      res.status(500).json({ error: getErrorMessage(error) });
     }
   }
 );
@@ -384,6 +395,82 @@ app.post('/v1/webhooks/github', (req: express.Request, res: express.Response) =>
 const server = app.listen(env.PORT, () => {
   console.log(`[vibenote] api listening on :${env.PORT}`);
 });
+
+function getOptionalString(record: Record<string, unknown>, key: string): string | null {
+  const value = record[key];
+  if (typeof value === 'string' && value.trim().length > 0) {
+    return value;
+  }
+  return null;
+}
+
+function parseAccessToken(json: unknown): string {
+  if (!json || typeof json !== 'object') throw new Error('invalid token response');
+  const token = (json as Record<string, unknown>).access_token;
+  if (typeof token !== 'string' || token.trim().length === 0) {
+    throw new Error('no access token');
+  }
+  return token;
+}
+
+function parseGitHubUser(json: unknown): { id: string; login: string; name: string | null; avatarUrl: string | null } {
+  if (!json || typeof json !== 'object') throw new Error('invalid user response');
+  const obj = json as Record<string, unknown>;
+  const idValue = obj.id;
+  const loginValue = obj.login;
+  if ((typeof idValue !== 'number' && typeof idValue !== 'string') || typeof loginValue !== 'string') {
+    throw new Error('invalid user payload');
+  }
+  const nameValue = obj.name;
+  const avatarValue = obj.avatar_url;
+  return {
+    id: String(idValue),
+    login: loginValue,
+    name: typeof nameValue === 'string' && nameValue.length > 0 ? nameValue : null,
+    avatarUrl: typeof avatarValue === 'string' && avatarValue.length > 0 ? avatarValue : null,
+  };
+}
+
+function parseCommitRequestBody(input: unknown): { branch: string; message?: string; changes: CommitChange[] } {
+  if (!input || typeof input !== 'object') throw new Error('invalid commit payload');
+  const record = input as Record<string, unknown>;
+  const branchValue = typeof record.branch === 'string' ? record.branch.trim() : '';
+  if (!branchValue) throw new Error('branch required');
+  const rawChanges = record.changes;
+  if (!Array.isArray(rawChanges) || rawChanges.length === 0) {
+    throw new Error('changes required');
+  }
+  const changes: CommitChange[] = rawChanges.map((raw, index) => {
+    if (!raw || typeof raw !== 'object') {
+      throw new Error(`invalid change at index ${index}`);
+    }
+    const changeRecord = raw as Record<string, unknown>;
+    const pathValue = typeof changeRecord.path === 'string' ? changeRecord.path.trim() : '';
+    if (!pathValue) {
+      throw new Error(`missing path for change at index ${index}`);
+    }
+    const deleteFlag = changeRecord.delete === true;
+    const contentValue = changeRecord.contentBase64;
+    if (!deleteFlag) {
+      if (typeof contentValue !== 'string') {
+        throw new Error(`missing contentBase64 for change at index ${index}`);
+      }
+      return {
+        path: pathValue,
+        contentBase64: contentValue,
+      };
+    }
+    return { path: pathValue, delete: true };
+  });
+
+  const messageValue = typeof record.message === 'string' ? record.message : undefined;
+  return { branch: branchValue, message: messageValue, changes };
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  return String(error);
+}
 
 // Graceful shutdown (systemd / docker stop)
 for (const sig of ['SIGINT', 'SIGTERM']) {
