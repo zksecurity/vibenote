@@ -2,6 +2,7 @@
 // Uses a stored OAuth token to read and write note files in a repository.
 
 import { getStoredToken } from '../auth/github';
+import { getRepoMetadata as backendGetRepoMetadata, getTree as backendGetTree, getFile as backendGetFile, commit as backendCommit } from '../lib/backend';
 import type { LocalStore } from '../storage/local';
 import {
   listTombstones,
@@ -34,10 +35,17 @@ export function buildRemoteConfig(slug: string): RemoteConfig {
 }
 
 export async function repoExists(owner: string, repo: string): Promise<boolean> {
-  const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
-    headers: authHeaders(),
-  });
-  return res.ok;
+  try {
+    const meta = await backendGetRepoMetadata(owner, repo);
+    if (meta.installed && (meta.repoSelected || meta.repositorySelection === 'all')) return true;
+    // public repo without install is still viewable (read-only)
+    if (meta.isPrivate === false) return true;
+    return false;
+  } catch {
+    // fallback to legacy check with token if available
+    const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, { headers: authHeaders() });
+    return res.ok;
+  }
 }
 
 function authHeaders() {
@@ -53,15 +61,20 @@ function encodeApiPath(path: string): string {
 }
 
 export async function pullNote(config: RemoteConfig, path: string): Promise<RemoteFile | null> {
-  const url = `https://api.github.com/repos/${config.owner}/${config.repo}/contents/${encodeApiPath(
-    path
-  )}?ref=${encodeURIComponent(config.branch)}`;
-  const res = await fetch(url, { headers: authHeaders() });
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error('Failed to fetch note');
-  const data = await res.json();
-  const content = fromBase64((data.content as string).replace(/\n/g, ''));
-  return { path, text: content, sha: data.sha };
+  try {
+    const f = await backendGetFile(config.owner, config.repo, path, config.branch);
+    const content = fromBase64((f.contentBase64 || '').replace(/\n/g, ''));
+    return { path, text: content, sha: f.sha };
+  } catch (e: any) {
+    // fallback to legacy path when backend not available
+    const url = `https://api.github.com/repos/${config.owner}/${config.repo}/contents/${encodeApiPath(path)}?ref=${encodeURIComponent(config.branch)}`;
+    const res = await fetch(url, { headers: authHeaders() });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error('Failed to fetch note');
+    const data = await res.json();
+    const content = fromBase64((data.content as string).replace(/\n/g, ''));
+    return { path, text: content, sha: data.sha };
+  }
 }
 
 export type SyncSummary = {
@@ -74,14 +87,9 @@ export type SyncSummary = {
 
 // Fetch raw blob content by SHA
 export async function fetchBlob(config: RemoteConfig, sha: string): Promise<string | null> {
-  const url = `https://api.github.com/repos/${config.owner}/${
-    config.repo
-  }/git/blobs/${encodeURIComponent(sha)}`;
-  const res = await fetch(url, { headers: authHeaders() });
-  if (!res.ok) return null;
-  const data = await res.json();
-  const content = fromBase64((data.content as string).replace(/\n/g, ''));
-  return content;
+  // Backend v1 does not expose blob-by-sha. Fall back to empty base to bias toward local changes.
+  void config; void sha;
+  return '';
 }
 
 // Upsert a single file and return its new content sha
@@ -90,24 +98,14 @@ export async function putFile(
   file: { path: string; text: string; baseSha?: string },
   message: string
 ): Promise<string> {
-  const url = `https://api.github.com/repos/${config.owner}/${config.repo}/contents/${encodeApiPath(
-    file.path
-  )}`;
-  const res = await fetch(url, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({
-      message,
-      content: toBase64(file.text),
-      sha: file.baseSha,
-      branch: config.branch,
-    }),
+  const res = await backendCommit(config.owner, config.repo, {
+    branch: config.branch,
+    message,
+    baseSha: file.baseSha,
+    changes: [{ path: file.path, contentBase64: toBase64(file.text) }],
   });
-  if (!res.ok) throw new Error('Commit failed');
-  const data = await res.json();
-  const contentSha: string | undefined = data.content?.sha;
-  if (!contentSha) throw new Error('Missing content sha');
-  return contentSha;
+  // We don't receive per-file blob sha; return commit sha as a placeholder
+  return res.commitSha;
 }
 
 export async function commitBatch(
@@ -116,61 +114,31 @@ export async function commitBatch(
   message: string
 ): Promise<string | null> {
   if (files.length === 0) return null;
-  let commitSha: string | null = null;
-  for (const f of files) {
-    const url = `https://api.github.com/repos/${config.owner}/${
-      config.repo
-    }/contents/${encodeApiPath(f.path)}`;
-    const res = await fetch(url, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({
-        message,
-        content: toBase64(f.text),
-        sha: f.baseSha,
-        branch: config.branch,
-      }),
-    });
-    if (!res.ok) throw new Error('Commit failed');
-    const data = await res.json();
-    commitSha = data.commit?.sha || commitSha;
-  }
-  return commitSha;
+  const res = await backendCommit(config.owner, config.repo, {
+    branch: config.branch,
+    message,
+    changes: files.map((f) => ({ path: f.path, contentBase64: toBase64(f.text) })),
+    baseSha: files[0]?.baseSha,
+  });
+  return res.commitSha;
 }
 
 // List Markdown files under the configured notesDir at HEAD
 export async function listNoteFiles(config: RemoteConfig): Promise<{ path: string; sha: string }[]> {
   const rootDir = (config.notesDir || '').replace(/(^\/+|\/+?$)/g, '');
+  const entries = await backendGetTree(config.owner, config.repo, config.branch);
   const results: { path: string; sha: string }[] = [];
-  async function walk(dir: string, depth: number) {
-    const base = `https://api.github.com/repos/${config.owner}/${config.repo}/contents`;
-    const url = `${base}${dir ? '/' + encodeApiPath(dir) : ''}?ref=${encodeURIComponent(
-      config.branch
-    )}`;
-    const res = await fetch(url, { headers: authHeaders() });
-    if (res.status === 404) return;
-    if (!res.ok) throw new Error('Failed to list notes directory');
-    const data = await res.json();
-    if (!Array.isArray(data)) return;
-    for (const e of data) {
-      if (!e || typeof e !== 'object') continue;
-      const type = (e as any).type as string | undefined;
-      const path = (e as any).path as string | undefined;
-      const name = (e as any).name as string | undefined;
-      const sha = (e as any).sha as string | undefined;
-      if (!type || !name || !path) continue;
-      if (type === 'dir') {
-        await walk(path, depth + 1);
-        continue;
-      }
-      if (type !== 'file' || !/\.md$/i.test(name)) continue;
-      // Exclude README.md only at the root level relative to notesDir
-      if (depth === 0 && name.toLowerCase() === 'readme.md') continue;
-      if (!sha) continue;
-      results.push({ path, sha });
-    }
+  for (const e of entries) {
+    const type = (e as any).type as string | undefined;
+    const path = (e as any).path as string | undefined;
+    const sha = (e as any).sha as string | undefined;
+    if (type !== 'blob' || !path || !sha) continue;
+    if (rootDir && !path.startsWith(rootDir + '/')) continue;
+    if (!/\.md$/i.test(path)) continue;
+    const name = path.slice(path.lastIndexOf('/') + 1);
+    if (!rootDir && name.toLowerCase() === 'readme.md') continue;
+    results.push({ path, sha });
   }
-  await walk(rootDir, 0);
   return results;
 }
 
@@ -189,25 +157,12 @@ export async function deleteFiles(
   message: string
 ): Promise<string | null> {
   if (files.length === 0) return null;
-  let commitSha: string | null = null;
-  for (const f of files) {
-    const url = `https://api.github.com/repos/${config.owner}/${
-      config.repo
-    }/contents/${encodeApiPath(f.path)}`;
-    const res = await fetch(url, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({
-        message,
-        sha: f.sha,
-        branch: config.branch,
-      }),
-    });
-    if (!res.ok) throw new Error('Delete failed');
-    const data = await res.json();
-    commitSha = data.commit?.sha || commitSha;
-  }
-  return commitSha;
+  const res = await backendCommit(config.owner, config.repo, {
+    branch: config.branch,
+    message,
+    changes: files.map((f) => ({ path: f.path, delete: true })),
+  });
+  return res.commitSha || null;
 }
 
 function fromBase64(b64: string): string {

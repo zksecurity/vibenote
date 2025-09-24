@@ -220,7 +220,7 @@ app.post("/v1/repos/:owner/:repo/commit", requireSession, async (req: express.Re
   const body = req.body as any;
   const branch = String(body.branch ?? "");
   const message = String(body.message ?? "Update from VibeNote");
-  const changes = Array.isArray(body.changes) ? body.changes as Array<{ path: string; contentBase64: string; sha?: string }> : [];
+  const changes = Array.isArray(body.changes) ? body.changes as Array<{ path: string; contentBase64?: string; sha?: string; delete?: boolean }> : [];
   const baseSha = body.baseSha ? String(body.baseSha) : null;
   if (!branch || changes.length === 0) return res.status(400).json({ error: "branch and changes required" });
 
@@ -240,9 +240,14 @@ app.post("/v1/repos/:owner/:repo/commit", requireSession, async (req: express.Re
     const baseTreeSha = String(headCommit.data.tree.sha);
 
     // Create blobs for each change
-    const treeItems: Array<{ path: string; mode: "100644"; type: "blob"; sha: string }> = [];
+    const treeItems: Array<{ path?: string; mode?: "100644" | "100755" | "040000" | "160000" | "120000"; type?: "blob" | "tree" | "commit"; sha: string | null }> = [];
     for (const ch of changes) {
-      const blob = await kit.request("POST /repos/{owner}/{repo}/git/blobs", { owner, repo, content: ch.contentBase64, encoding: "base64" });
+      if (ch.delete === true) {
+        treeItems.push({ path: ch.path, sha: null });
+        continue;
+      }
+      const contentBase64 = ch.contentBase64 ?? "";
+      const blob = await kit.request("POST /repos/{owner}/{repo}/git/blobs", { owner, repo, content: contentBase64, encoding: "base64" });
       treeItems.push({ path: ch.path, mode: "100644", type: "blob", sha: String((blob as any).data.sha) });
     }
 
