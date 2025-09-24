@@ -738,7 +738,9 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     accessState === 'unreachable' &&
     !isPublicReadonly &&
     !needsInstallForPrivate;
-  const showSidebar = canEdit || (isPublicReadonly && readOnlyNotes.length > 0);
+  const showSidebar =
+    (notes.length > 0 && linked) ||
+    (isPublicReadonly && readOnlyNotes.length > 0);
   const layoutClass = showSidebar ? (isRepoUnreachable ? 'single' : '') : 'single';
   const readOnlyFolders = useMemo(() => {
     const set = new Set<string>();
