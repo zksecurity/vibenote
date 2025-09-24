@@ -53,7 +53,18 @@ export async function getBlob(owner: string, repo: string, sha: string): Promise
   return (await res.json()) as { contentBase64: string };
 }
 
-export async function commit(owner: string, repo: string, body: { branch: string; message: string; changes: Array<{ path: string; contentBase64?: string; delete?: boolean }>; baseSha?: string }): Promise<{ commitSha: string }> {
+export type CommitResponse = { commitSha: string; blobShas?: Record<string, string> };
+
+export async function commit(
+  owner: string,
+  repo: string,
+  body: {
+    branch: string;
+    message: string;
+    changes: Array<{ path: string; contentBase64?: string; delete?: boolean }>;
+    baseSha?: string;
+  }
+): Promise<CommitResponse> {
   const base = getApiBase();
   const res = await fetch(`${base}/v1/repos/${encode(owner)}/${encode(repo)}/commit`, {
     method: 'POST',
@@ -61,7 +72,7 @@ export async function commit(owner: string, repo: string, body: { branch: string
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`commit failed (${res.status})`);
-  return (await res.json()) as { commitSha: string };
+  return (await res.json()) as CommitResponse;
 }
 
 export async function getInstallUrl(owner: string, repo: string, returnTo: string): Promise<string> {

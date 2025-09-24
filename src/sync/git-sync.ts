@@ -2,7 +2,14 @@
 // Uses a stored OAuth token to read and write note files in a repository.
 
 import { getStoredToken } from '../auth/github';
-import { getRepoMetadata as backendGetRepoMetadata, getTree as backendGetTree, getFile as backendGetFile, getBlob as backendGetBlob, commit as backendCommit } from '../lib/backend';
+import {
+  getRepoMetadata as backendGetRepoMetadata,
+  getTree as backendGetTree,
+  getFile as backendGetFile,
+  getBlob as backendGetBlob,
+  commit as backendCommit,
+  type CommitResponse,
+} from '../lib/backend';
 import type { LocalStore } from '../storage/local';
 import {
   listTombstones,
@@ -98,8 +105,7 @@ export async function putFile(
     baseSha: file.baseSha,
     changes: [{ path: file.path, contentBase64: toBase64(file.text) }],
   });
-  // We don't receive per-file blob sha; return commit sha as a placeholder
-  return res.commitSha;
+  return extractBlobSha(res, file.path) ?? res.commitSha;
 }
 
 export async function commitBatch(
@@ -114,7 +120,9 @@ export async function commitBatch(
     changes: files.map((f) => ({ path: f.path, contentBase64: toBase64(f.text) })),
     baseSha: files[0]?.baseSha,
   });
-  return res.commitSha;
+  // Return the first blob sha if available to align with caller expectations
+  const firstPath = files[0]?.path;
+  return firstPath ? extractBlobSha(res, firstPath) ?? res.commitSha : res.commitSha;
 }
 
 // List Markdown files under the configured notesDir at HEAD
@@ -176,6 +184,16 @@ export async function fetchBlob(config: RemoteConfig, sha: string): Promise<stri
   } catch {
     return '';
   }
+}
+
+function extractBlobSha(res: CommitResponse, path: string): string | undefined {
+  const map = res.blobShas;
+  if (!map) return undefined;
+  if (path in map) return map[path];
+  // Git stores paths exactly as provided; attempt normalized
+  const alt = path.replace(/^\.\//, '');
+  if (alt in map) return map[alt];
+  return undefined;
 }
 
 export async function ensureRepoExists(

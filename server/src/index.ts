@@ -266,6 +266,7 @@ app.post("/v1/repos/:owner/:repo/commit", requireSession, async (req: express.Re
 
     // Create blobs for each change
     const treeItems: Array<{ path?: string; mode?: "100644" | "100755" | "040000" | "160000" | "120000"; type?: "blob" | "tree" | "commit"; sha: string | null }> = [];
+    const blobByPath = new Map<string, string>();
     for (const ch of changes) {
       if (ch.delete === true) {
         treeItems.push({ path: ch.path, sha: null });
@@ -273,7 +274,9 @@ app.post("/v1/repos/:owner/:repo/commit", requireSession, async (req: express.Re
       }
       const contentBase64 = ch.contentBase64 ?? "";
       const blob = await kit.request("POST /repos/{owner}/{repo}/git/blobs", { owner, repo, content: contentBase64, encoding: "base64" });
-      treeItems.push({ path: ch.path, mode: "100644", type: "blob", sha: String((blob as any).data.sha) });
+      const blobSha = String((blob as any).data.sha);
+      treeItems.push({ path: ch.path, mode: "100644", type: "blob", sha: blobSha });
+      blobByPath.set(ch.path, blobSha);
     }
 
     const session = (req as any).sessionUser as SessionClaims | undefined;
@@ -288,7 +291,9 @@ app.post("/v1/repos/:owner/:repo/commit", requireSession, async (req: express.Re
     const newTree: any = await kit.request("POST /repos/{owner}/{repo}/git/trees", { owner, repo, base_tree: baseTreeSha, tree: treeItems as any });
     const newCommit: any = await kit.request("POST /repos/{owner}/{repo}/git/commits", { owner, repo, message, tree: String(newTree.data.sha), parents: [headSha] });
     await kit.request("PATCH /repos/{owner}/{repo}/git/refs/{ref}", { owner, repo, ref: `heads/${branch}`, sha: String(newCommit.data.sha), force: false });
-    res.json({ commitSha: newCommit.data.sha });
+    const blobs: Record<string, string> = {};
+    for (const [path, sha] of blobByPath.entries()) blobs[path] = sha;
+    res.json({ commitSha: newCommit.data.sha, blobShas: blobs });
   } catch (e: any) {
     res.status(500).json({ error: String(e?.message ?? e) });
   }
