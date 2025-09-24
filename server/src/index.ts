@@ -147,13 +147,12 @@ app.get('/v1/repos/:owner/:repo/metadata', async (req: express.Request, res: exp
   try {
     let isPrivate: boolean | null = null;
     let defaultBranch: string | null = null;
-    let installed = false;
-    let repoSelected = false;
+    let repoAccessible = false;
     let repositorySelection: 'all' | 'selected' | null = null;
     const repoInst = await getRepositoryInstallation(appClient, owner, repo);
+    let ownerInstRecord = null as Awaited<ReturnType<typeof getOwnerInstallation>> | null;
     if (repoInst) {
-      installed = true;
-      repoSelected = true;
+      repoAccessible = true;
       repositorySelection = repoInst.repository_selection;
       const details = await getRepoDetailsViaInstallation(appClient, repoInst.id, owner, repo);
       if (details) {
@@ -161,13 +160,12 @@ app.get('/v1/repos/:owner/:repo/metadata', async (req: express.Request, res: exp
         defaultBranch = details.defaultBranch;
       }
     } else {
-      const ownerInst = await getOwnerInstallation(appClient, owner);
-      if (ownerInst) {
-        installed = true;
-        repositorySelection = ownerInst.repository_selection;
-        repoSelected = repositorySelection === 'all' ? true : false;
-        if (repoSelected) {
-          const details = await getRepoDetailsViaInstallation(appClient, ownerInst.id, owner, repo);
+      ownerInstRecord = await getOwnerInstallation(appClient, owner);
+      if (ownerInstRecord) {
+        repositorySelection = ownerInstRecord.repository_selection;
+        if (repositorySelection === 'all') {
+          repoAccessible = true;
+          const details = await getRepoDetailsViaInstallation(appClient, ownerInstRecord.id, owner, repo);
           if (details) {
             isPrivate = details.isPrivate;
             defaultBranch = details.defaultBranch;
@@ -178,7 +176,14 @@ app.get('/v1/repos/:owner/:repo/metadata', async (req: express.Request, res: exp
       // Uninstalled and no additional data; leave isPrivate/defaultBranch null for client-side fetch
     }
 
-    return res.json({ isPrivate, installed, repoSelected, repositorySelection, defaultBranch });
+    const installed = Boolean(repoInst || ownerInstRecord);
+    return res.json({
+      isPrivate,
+      installed,
+      repoSelected: repoAccessible,
+      repositorySelection,
+      defaultBranch,
+    });
   } catch (error: unknown) {
     res.status(500).json({ error: getErrorMessage(error) });
   }

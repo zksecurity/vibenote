@@ -117,15 +117,11 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     if (branch) cfg.branch = branch;
     return cfg;
   };
-  const metadataAllowsEdit = !!(
-    repoMeta &&
-    repoMeta.installed &&
-    (repoMeta.repoSelected || repoMeta.repositorySelection === 'all')
-  );
+  const metadataAllowsEdit = !!repoMeta?.repoSelected;
   const canEdit =
     !!sessionToken && (metadataAllowsEdit || ((!hasMetadataResolved || !!metadataError) && linked));
   const repoIsPublic =
-    repoMeta?.isPrivate === false || (!repoMeta?.installed && publicRepoMeta?.isPrivate === false);
+    repoMeta?.isPrivate === false || (!repoMeta?.repoSelected && publicRepoMeta?.isPrivate === false);
   const repoIsPrivate = repoMeta?.isPrivate === true || publicRepoMeta?.isPrivate === true;
   const isPublicReadonly = repoIsPublic && !canEdit;
   const needsInstallForPrivate = repoIsPrivate && !canEdit;
