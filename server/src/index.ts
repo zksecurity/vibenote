@@ -326,29 +326,29 @@ app.post(
       });
       const baseTreeSha = String(headCommit.data.tree.sha);
 
-      // Create blobs for each change
       const treeItems: Array<{
         path?: string;
         mode?: '100644' | '100755' | '040000' | '160000' | '120000';
         type?: 'blob' | 'tree' | 'commit';
-        sha: string | null;
+        sha?: string | null;
+        content?: string;
+        encoding?: 'utf-8' | 'base64';
       }> = [];
-      const blobByPath = new Map<string, string>();
+      const trackedPaths = new Set<string>();
       for (const ch of changes) {
         if (ch.delete === true) {
-          treeItems.push({ path: ch.path, sha: null });
+          treeItems.push({ path: ch.path, mode: '100644', type: 'blob', sha: null });
           continue;
         }
         const contentBase64 = ch.contentBase64 ?? '';
-        const blob = await kit.request('POST /repos/{owner}/{repo}/git/blobs', {
-          owner,
-          repo,
+        treeItems.push({
+          path: ch.path,
+          mode: '100644',
+          type: 'blob',
           content: contentBase64,
           encoding: 'base64',
         });
-        const blobSha = String((blob as any).data.sha);
-        treeItems.push({ path: ch.path, mode: '100644', type: 'blob', sha: blobSha });
-        blobByPath.set(ch.path, blobSha);
+        trackedPaths.add(ch.path);
       }
 
       const session = (req as any).sessionUser as SessionClaims | undefined;
@@ -366,6 +366,14 @@ app.post(
         base_tree: baseTreeSha,
         tree: treeItems as any,
       });
+      const blobByPath: Record<string, string> = {};
+      if (Array.isArray(newTree.data?.tree)) {
+        for (const entry of newTree.data.tree as Array<any>) {
+          if (!entry || entry.type !== 'blob') continue;
+          if (typeof entry.path !== 'string' || typeof entry.sha !== 'string') continue;
+          if (trackedPaths.has(entry.path)) blobByPath[entry.path] = entry.sha;
+        }
+      }
       const newCommit: any = await kit.request('POST /repos/{owner}/{repo}/git/commits', {
         owner,
         repo,
@@ -380,9 +388,7 @@ app.post(
         sha: String(newCommit.data.sha),
         force: false,
       });
-      const blobs: Record<string, string> = {};
-      for (const [path, sha] of blobByPath.entries()) blobs[path] = sha;
-      res.json({ commitSha: newCommit.data.sha, blobShas: blobs });
+      res.json({ commitSha: newCommit.data.sha, blobShas: blobByPath });
     } catch (e: any) {
       res.status(500).json({ error: String(e?.message ?? e) });
     }
