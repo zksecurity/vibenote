@@ -57,7 +57,12 @@ export function HomeView({ recents, navigate }: HomeViewProps) {
                   <span className="home-repo-label">{renderLabel(entry)}</span>
                   <span aria-hidden className="home-repo-arrow">
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor">
-                      <path d="M6 12 10 8 6 4" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                      <path
+                        d="M6 12 10 8 6 4"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
                     </svg>
                   </span>
                 </button>

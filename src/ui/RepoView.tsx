@@ -104,13 +104,14 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   const [repoModalMode, setRepoModalMode] = useState<'onboard' | 'manage'>('manage');
   const [repoModalError, setRepoModalError] = useState<string | null>(null);
   const [showSwitcher, setShowSwitcher] = useState(false);
-  const [accessState, setAccessState] = useState<'unknown' | 'reachable' | 'unreachable'>(
-    'unknown'
-  );
+  const [accessState, setAccessState] = useState<'unknown' | 'reachable' | 'unreachable'>('unknown');
   const [repoMeta, setRepoMeta] = useState<RepoMetadata | null>(null);
   const [hasMetadataResolved, setHasMetadataResolved] = useState(false);
   const [metadataError, setMetadataError] = useState<string | null>(null);
-  const [publicRepoMeta, setPublicRepoMeta] = useState<{ isPrivate: boolean; defaultBranch: string | null } | null>(null);
+  const [publicRepoMeta, setPublicRepoMeta] = useState<{
+    isPrivate: boolean;
+    defaultBranch: string | null;
+  } | null>(null);
   const [publicRateLimited, setPublicRateLimited] = useState(false);
   const [, setPublicMetaError] = useState<string | null>(null);
   const buildConfigWithMeta = () => {
@@ -128,16 +129,13 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     !!sessionToken && (metadataAllowsEdit || ((!hasMetadataResolved || !!metadataError) && linked));
   const repoIsPublic =
     repoMeta?.isPrivate === false || (!repoMeta?.installed && publicRepoMeta?.isPrivate === false);
-  const repoIsPrivate =
-    repoMeta?.isPrivate === true || publicRepoMeta?.isPrivate === true;
+  const repoIsPrivate = repoMeta?.isPrivate === true || publicRepoMeta?.isPrivate === true;
   const isPublicReadonly = repoIsPublic && !canEdit;
   const needsInstallForPrivate = repoIsPrivate && !canEdit;
   const isRateLimited = !metadataError && (publicRateLimited || repoMeta?.rateLimited === true);
   const [refreshTick, setRefreshTick] = useState(0);
   const initialPullRef = useState({ done: false })[0];
-  const [autosync, setAutosync] = useState<boolean>(() =>
-    slug !== 'new' ? isAutosyncEnabled(slug) : false
-  );
+  const [autosync, setAutosync] = useState<boolean>(() => (slug !== 'new' ? isAutosyncEnabled(slug) : false));
   const autoSyncTimerRef = useState<{ id: number | null }>({ id: null })[0];
   const autoSyncBusyRef = useState<{ busy: boolean }>({ busy: false })[0];
   const AUTO_SYNC_MIN_INTERVAL_MS = 60_000; // not too often
@@ -263,7 +261,10 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
         const info = await fetchPublicRepoInfo(route.owner, route.repo);
         if (cancelled) return;
         if (info.ok && typeof info.isPrivate === 'boolean') {
-          setPublicRepoMeta({ isPrivate: info.isPrivate, defaultBranch: info.defaultBranch ?? null });
+          setPublicRepoMeta({
+            isPrivate: info.isPrivate,
+            defaultBranch: info.defaultBranch ?? null,
+          });
           setPublicRateLimited(false);
           setPublicMetaError(null);
           setAccessState(info.isPrivate ? 'unreachable' : 'reachable');
@@ -523,12 +524,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     }
   };
 
-  const onConfigSubmit = async (cfg: {
-    owner: string;
-    repo: string;
-    branch: string;
-    autosync: boolean;
-  }) => {
+  const onConfigSubmit = async (cfg: { owner: string; repo: string; branch: string; autosync: boolean }) => {
     setSyncMsg(null);
     setRepoModalError(null);
     setSyncing(true);
@@ -672,18 +668,8 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     >
       <path d="M2.5 8a5.5 5.5 0 0 1 9-3.9" strokeWidth="1.4" strokeLinecap="round" />
       <path d="M13.5 8a5.5 5.5 0 0 1-9 3.9" strokeWidth="1.4" strokeLinecap="round" />
-      <path
-        d="M11.5 2.5 13.5 5l-3 .5"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M4.5 13.5 2.5 11l3-.5"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+      <path d="M11.5 2.5 13.5 5l-3 .5" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M4.5 13.5 2.5 11l3-.5" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 
@@ -821,12 +807,8 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   };
 
   const isRepoUnreachable =
-    route.kind === 'repo' &&
-    accessState === 'unreachable' &&
-    !isPublicReadonly &&
-    !needsInstallForPrivate;
-  const showSidebar =
-    (notes.length > 0 && linked) || (isPublicReadonly && readOnlyNotes.length > 0);
+    route.kind === 'repo' && accessState === 'unreachable' && !isPublicReadonly && !needsInstallForPrivate;
+  const showSidebar = (notes.length > 0 && linked) || (isPublicReadonly && readOnlyNotes.length > 0);
   const layoutClass = showSidebar ? (isRepoUnreachable ? 'single' : '') : 'single';
   const noteList = isPublicReadonly ? readOnlyNotes : notes;
   const folderList = useMemo(() => {
@@ -954,12 +936,12 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                 <h2>Can’t access this repository</h2>
                 <p>
                   You don’t have permission to view{' '}
-                  <strong>{route.kind === 'repo' ? `${route.owner}/${route.repo}` : ''}</strong>{' '}
-                  with the current GitHub device token.
+                  <strong>{route.kind === 'repo' ? `${route.owner}/${route.repo}` : ''}</strong> with the
+                  current GitHub device token.
                 </p>
                 <p>
-                  Sign out and sign in with a token that has access, or switch to a different
-                  repository from the header.
+                  Sign out and sign in with a token that has access, or switch to a different repository from
+                  the header.
                 </p>
               </div>
             </div>
@@ -1104,12 +1086,9 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                 ) : route.kind === 'repo' && needsInstallForPrivate ? (
                   <div className="empty-state">
                     <h2>Can't access this repository</h2>
+                    <p>This repository is private or not yet enabled for the VibeNote GitHub App.</p>
                     <p>
-                      This repository is private or not yet enabled for the VibeNote GitHub App.
-                    </p>
-                    <p>
-                      Continue to GitHub and either select <strong>Only select repositories</strong>{' '}
-                      and pick
+                      Continue to GitHub and either select <strong>Only select repositories</strong> and pick
                       <code>
                         {' '}
                         {route.owner}/{route.repo}{' '}
@@ -1125,7 +1104,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                               const url = await apiGetInstallUrl(
                                 route.owner,
                                 route.repo,
-                                window.location.href
+                                window.location.href,
                               );
                               window.open(url, '_blank', 'noopener');
                             } catch (e) {
@@ -1155,8 +1134,8 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                       <div className="alert warning">
                         <span className="badge">Limited</span>
                         <span className="alert-text">
-                          GitHub rate limits temporarily prevent checking repository access.
-                          Public repositories remain viewable; retry shortly for private access checks.
+                          GitHub rate limits temporarily prevent checking repository access. Public
+                          repositories remain viewable; retry shortly for private access checks.
                         </span>
                       </div>
                     )}
@@ -1176,7 +1155,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                                   const url = await apiGetInstallUrl(
                                     route.owner,
                                     route.repo,
-                                    window.location.href
+                                    window.location.href,
                                   );
                                   window.open(url, '_blank', 'noopener');
                                 } catch (e) {
@@ -1208,8 +1187,8 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                         <h2>Browse on GitHub to view files</h2>
                         <p>This repository has no notes cached locally yet.</p>
                         <p>
-                          Open the repository on GitHub or select a file from the sidebar to load it
-                          in VibeNote.
+                          Open the repository on GitHub or select a file from the sidebar to load it in
+                          VibeNote.
                         </p>
                       </div>
                     ) : (
@@ -1217,8 +1196,8 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                         <h2>Welcome to VibeNote</h2>
                         <p>Select a note from the sidebar or create a new one to get started.</p>
                         <p>
-                          To sync with GitHub, connect your account and link a repository. Once
-                          connected, use <strong>Sync now</strong> anytime to pull and push updates.
+                          To sync with GitHub, connect your account and link a repository. Once connected, use{' '}
+                          <strong>Sync now</strong> anytime to pull and push updates.
                         </p>
                         {syncMsg && <p className="empty-state-status">{syncMsg}</p>}
                       </div>

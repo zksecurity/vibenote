@@ -22,7 +22,7 @@ app.use(
       return cb(new Error('CORS not allowed'));
     },
     credentials: true,
-  })
+  }),
 );
 
 app.get('/v1/healthz', (_req: express.Request, res: express.Response) => res.json({ ok: true }));
@@ -74,24 +74,21 @@ app.get('/v1/auth/github/callback', async (req: express.Request, res: express.Re
         avatarUrl: (u.avatar_url as string) ?? null,
         name: (u.name as string | null) ?? null,
       },
-      env.SESSION_JWT_SECRET
+      env.SESSION_JWT_SECRET,
     );
 
-    const rt = new URL(
-      returnTo,
-      returnTo.startsWith('http') ? undefined : `https://${req.headers.host}`
-    );
+    const rt = new URL(returnTo, returnTo.startsWith('http') ? undefined : `https://${req.headers.host}`);
     const origin = rt.origin;
     const html = `<!doctype html><meta charset="utf-8"><title>VibeNote Login</title><script>
       (function(){
         try {
           const msg = { type: 'vibenote:auth', sessionToken: ${JSON.stringify(
-            sessionToken
+            sessionToken,
           )}, user: { id: ${JSON.stringify(String(u.id))}, login: ${JSON.stringify(
-      String(u.login)
-    )}, name: ${JSON.stringify((u.name as string | null) ?? null)}, avatarUrl: ${JSON.stringify(
-      u.avatar_url ?? null
-    )}, avatarDataUrl: null } };
+            String(u.login),
+          )}, name: ${JSON.stringify((u.name as string | null) ?? null)}, avatarUrl: ${JSON.stringify(
+            u.avatar_url ?? null,
+          )}, avatarDataUrl: null } };
           if (window.opener && '${origin}') { window.opener.postMessage(msg, '${origin}'); }
         } catch (e) {}
         setTimeout(function(){ window.close(); }, 50);
@@ -109,14 +106,10 @@ app.get('/v1/app/install-url', async (req: express.Request, res: express.Respons
   const owner = String(req.query.owner ?? '');
   const repo = String(req.query.repo ?? '');
   const returnTo = String(req.query.returnTo ?? '');
-  const state = await signState(
-    { owner, repo, returnTo, t: Date.now() },
-    env.SESSION_JWT_SECRET,
-    60 * 30
-  );
-  const url = `https://github.com/apps/${
-    env.GITHUB_APP_SLUG
-  }/installations/new?state=${encodeURIComponent(state)}`;
+  const state = await signState({ owner, repo, returnTo, t: Date.now() }, env.SESSION_JWT_SECRET, 60 * 30);
+  const url = `https://github.com/apps/${env.GITHUB_APP_SLUG}/installations/new?state=${encodeURIComponent(
+    state,
+  )}`;
   res.json({ url });
 });
 
@@ -128,10 +121,7 @@ app.get('/v1/app/setup', async (req: express.Request, res: express.Response) => 
     const stateToken = String(req.query.state ?? '');
     const state = (await verifyState(stateToken, env.SESSION_JWT_SECRET)) as any;
     const returnTo = typeof state?.returnTo === 'string' && state.returnTo ? state.returnTo : '/';
-    const url = new URL(
-      returnTo,
-      returnTo.startsWith('http') ? undefined : `https://${req.headers.host}`
-    );
+    const url = new URL(returnTo, returnTo.startsWith('http') ? undefined : `https://${req.headers.host}`);
     if (installationId) url.searchParams.set('installation_id', installationId);
     if (setupAction) url.searchParams.set('setup_action', setupAction);
     res.redirect(url.toString());
@@ -155,8 +145,7 @@ app.get('/v1/repos/:owner/:repo/metadata', async (req: express.Request, res: exp
     if (repoInst) {
       installed = true;
       repoSelected = true;
-      repositorySelection =
-        (repoInst.repository_selection as 'all' | 'selected' | undefined) ?? null;
+      repositorySelection = (repoInst.repository_selection as 'all' | 'selected' | undefined) ?? null;
       const details = await getRepoDetailsViaInstallation(appClient, repoInst.id, owner, repo);
       if (details) {
         isPrivate = details.isPrivate;
@@ -166,8 +155,7 @@ app.get('/v1/repos/:owner/:repo/metadata', async (req: express.Request, res: exp
       const ownerInst = await getOwnerInstallation(appClient, owner);
       if (ownerInst) {
         installed = true;
-        repositorySelection =
-          (ownerInst.repository_selection as 'all' | 'selected' | undefined) ?? null;
+        repositorySelection = (ownerInst.repository_selection as 'all' | 'selected' | undefined) ?? null;
         repoSelected = repositorySelection === 'all' ? true : false;
         if (repoSelected) {
           const details = await getRepoDetailsViaInstallation(appClient, ownerInst.id, owner, repo);
@@ -216,10 +204,8 @@ app.get('/v1/repos/:owner/:repo/tree', async (req: express.Request, res: express
       return res.json({ entries: r.data.tree });
     } else {
       const unauth = await fetch(
-        `https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(
-          branch
-        )}?recursive=1`,
-        { headers: { Accept: 'application/vnd.github+json' } }
+        `https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
+        { headers: { Accept: 'application/vnd.github+json' } },
       );
       if (!unauth.ok) return res.status(unauth.status).json({ error: `github: ${unauth.status}` });
       const data: any = await unauth.json();
@@ -253,9 +239,7 @@ app.get('/v1/repos/:owner/:repo/file', async (req: express.Request, res: express
       return res.json({ contentBase64: file.content, sha: file.sha });
     }
     // unauth for public
-    const u = new URL(
-      `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`
-    );
+    const u = new URL(`https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`);
     if (ref) u.searchParams.set('ref', ref);
     const r = await fetch(u, { headers: { Accept: 'application/vnd.github+json' } });
     if (!r.ok) return res.status(r.status).json({ error: `github: ${r.status}` });
@@ -291,8 +275,7 @@ app.get('/v1/repos/:owner/:repo/blob/:sha', async (req: express.Request, res: ex
 // Auth guard for write endpoints
 function requireSession(req: express.Request, res: express.Response, next: express.NextFunction) {
   const h = req.header('authorization') || req.header('Authorization');
-  if (!h || !h.toLowerCase().startsWith('bearer '))
-    return res.status(401).json({ error: 'missing auth' });
+  if (!h || !h.toLowerCase().startsWith('bearer ')) return res.status(401).json({ error: 'missing auth' });
   const token = h.slice(7).trim();
   verifySession(token, env.SESSION_JWT_SECRET)
     .then((claims) => {
@@ -370,8 +353,7 @@ app.post(
 
       const session = (req as any).sessionUser as SessionClaims | undefined;
       if (session && session.login && session.sub) {
-        const display =
-          session.name && session.name.trim().length > 0 ? session.name : session.login;
+        const display = session.name && session.name.trim().length > 0 ? session.name : session.login;
         const coAuthorLine = `Co-authored-by: ${display} <${session.sub}+${session.login}@users.noreply.github.com>`;
         if (!message.includes('Co-authored-by:')) {
           message = `${message.trim()}\n\n${coAuthorLine}`;
@@ -404,7 +386,7 @@ app.post(
     } catch (e: any) {
       res.status(500).json({ error: String(e?.message ?? e) });
     }
-  }
+  },
 );
 
 // Optional webhooks placeholder (no-op for v1)

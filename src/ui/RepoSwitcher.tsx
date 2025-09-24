@@ -1,7 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { Route } from './routing';
 import { listRecentRepos, markRepoLinked, type RecentRepo } from '../storage/local';
-import { buildRemoteConfig, commitBatch, listNoteFiles, pullNote, repoExists, ensureRepoExists, type RemoteConfig } from '../sync/git-sync';
+import {
+  buildRemoteConfig,
+  commitBatch,
+  listNoteFiles,
+  pullNote,
+  repoExists,
+  ensureRepoExists,
+  type RemoteConfig,
+} from '../sync/git-sync';
 import { ensureIntroReadme } from '../sync/readme';
 import { LocalStore } from '../storage/local';
 
@@ -62,7 +70,8 @@ export function RepoSwitcher({ accountOwner, route, slug, navigate, onClose, onR
     const q = input.trim().toLowerCase();
     const base = recents;
     if (!q) return base.slice(0, 8);
-    const score = (slug: string) => (slug.toLowerCase().startsWith(q) ? 0 : slug.toLowerCase().includes(q) ? 1 : 2);
+    const score = (slug: string) =>
+      slug.toLowerCase().startsWith(q) ? 0 : slug.toLowerCase().includes(q) ? 1 : 2;
     return base
       .slice()
       .sort((a, b) => score(a.slug) - score(b.slug) || b.lastOpenedAt - a.lastOpenedAt)
@@ -205,7 +214,9 @@ export function RepoSwitcher({ accountOwner, route, slug, navigate, onClose, onR
                 if (o && r) goTo(o, r);
               }}
             >
-              <span className="repo-switcher-slug">{s.owner && s.repo ? `${s.owner}/${s.repo}` : s.slug}</span>
+              <span className="repo-switcher-slug">
+                {s.owner && s.repo ? `${s.owner}/${s.repo}` : s.slug}
+              </span>
               {s.connected ? <span className="repo-switcher-connected">linked</span> : null}
             </button>
           </li>

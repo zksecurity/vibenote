@@ -493,7 +493,7 @@ export function recordDeleteTombstone(
     path: string;
     lastRemoteSha?: string;
     deletedAt: number;
-  }
+  },
 ) {
   let ts = listTombstones(slug);
   ts.push({ type: 'delete', path: t.path, lastRemoteSha: t.lastRemoteSha, deletedAt: t.deletedAt });
@@ -508,7 +508,7 @@ export function recordRenameTombstone(
     to: string;
     lastRemoteSha?: string;
     renamedAt: number;
-  }
+  },
 ) {
   let ts = listTombstones(slug);
   ts.push({
@@ -533,11 +533,7 @@ export function clearAllTombstones(slug: string) {
   debugLog(slug, 'tombstone:clearAll', {});
 }
 
-export function markSynced(
-  slug: string,
-  id: string,
-  patch: { remoteSha?: string; syncedHash?: string }
-) {
+export function markSynced(slug: string, id: string, patch: { remoteSha?: string; syncedHash?: string }) {
   let key = `${repoKey(slug, 'note')}:${id}`;
   let docRaw = localStorage.getItem(key);
   if (!docRaw) return;
@@ -785,9 +781,7 @@ function loadRecentRepos(): RecentRepo[] {
   try {
     let parsed = JSON.parse(raw) as RecentRepo[];
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (item) => typeof item?.slug === 'string' && typeof item?.lastOpenedAt === 'number'
-    );
+    return parsed.filter((item) => typeof item?.slug === 'string' && typeof item?.lastOpenedAt === 'number');
   } catch {
     return [];
   }

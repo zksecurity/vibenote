@@ -17,8 +17,10 @@
   --shadow: 0 1px 2px rgba(15, 23, 42, 0.08), 0 8px 24px rgba(15, 23, 42, 0.06);
   --shadow-soft: 0 12px 36px rgba(15, 23, 42, 0.12);
   --topbar-height: 64px;
-  --font: 16px/1.55 "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-  --code-font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --font: 16px/1.55 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial,
+    sans-serif;
+  --code-font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
 }
 
 * {
@@ -246,7 +248,10 @@ textarea {
   cursor: pointer;
   font-size: 1rem;
   font-weight: 500;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background 0.18s ease;
 }
 
 .home-repo:hover {
@@ -312,7 +317,11 @@ textarea {
   font-weight: 500;
   line-height: 1;
   cursor: pointer;
-  transition: background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, color 0.18s ease;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    color 0.18s ease;
   text-decoration: none;
 }
 
@@ -364,7 +373,6 @@ textarea {
 .btn.secondary:hover {
   background: rgba(9, 105, 218, 0.1);
 }
-
 
 .sync-btn {
   width: 40px;
@@ -538,7 +546,9 @@ textarea {
   border-radius: var(--radius);
   background: var(--surface);
   padding: 10px 12px;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
 }
 
 .input:focus-visible,
@@ -597,7 +607,9 @@ textarea:focus-visible {
   gap: 8px;
 }
 
-.sidebar-actions .btn { flex: 1; }
+.sidebar-actions .btn {
+  flex: 1;
+}
 
 .sidebar-title {
   display: flex;
@@ -631,7 +643,11 @@ textarea:focus-visible {
   border-radius: var(--radius);
   background: var(--surface);
   padding: 14px;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease, background 0.2s ease;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease,
+    background 0.2s ease;
   cursor: pointer;
 }
 
@@ -739,7 +755,6 @@ textarea:focus-visible {
   background: #fbe0a1;
   color: #a36600;
 }
-
 
 .alert .alert-text {
   flex: 1 1 auto;
@@ -994,7 +1009,10 @@ textarea:focus-visible {
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;
-  transition: background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
   overflow: hidden; /* ensure thumb never escapes */
   box-sizing: border-box;
   flex: 0 0 50px; /* prevent flex shrinking */
@@ -1021,7 +1039,9 @@ textarea:focus-visible {
   left: 2px;
   top: 50%;
   transform: translateY(-50%);
-  transition: left 0.18s ease, right 0.18s ease;
+  transition:
+    left 0.18s ease,
+    right 0.18s ease;
 }
 
 .toggle-switch.on .toggle-thumb {
@@ -1053,32 +1073,91 @@ textarea:focus-visible {
 }
 
 /* --- File tree (GitHub-like) --- */
-.file-tree { font-size: 14px; user-select: none; }
-.tree-row { position: relative; display: flex; align-items: center; gap: 6px; height: 28px; line-height: 28px; border-radius: 6px; padding-right: 8px; color: var(--text); cursor: default; }
-.tree-row:hover { background: #f6f8fa; }
-.tree-row.is-active { background: #eaeef2; }
-.tree-disclosure { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border: 0; background: transparent; color: #6e7781; cursor: pointer; }
-.tree-disclosure-spacer { display: inline-block; width: 18px; height: 18px; }
-.tree-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tree-icon { width: 16px; height: 16px; display: inline-block; background-repeat: no-repeat; background-size: 16px 16px; }
+.file-tree {
+  font-size: 14px;
+  user-select: none;
+}
+.tree-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  line-height: 28px;
+  border-radius: 6px;
+  padding-right: 8px;
+  color: var(--text);
+  cursor: default;
+}
+.tree-row:hover {
+  background: #f6f8fa;
+}
+.tree-row.is-active {
+  background: #eaeef2;
+}
+.tree-disclosure {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  background: transparent;
+  color: #6e7781;
+  cursor: pointer;
+}
+.tree-disclosure-spacer {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+}
+.tree-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tree-icon {
+  width: 16px;
+  height: 16px;
+  display: inline-block;
+  background-repeat: no-repeat;
+  background-size: 16px 16px;
+}
 .tree-icon.folder,
 .tree-icon.folder-open {
   /* Octicon-like closed folder silhouette */
-  -webkit-mask-image: url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\"><path d=\"M1.75 3A1.75 1.75 0 0 0 0 4.75v6.5C0 12.216.784 13 1.75 13h12.5A1.75 1.75 0 0 0 16 11.25V5.5A1.5 1.5 0 0 0 14.5 4h-6L7.22 2.72A1.75 1.75 0 0 0 6 2H1.75Z\"/></svg>');
-  mask-image: url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\"><path d=\"M1.75 3A1.75 1.75 0 0 0 0 4.75v6.5C0 12.216.784 13 1.75 13h12.5A1.75 1.75 0 0 0 16 11.25V5.5A1.5 1.5 0 0 0 14.5 4h-6L7.22 2.72A1.75 1.75 0 0 0 6 2H1.75Z\"/></svg>');
+  -webkit-mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M1.75 3A1.75 1.75 0 0 0 0 4.75v6.5C0 12.216.784 13 1.75 13h12.5A1.75 1.75 0 0 0 16 11.25V5.5A1.5 1.5 0 0 0 14.5 4h-6L7.22 2.72A1.75 1.75 0 0 0 6 2H1.75Z"/></svg>');
+  mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M1.75 3A1.75 1.75 0 0 0 0 4.75v6.5C0 12.216.784 13 1.75 13h12.5A1.75 1.75 0 0 0 16 11.25V5.5A1.5 1.5 0 0 0 14.5 4h-6L7.22 2.72A1.75 1.75 0 0 0 6 2H1.75Z"/></svg>');
   background-color: #218bff; /* GitHub blue */
 }
-.tree-icon.folder { background-color: #0969da; } /* closed: darker */
-.tree-icon.folder-open { background-color: #218bff; } /* open: lighter */
+.tree-icon.folder {
+  background-color: #0969da;
+} /* closed: darker */
+.tree-icon.folder-open {
+  background-color: #218bff;
+} /* open: lighter */
 
 /* File: outlined gray document for contrast */
 .tree-icon.file {
-  background-image: url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"%2357606a\" stroke-width=\"1.2\" stroke-linejoin=\"round\" stroke-linecap=\"round\"><path d=\"M3.25 2.25h5.1l3.4 3.4v8.1c0 .69-.56 1.25-1.25 1.25H4.5c-.69 0-1.25-.56-1.25-1.25v-10.5Z\"/><path d=\"M8.35 2.25V5.9h3.4\"/></svg>');
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="%2357606a" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"><path d="M3.25 2.25h5.1l3.4 3.4v8.1c0 .69-.56 1.25-1.25 1.25H4.5c-.69 0-1.25-.56-1.25-1.25v-10.5Z"/><path d="M8.35 2.25V5.9h3.4"/></svg>');
   background-color: transparent;
 }
-.tree-edit-form { display: inline-flex; flex: 1; }
-.tree-input { width: 180px; height: 24px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; outline: none; }
-.tree-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.tree-edit-form {
+  display: inline-flex;
+  flex: 1;
+}
+.tree-input {
+  width: 180px;
+  height: 24px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+}
+.tree-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
 
 /* Inline context menu for mobile long-press or desktop right-click */
 .tree-menu {

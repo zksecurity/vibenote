@@ -38,7 +38,12 @@ describe('LocalStore cross-tab resilience', () => {
 
     // Second tab created before deletion; holds its own in-memory index
     const b = new LocalStore(slug, { seedWelcome: false });
-    expect(b.listNotes().map((n) => n.id).sort()).toEqual([id1, id2].sort());
+    expect(
+      b
+        .listNotes()
+        .map((n) => n.id)
+        .sort(),
+    ).toEqual([id1, id2].sort());
 
     // Tab A deletes note A
     a.deleteNote(id1);
@@ -54,4 +59,3 @@ describe('LocalStore cross-tab resilience', () => {
     expect(c.listNotes().some((n) => n.id === id1)).toBe(false);
   });
 });
-

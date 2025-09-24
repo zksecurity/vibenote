@@ -24,7 +24,7 @@ async function ensureIntroReadme(config: RemoteConfig): Promise<void> {
           baseSha: existingReadme?.sha,
         },
       ],
-      'vibenote: add README'
+      'vibenote: add README',
     );
   } catch {
     // Ignore README failures; syncing notes is more important for first-time setup.

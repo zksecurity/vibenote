@@ -26,7 +26,11 @@ export async function getRepoMetadata(owner: string, repo: string): Promise<Repo
   return (await res.json()) as RepoMetadata;
 }
 
-export async function getTree(owner: string, repo: string, ref?: string): Promise<Array<{ path: string; type: string; sha?: string }>> {
+export async function getTree(
+  owner: string,
+  repo: string,
+  ref?: string,
+): Promise<Array<{ path: string; type: string; sha?: string }>> {
   const base = getApiBase();
   const url = new URL(`${base}/v1/repos/${encode(owner)}/${encode(repo)}/tree`);
   if (ref) url.searchParams.set('ref', ref);
@@ -36,7 +40,12 @@ export async function getTree(owner: string, repo: string, ref?: string): Promis
   return Array.isArray(data.entries) ? data.entries : [];
 }
 
-export async function getFile(owner: string, repo: string, path: string, ref?: string): Promise<{ contentBase64: string; sha: string }> {
+export async function getFile(
+  owner: string,
+  repo: string,
+  path: string,
+  ref?: string,
+): Promise<{ contentBase64: string; sha: string }> {
   const base = getApiBase();
   const url = new URL(`${base}/v1/repos/${encode(owner)}/${encode(repo)}/file`);
   url.searchParams.set('path', path);
@@ -63,7 +72,7 @@ export async function commit(
     message: string;
     changes: Array<{ path: string; contentBase64?: string; delete?: boolean }>;
     baseSha?: string;
-  }
+  },
 ): Promise<CommitResponse> {
   const base = getApiBase();
   const res = await fetch(`${base}/v1/repos/${encode(owner)}/${encode(repo)}/commit`, {
@@ -87,4 +96,6 @@ export async function getInstallUrl(owner: string, repo: string, returnTo: strin
   return String(j.url || '');
 }
 
-function encode(s: string): string { return encodeURIComponent(s); }
+function encode(s: string): string {
+  return encodeURIComponent(s);
+}

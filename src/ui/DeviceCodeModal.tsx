@@ -71,24 +71,31 @@ export function DeviceCodeModal({ device, onDone, onCancel }: Props) {
         </ol>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
           <code style={{ fontSize: 24, letterSpacing: 3 }}>{prettyCode}</code>
-          <button className="btn" onClick={copyCode}>Copy</button>
+          <button className="btn" onClick={copyCode}>
+            Copy
+          </button>
         </div>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:8 }}>
-          <a href={device.verification_uri} target="_blank" rel="noreferrer" style={{ color:'var(--accent)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+          <a
+            href={device.verification_uri}
+            target="_blank"
+            rel="noreferrer"
+            style={{ color: 'var(--accent)' }}
+          >
             {device.verification_uri.replace('https://', '')}
           </a>
-          <div className="toolbar" style={{ margin:0 }}>
-            <button className="btn" onClick={onCancel}>Cancel</button>
-            <button className="btn primary" onClick={openGitHub}>Open GitHub</button>
+          <div className="toolbar" style={{ margin: 0 }}>
+            <button className="btn" onClick={onCancel}>
+              Cancel
+            </button>
+            <button className="btn primary" onClick={openGitHub}>
+              Open GitHub
+            </button>
           </div>
         </div>
         <div style={{ marginTop: 10 }}>
-          {status === 'polling' && (
-            <div style={{ color: 'var(--muted)' }}>Waiting for authorization…</div>
-          )}
-          {message && (
-            <div style={{ color: 'var(--accent)' }}>{message}</div>
-          )}
+          {status === 'polling' && <div style={{ color: 'var(--muted)' }}>Waiting for authorization…</div>}
+          {message && <div style={{ color: 'var(--accent)' }}>{message}</div>}
         </div>
       </div>
     </div>

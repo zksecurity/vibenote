@@ -27,9 +27,12 @@ export async function fetchPublicRepoInfo(owner: string, repo: string): Promise<
   }
 
   try {
-    const res = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, {
-      headers: { Accept: 'application/vnd.github+json' },
-    });
+    const res = await fetch(
+      `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
+      {
+        headers: { Accept: 'application/vnd.github+json' },
+      },
+    );
     if (res.status === 200) {
       const data: any = await res.json();
       const info: PublicRepoInfo = {
@@ -84,4 +87,3 @@ export function clearPublicRepoInfoCache() {
 function cacheKey(owner: string, repo: string): string {
   return `${owner.toLowerCase()}/${repo.toLowerCase()}`;
 }
-

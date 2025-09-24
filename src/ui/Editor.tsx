@@ -44,10 +44,11 @@ export function Editor({ doc, onChange, readOnly = false }: Props) {
 
   return (
     <>
-      {!readOnly && (
-        <textarea value={text} onChange={(e) => onInput(e.target.value)} spellCheck={false} />
-      )}
-      <div className={`preview${readOnly ? ' preview-only' : ''}`} dangerouslySetInnerHTML={{ __html: html }} />
+      {!readOnly && <textarea value={text} onChange={(e) => onInput(e.target.value)} spellCheck={false} />}
+      <div
+        className={`preview${readOnly ? ' preview-only' : ''}`}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
     </>
   );
 }

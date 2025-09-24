@@ -13,7 +13,7 @@ export function App() {
       recordRecentRepo(entry);
       setRecents(listRecentRepos());
     },
-    []
+    [],
   );
 
   useEffect(() => {

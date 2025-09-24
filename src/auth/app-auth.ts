@@ -40,7 +40,9 @@ export function clearSession() {
   localStorage.removeItem(USER_KEY);
 }
 
-export async function signInWithGitHubApp(returnTo?: string): Promise<{ token: string; user: AppUser } | null> {
+export async function signInWithGitHubApp(
+  returnTo?: string,
+): Promise<{ token: string; user: AppUser } | null> {
   const base = getApiBase();
   const url = new URL(base + '/v1/auth/github/start');
   url.searchParams.set('returnTo', returnTo || window.location.href);

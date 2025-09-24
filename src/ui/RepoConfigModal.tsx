@@ -68,8 +68,7 @@ function RepoConfigModal({
     };
   }, [owner, repo]);
 
-  const heading =
-    mode === 'onboard' ? 'Create your notes repository' : 'Create or switch to a repository';
+  const heading = mode === 'onboard' ? 'Create your notes repository' : 'Create or switch to a repository';
   const description =
     mode === 'onboard'
       ? 'VibeNote stores your notes in a private GitHub repository. Create one now to start syncing.'
@@ -139,9 +138,7 @@ function RepoConfigModal({
           {checking ? (
             <div className="repo-config-hint">Checking repository…</div>
           ) : exists === true ? (
-            <div className="repo-config-hint">
-              Repository already exists — you can switch to it.
-            </div>
+            <div className="repo-config-hint">Repository already exists — you can switch to it.</div>
           ) : exists === false ? (
             <div className="repo-config-hint">Repository not found — it will be created.</div>
           ) : null}
@@ -151,21 +148,12 @@ function RepoConfigModal({
             </button>
             <div className="repo-config-actions">
               {showLinkExisting && (
-                <button
-                  type="button"
-                  className="btn secondary"
-                  onClick={linkExisting}
-                  disabled={syncing}
-                >
+                <button type="button" className="btn secondary" onClick={linkExisting} disabled={syncing}>
                   Switch to existing repo
                 </button>
               )}
               <button type="submit" className="btn primary" disabled={!canSubmit}>
-                {syncing
-                  ? 'Setting up…'
-                  : exists === true
-                  ? 'Switch to repository'
-                  : 'Create repository'}
+                {syncing ? 'Setting up…' : exists === true ? 'Switch to repository' : 'Create repository'}
               </button>
             </div>
           </div>
