@@ -888,7 +888,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                               route.repo,
                               window.location.href
                             );
-                            window.location.href = url;
+                            window.open(url, '_blank', 'noopener');
                           } catch (e) {
                             console.error(e);
                             setSyncMsg('Failed to open GitHub');
@@ -918,7 +918,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                                   route.repo,
                                   window.location.href
                                 );
-                                window.location.href = url;
+                                window.open(url, '_blank', 'noopener');
                               } catch (e) {
                                 console.error(e);
                                 setSyncMsg('Failed to open GitHub');
