@@ -220,19 +220,6 @@ function extractBlobSha(res: CommitResponse, path: string): string | undefined {
   return undefined;
 }
 
-export async function ensureRepoExists(owner: string, repo: string, isPrivate = true): Promise<boolean> {
-  const token = getStoredToken();
-  if (!token) return false;
-  const exists = await repoExists(owner, repo);
-  if (exists) return true;
-  const res = await fetch(`https://api.github.com/user/repos`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ name: repo, private: isPrivate, auto_init: true }),
-  });
-  return res.ok;
-}
-
 function hashText(text: string): string {
   let h = 5381;
   for (let i = 0; i < text.length; i++) h = ((h << 5) + h) ^ text.charCodeAt(i);

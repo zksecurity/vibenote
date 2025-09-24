@@ -33,14 +33,11 @@ import { fetchPublicRepoInfo } from '../lib/github-public';
 import {
   buildRemoteConfig,
   pullNote,
-  commitBatch,
-  ensureRepoExists,
   repoExists,
   listNoteFiles,
   syncBidirectional,
   type RemoteConfig,
 } from '../sync/git-sync';
-import { ensureIntroReadme } from '../sync/readme';
 import { hashText } from '../storage/local';
 import { RepoSwitcher } from './RepoSwitcher';
 import { RepoConfigModal } from './RepoConfigModal';
@@ -1249,7 +1246,6 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
       )}
       {showSwitcher && (
         <RepoSwitcher
-          accountOwner={ownerLogin}
           route={route}
           slug={slug}
           navigate={navigate}
