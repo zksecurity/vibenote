@@ -10,7 +10,12 @@ import {
   commit as backendCommit,
   type CommitResponse,
 } from '../lib/backend';
-import { fetchPublicFile, fetchPublicTree, PublicFetchError } from '../lib/github-public';
+import {
+  fetchPublicFile,
+  fetchPublicTree,
+  fetchPublicRepoInfo,
+  PublicFetchError,
+} from '../lib/github-public';
 import type { LocalStore } from '../storage/local';
 import {
   listTombstones,
@@ -48,13 +53,15 @@ export async function repoExists(owner: string, repo: string): Promise<boolean> 
     if (meta.installed && (meta.repoSelected || meta.repositorySelection === 'all')) return true;
     // public repo without install is still viewable (read-only)
     if (meta.isPrivate === false) return true;
-    return false;
+    if (meta.isPrivate === true) return false;
   } catch {
-    // fallback to legacy check with token if available
-    const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
-      headers: authHeaders(),
-    });
-    return res.ok;
+    // ignore and fall through to public fetch
+  }
+  try {
+    const info = await fetchPublicRepoInfo(owner, repo);
+    return info.ok && info.isPrivate === false;
+  } catch {
+    return false;
   }
 }
 
@@ -100,7 +107,7 @@ export type SyncSummary = {
 export async function putFile(
   config: RemoteConfig,
   file: { path: string; text: string; baseSha?: string },
-  message: string,
+  message: string
 ): Promise<string> {
   const res = await backendCommit(config.owner, config.repo, {
     branch: config.branch,
@@ -114,7 +121,7 @@ export async function putFile(
 export async function commitBatch(
   config: RemoteConfig,
   files: { path: string; text: string; baseSha?: string }[],
-  message: string,
+  message: string
 ): Promise<string | null> {
   if (files.length === 0) return null;
   const res = await backendCommit(config.owner, config.repo, {
@@ -173,7 +180,7 @@ function toBase64(input: string): string {
 export async function deleteFiles(
   config: RemoteConfig,
   files: { path: string; sha: string }[],
-  message: string,
+  message: string
 ): Promise<string | null> {
   if (files.length === 0) return null;
   const res = await backendCommit(config.owner, config.repo, {
@@ -277,7 +284,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         const newSha = await putFile(
           config,
           { path: doc.path, text: doc.text, baseSha: e.sha },
-          'vibenote: update notes',
+          'vibenote: update notes'
         );
         markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: hashText(doc.text || '') });
         pushed++;
@@ -298,7 +305,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         const newSha = await putFile(
           config,
           { path: doc.path, text: mergedText, baseSha: rf.sha },
-          'vibenote: merge notes',
+          'vibenote: merge notes'
         );
         markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: hashText(mergedText) });
         merged++;
@@ -347,7 +354,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         // already gone remotely
         removeTombstones(
           storeSlug,
-          (x) => x.type === 'delete' && x.path === t.path && x.deletedAt === t.deletedAt,
+          (x) => x.type === 'delete' && x.path === t.path && x.deletedAt === t.deletedAt
         );
         debugLog(slug, 'sync:tombstone:delete:remote-missing', { path: t.path });
         continue;
@@ -358,14 +365,14 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         deletedRemote++;
         removeTombstones(
           storeSlug,
-          (x) => x.type === 'delete' && x.path === t.path && x.deletedAt === t.deletedAt,
+          (x) => x.type === 'delete' && x.path === t.path && x.deletedAt === t.deletedAt
         );
         debugLog(slug, 'sync:tombstone:delete:remote-deleted', { path: t.path });
       } else {
         // remote changed since we deleted locally → keep remote (no action), clear tombstone
         removeTombstones(
           storeSlug,
-          (x) => x.type === 'delete' && x.path === t.path && x.deletedAt === t.deletedAt,
+          (x) => x.type === 'delete' && x.path === t.path && x.deletedAt === t.deletedAt
         );
         debugLog(slug, 'sync:tombstone:delete:remote-changed-keep-remote', { path: t.path });
       }
@@ -375,7 +382,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         // Nothing tracked for this rename: remote already missing
         removeTombstones(
           storeSlug,
-          (x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt,
+          (x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt
         );
         debugLog(slug, 'sync:tombstone:rename:remote-missing', { from: t.from, to: t.to });
         continue;
@@ -386,7 +393,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         if (!remoteFile) {
           removeTombstones(
             storeSlug,
-            (x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt,
+            (x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt
           );
           continue;
         }
@@ -397,13 +404,13 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         await deleteFiles(
           config,
           [{ path: t.from, sha: shaToDelete }],
-          'vibenote: delete old path after rename',
+          'vibenote: delete old path after rename'
         );
         deletedRemote++;
         remoteMap.delete(t.from);
         removeTombstones(
           storeSlug,
-          (x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt,
+          (x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt
         );
         debugLog(slug, 'sync:tombstone:rename:remote-deleted', { from: t.from, to: t.to });
         continue;
@@ -435,7 +442,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       }
       removeTombstones(
         storeSlug,
-        (x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt,
+        (x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt
       );
     }
   }
