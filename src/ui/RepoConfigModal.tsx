@@ -68,13 +68,13 @@ function RepoConfigModal({
     };
   }, [owner, repo]);
 
-  const heading = mode === 'onboard' ? 'Create your notes repository' : 'Create or switch to a repository';
+  const heading = mode === 'onboard' ? 'Connect your notes repository' : 'Connect a repository';
   const description =
     mode === 'onboard'
-      ? 'VibeNote stores your notes in a private GitHub repository. Create one now to start syncing.'
-      : 'Set up a GitHub repository for your notes. You can create a new repo or switch to an existing one.';
+      ? 'VibeNote stores your notes in a GitHub repository. Connect an existing repo you already manage.'
+      : 'Switch to or connect an existing GitHub repository for your notes.';
 
-  const canSubmit = owner.trim() !== '' && repo.trim() !== '' && !syncing;
+  const canSubmit = owner.trim() !== '' && repo.trim() !== '' && !syncing && exists !== false && !checking;
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -138,9 +138,9 @@ function RepoConfigModal({
           {checking ? (
             <div className="repo-config-hint">Checking repository…</div>
           ) : exists === true ? (
-            <div className="repo-config-hint">Repository already exists — you can switch to it.</div>
+            <div className="repo-config-hint">Repository found — connect to start syncing.</div>
           ) : exists === false ? (
-            <div className="repo-config-hint">Repository not found — it will be created.</div>
+            <div className="repo-config-hint">Repository not found. Create it on GitHub first, then reconnect.</div>
           ) : null}
           <div className="repo-config-footer">
             <button type="button" className="btn" onClick={close} disabled={syncing}>
@@ -153,7 +153,7 @@ function RepoConfigModal({
                 </button>
               )}
               <button type="submit" className="btn primary" disabled={!canSubmit}>
-                {syncing ? 'Setting up…' : exists === true ? 'Switch to repository' : 'Create repository'}
+                {syncing ? 'Connecting…' : 'Connect repository'}
               </button>
             </div>
           </div>
