@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import { getEnv } from "./env.ts";
 import { signSession, verifySession, signState, verifyState, type SessionClaims } from "./jwt.ts";
-import { makeApp, getRepositoryInstallation, getOwnerInstallation, getDefaultBranch, getRepoMetadataUnauthed, getInstallationOctokit, getRepoDetailsViaInstallation } from "./github.ts";
+import { makeApp, getRepositoryInstallation, getOwnerInstallation, getDefaultBranch, getInstallationOctokit, getRepoDetailsViaInstallation } from "./github.ts";
 
 const env = getEnv();
 const app = express();
@@ -110,8 +110,6 @@ app.get("/v1/repos/:owner/:repo/metadata", async (req: express.Request, res: exp
     let installed = false;
     let repoSelected = false;
     let repositorySelection: "all" | "selected" | null = null;
-    let rateLimited = false;
-
     const repoInst = await getRepositoryInstallation(appClient, owner, repo);
     if (repoInst) {
       installed = true;
@@ -137,31 +135,10 @@ app.get("/v1/repos/:owner/:repo/metadata", async (req: express.Request, res: exp
         }
       }
 
-      if (isPrivate === null || defaultBranch === null) {
-        const pub = await getRepoMetadataUnauthed(owner, repo);
-        if (pub.ok) {
-          if (isPrivate === null && typeof pub.isPrivate === "boolean") {
-            isPrivate = pub.isPrivate;
-          }
-          if (defaultBranch === null && pub.defaultBranch) {
-            defaultBranch = pub.defaultBranch ?? null;
-          }
-        } else {
-          if (pub.rateLimited) {
-            rateLimited = true;
-          } else if (pub.status === 404 || pub.status === 403) {
-            if (isPrivate === null) isPrivate = true;
-          }
-        }
-      }
+      // Uninstalled and no additional data; leave isPrivate/defaultBranch null for client-side fetch
     }
 
-    if (isPrivate === null && !installed && !rateLimited) {
-      // Default to private when unknown and not rate limited, so CTA errs on safety
-      isPrivate = true;
-    }
-
-    return res.json({ isPrivate, installed, repoSelected, repositorySelection, defaultBranch, rateLimited });
+    return res.json({ isPrivate, installed, repoSelected, repositorySelection, defaultBranch });
   } catch (e: any) {
     res.status(500).json({ error: String(e?.message ?? e) });
   }
@@ -186,11 +163,10 @@ app.get("/v1/repos/:owner/:repo/tree", async (req: express.Request, res: express
       if (useAuth) {
         branch = await getDefaultBranch(appClient, repoInst!.id, owner, repo);
       } else {
-        const pub = await getRepoMetadataUnauthed(owner, repo);
-        branch = pub.defaultBranch ?? null;
+        return res.status(400).json({ error: "ref missing" });
       }
     }
-    if (!branch) return res.status(400).json({ error: "ref missing and default branch unknown" });
+    if (!branch) return res.status(400).json({ error: "ref missing" });
     const url = `GET /repos/{owner}/{repo}/git/trees/{tree_sha}`;
     if (useAuth) {
       const r = await kit.request(url, { owner, repo, tree_sha: branch, recursive: "1" as any });

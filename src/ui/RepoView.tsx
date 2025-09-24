@@ -29,6 +29,7 @@ import {
   getInstallUrl as apiGetInstallUrl,
   type RepoMetadata,
 } from '../lib/backend';
+import { fetchPublicRepoInfo } from '../lib/github-public';
 import {
   buildRemoteConfig,
   pullNote,
@@ -109,10 +110,13 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   const [repoMeta, setRepoMeta] = useState<RepoMetadata | null>(null);
   const [hasMetadataResolved, setHasMetadataResolved] = useState(false);
   const [metadataError, setMetadataError] = useState<string | null>(null);
-  const [metadataRateLimited, setMetadataRateLimited] = useState(false);
+  const [publicRepoMeta, setPublicRepoMeta] = useState<{ isPrivate: boolean; defaultBranch: string | null } | null>(null);
+  const [publicRateLimited, setPublicRateLimited] = useState(false);
+  const [, setPublicMetaError] = useState<string | null>(null);
   const buildConfigWithMeta = () => {
     const cfg: RemoteConfig = buildRemoteConfig(slug);
-    if (repoMeta?.defaultBranch) cfg.branch = repoMeta.defaultBranch;
+    const branch = repoMeta?.defaultBranch ?? publicRepoMeta?.defaultBranch;
+    if (branch) cfg.branch = branch;
     return cfg;
   };
   const metadataAllowsEdit = !!(
@@ -122,8 +126,13 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   );
   const canEdit =
     !!sessionToken && (metadataAllowsEdit || ((!hasMetadataResolved || !!metadataError) && linked));
-  const isPublicReadonly = !!(repoMeta && repoMeta.isPrivate === false && !canEdit);
-  const needsInstallForPrivate = !!(repoMeta && repoMeta.isPrivate === true && !canEdit);
+  const repoIsPublic =
+    repoMeta?.isPrivate === false || (!repoMeta?.installed && publicRepoMeta?.isPrivate === false);
+  const repoIsPrivate =
+    repoMeta?.isPrivate === true || publicRepoMeta?.isPrivate === true;
+  const isPublicReadonly = repoIsPublic && !canEdit;
+  const needsInstallForPrivate = repoIsPrivate && !canEdit;
+  const isRateLimited = !metadataError && (publicRateLimited || repoMeta?.rateLimited === true);
   const [refreshTick, setRefreshTick] = useState(0);
   const initialPullRef = useState({ done: false })[0];
   const [autosync, setAutosync] = useState<boolean>(() =>
@@ -157,7 +166,9 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     setSidebarOpen(false);
     setSyncMsg(null);
     setAccessState('unknown');
-    setMetadataRateLimited(false);
+    setPublicRepoMeta(null);
+    setPublicRateLimited(false);
+    setPublicMetaError(null);
   }, [slug]);
 
   useEffect(() => {
@@ -213,15 +224,25 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     (async () => {
       try {
         const meta = await apiGetRepoMetadata(route.owner, route.repo);
-        const reachable = meta.installed === true || meta.isPrivate !== true;
-        if (!cancelled) setAccessState(reachable ? 'reachable' : 'unreachable');
-        setRepoMeta(meta);
-        setMetadataRateLimited(Boolean(meta.rateLimited));
+        if (!cancelled) {
+          setRepoMeta(meta);
+          if (meta.installed === true || meta.isPrivate === false) {
+            setAccessState('reachable');
+            if (meta.installed) {
+              setPublicRepoMeta(null);
+              setPublicRateLimited(false);
+              setPublicMetaError(null);
+            }
+          } else if (meta.isPrivate === true) {
+            setAccessState('unreachable');
+          } else {
+            setAccessState('unknown');
+          }
+        }
         setHasMetadataResolved(true);
       } catch (err) {
         if (!cancelled) setAccessState('unknown');
         setMetadataError(err instanceof Error ? err.message : 'unknown-error');
-        setMetadataRateLimited(false);
         setHasMetadataResolved(true);
       }
     })();
@@ -229,6 +250,43 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
       cancelled = true;
     };
   }, [route]);
+
+  useEffect(() => {
+    if (route.kind !== 'repo') return;
+    if (repoMeta?.installed) return;
+    if (repoMeta?.isPrivate === true) return;
+    if (publicRepoMeta || publicRateLimited) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        setPublicMetaError(null);
+        const info = await fetchPublicRepoInfo(route.owner, route.repo);
+        if (cancelled) return;
+        if (info.ok && typeof info.isPrivate === 'boolean') {
+          setPublicRepoMeta({ isPrivate: info.isPrivate, defaultBranch: info.defaultBranch ?? null });
+          setPublicRateLimited(false);
+          setPublicMetaError(null);
+          setAccessState(info.isPrivate ? 'unreachable' : 'reachable');
+        } else if (info.rateLimited) {
+          setPublicRateLimited(true);
+        } else if (info.notFound) {
+          setPublicRepoMeta({ isPrivate: true, defaultBranch: null });
+          setAccessState('unreachable');
+        } else {
+          setPublicMetaError(info.message ?? 'unknown-error');
+          console.warn('vibenote: public repo metadata fetch failed', info);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setPublicMetaError(err instanceof Error ? err.message : 'unknown-error');
+          console.warn('vibenote: public repo metadata fetch error', err);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [route, repoMeta?.installed, repoMeta?.isPrivate, publicRepoMeta, publicRateLimited]);
 
   useEffect(() => {
     if (!isPublicReadonly) {
@@ -285,7 +343,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
       cancelled = true;
       setReadOnlyLoading(false);
     };
-  }, [isPublicReadonly, slug, repoMeta?.defaultBranch]);
+  }, [isPublicReadonly, slug, repoMeta?.defaultBranch, publicRepoMeta?.defaultBranch]);
 
   useEffect(() => {
     if (!canEdit) return;
@@ -722,6 +780,9 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     setFolders([]);
     setReadOnlyNotes([]);
     setMetadataError(null);
+    setPublicRepoMeta(null);
+    setPublicRateLimited(false);
+    setPublicMetaError(null);
     setNewEntry(null);
     setActiveId(null);
     setDoc(null);
@@ -1090,7 +1151,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                         </span>
                       </div>
                     )}
-                    {metadataError == null && metadataRateLimited && (
+                    {metadataError == null && isRateLimited && (
                       <div className="alert warning">
                         <span className="badge">Limited</span>
                         <span className="alert-text">

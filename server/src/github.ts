@@ -12,42 +12,6 @@ export async function getInstallationOctokit(app: App, installationId: number): 
   return await app.getInstallationOctokit(installationId);
 }
 
-export async function getRepoMetadataUnauthed(owner: string, repo: string): Promise<{
-  ok: boolean;
-  isPrivate?: boolean;
-  defaultBranch?: string;
-  status?: number;
-  rateLimited?: boolean;
-}> {
-  const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
-    headers: { "Accept": "application/vnd.github+json" },
-  });
-  const status = res.status;
-  const remaining = Number(res.headers.get("x-ratelimit-remaining") ?? "-1");
-  const maybeRateLimited = remaining === 0 || status === 403;
-  if (status === 200) {
-    const data: any = await res.json();
-    return {
-      ok: true,
-      isPrivate: Boolean(data.private),
-      defaultBranch: data.default_branch ? String(data.default_branch) : undefined,
-      status,
-      rateLimited: false,
-    };
-  }
-  let rateLimited = false;
-  if (maybeRateLimited) {
-    try {
-      const body: any = await res.json();
-      const msg = typeof body?.message === "string" ? body.message.toLowerCase() : "";
-      rateLimited = msg.includes("rate limit") || msg.includes("abuse detection");
-    } catch {
-      rateLimited = maybeRateLimited && remaining === 0;
-    }
-  }
-  return { ok: false, status, rateLimited };
-}
-
 export async function getRepositoryInstallation(app: App, owner: string, repo: string) {
   try {
     const r = await app.octokit.request("GET /repos/{owner}/{repo}/installation", { owner, repo });
