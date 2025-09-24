@@ -15,8 +15,17 @@ import {
   type NoteDoc,
 } from '../storage/local';
 import { clearToken } from '../auth/github';
-import { signInWithGitHubApp, getSessionToken as getAppSessionToken, getSessionUser as getAppSessionUser, clearSession as clearAppSession } from '../auth/app-auth';
-import { getRepoMetadata as apiGetRepoMetadata, getInstallUrl as apiGetInstallUrl, type RepoMetadata } from '../lib/backend';
+import {
+  signInWithGitHubApp,
+  getSessionToken as getAppSessionToken,
+  getSessionUser as getAppSessionUser,
+  clearSession as clearAppSession,
+} from '../auth/app-auth';
+import {
+  getRepoMetadata as apiGetRepoMetadata,
+  getInstallUrl as apiGetInstallUrl,
+  type RepoMetadata,
+} from '../lib/backend';
 import {
   buildRemoteConfig,
   pullNote,
@@ -66,18 +75,26 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     return firstId ? store.loadNote(firstId) : null;
   });
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [selection, setSelection] = useState<{ kind: 'folder'; dir: string } | { kind: 'file'; id: string } | null>(null);
-  const [newEntry, setNewEntry] = useState<{ kind: 'file' | 'folder'; parentDir: string; key: number } | null>(null);
+  const [selection, setSelection] = useState<
+    { kind: 'folder'; dir: string } | { kind: 'file'; id: string } | null
+  >(null);
+  const [newEntry, setNewEntry] = useState<{
+    kind: 'file' | 'folder';
+    parentDir: string;
+    key: number;
+  } | null>(null);
   const [sessionToken, setSessionToken] = useState<string | null>(getAppSessionToken());
   const [showConfig, setShowConfig] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [ownerLogin, setOwnerLogin] = useState<string | null>(getAppSessionUser()?.login ?? null);
   const [linked, setLinked] = useState(() => slug !== 'new' && isRepoLinked(slug));
-  const [user, setUser] = useState<{ login: string; name?: string; avatar_url?: string } | null>(() => {
-    const u = getAppSessionUser();
-    return u ? { login: u.login, name: undefined, avatar_url: u.avatarUrl ?? undefined } : null;
-  });
+  const [user, setUser] = useState<{ login: string; name?: string; avatar_url?: string } | null>(
+    () => {
+      const u = getAppSessionUser();
+      return u ? { login: u.login, name: undefined, avatar_url: u.avatarUrl ?? undefined } : null;
+    }
+  );
   const [menuOpen, setMenuOpen] = useState(false);
   const [toast, setToast] = useState<{ text: string; href?: string } | null>(null);
   const [repoModalMode, setRepoModalMode] = useState<'onboard' | 'manage'>('manage');
@@ -87,7 +104,11 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     'unknown'
   );
   const [repoMeta, setRepoMeta] = useState<RepoMetadata | null>(null);
-  const canEdit = !!(repoMeta && repoMeta.installed && (repoMeta.repoSelected || repoMeta.repositorySelection === 'all'));
+  const canEdit = !!(
+    repoMeta &&
+    repoMeta.installed &&
+    (repoMeta.repoSelected || repoMeta.repositorySelection === 'all')
+  );
   const isPublicReadonly = !!(repoMeta && repoMeta.isPrivate === false && !canEdit);
   const needsInstallForPrivate = !!(repoMeta && repoMeta.isPrivate === true && !canEdit);
   const [refreshTick, setRefreshTick] = useState(0);
@@ -558,7 +579,9 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
             .map((d) => ({ path: d.path, text: d.text || '', baseSha: d.lastRemoteSha }));
           if (files.length === 0) return true;
           const [owner, repo] = slug.split('/', 2);
-          void files; void owner; void repo;
+          void files;
+          void owner;
+          void repo;
           return true;
         } catch {
           return false;
@@ -782,39 +805,46 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                 </div>
               </div>
               <div className="sidebar-body">
-              <FileTree
-                files={notes.map((n) => ({ id: n.id, name: n.title || 'Untitled', path: n.path, dir: (n.dir as string) || '' })) as FileEntry[]}
-                folders={folders}
-                activeId={activeId}
-                onSelectionChange={(sel) => setSelection(sel as any)}
-                onSelectFile={(id) => {
-                  setActiveId(id);
-                  setSidebarOpen(false);
-                }}
-                onRenameFile={onRename}
-                onDeleteFile={onDelete}
-                onCreateFile={(dir, name) => {
-                  let id = store.createNote(name, '', dir);
-                  setNotes(store.listNotes());
-                  setFolders(store.listFolders());
-                  setActiveId(id);
-                  scheduleAutoSync();
-                  return id;
-                }}
-                onCreateFolder={(parentDir, name) => {
-                  try {
-                    store.createFolder(parentDir, name);
-                    setFolders(store.listFolders());
-                  } catch (e) {
-                    console.error(e);
-                    setSyncMsg('Invalid folder name.');
+                <FileTree
+                  files={
+                    notes.map((n) => ({
+                      id: n.id,
+                      name: n.title || 'Untitled',
+                      path: n.path,
+                      dir: (n.dir as string) || '',
+                    })) as FileEntry[]
                   }
-                }}
-                onRenameFolder={onRenameFolder}
-                onDeleteFolder={onDeleteFolder}
-                newEntry={newEntry}
-                onFinishCreate={() => setNewEntry(null)}
-              />
+                  folders={folders}
+                  activeId={activeId}
+                  onSelectionChange={(sel) => setSelection(sel as any)}
+                  onSelectFile={(id) => {
+                    setActiveId(id);
+                    setSidebarOpen(false);
+                  }}
+                  onRenameFile={onRename}
+                  onDeleteFile={onDelete}
+                  onCreateFile={(dir, name) => {
+                    let id = store.createNote(name, '', dir);
+                    setNotes(store.listNotes());
+                    setFolders(store.listFolders());
+                    setActiveId(id);
+                    scheduleAutoSync();
+                    return id;
+                  }}
+                  onCreateFolder={(parentDir, name) => {
+                    try {
+                      store.createFolder(parentDir, name);
+                      setFolders(store.listFolders());
+                    } catch (e) {
+                      console.error(e);
+                      setSyncMsg('Invalid folder name.');
+                    }
+                  }}
+                  onRenameFolder={onRenameFolder}
+                  onDeleteFolder={onDeleteFolder}
+                  newEntry={newEntry}
+                  onFinishCreate={() => setNewEntry(null)}
+                />
               </div>
               {route.kind === 'repo' && linked ? (
                 <div className="repo-autosync-toggle">
@@ -840,15 +870,24 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                       This repository is private or not yet enabled for the VibeNote GitHub App.
                     </p>
                     <p>
-                      Continue to GitHub and either select <strong>Only select repositories</strong> and pick
-                      <code> {route.owner}/{route.repo} </code>, or grant access to all repositories (not recommended).
+                      Continue to GitHub and either select <strong>Only select repositories</strong>{' '}
+                      and pick
+                      <code>
+                        {' '}
+                        {route.owner}/{route.repo}{' '}
+                      </code>
+                      , or grant access to all repositories (not recommended).
                     </p>
                     <button
                       className="btn primary"
                       onClick={() => {
                         (async () => {
                           try {
-                            const url = await apiGetInstallUrl(route.owner, route.repo, window.location.href);
+                            const url = await apiGetInstallUrl(
+                              route.owner,
+                              route.repo,
+                              window.location.href
+                            );
                             window.location.href = url;
                           } catch (e) {
                             console.error(e);
@@ -865,14 +904,20 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                     {isPublicReadonly && (
                       <div className="alert">
                         <span className="badge">Read-only</span>
-                        <span className="alert-text">Install VibeNote to enable editing.</span>
+                        <span className="alert-text">
+                          You can view, but not edit files in this repository.
+                        </span>
                         <button
                           className="btn primary"
                           onClick={() => {
                             (async () => {
                               if (route.kind !== 'repo') return;
                               try {
-                                const url = await apiGetInstallUrl(route.owner, route.repo, window.location.href);
+                                const url = await apiGetInstallUrl(
+                                  route.owner,
+                                  route.repo,
+                                  window.location.href
+                                );
                                 window.location.href = url;
                               } catch (e) {
                                 console.error(e);
@@ -890,6 +935,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                         <Editor
                           key={doc.id}
                           doc={doc}
+                          readOnly={isPublicReadonly || needsInstallForPrivate || !canEdit}
                           onChange={(id, text) => {
                             store.saveNote(id, text);
                             scheduleAutoSync();
@@ -921,7 +967,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
         )}
       </div>
       {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
-      
+
       {menuOpen && user && (
         <div className="account-menu">
           <div className="account-menu-header">
@@ -980,7 +1026,6 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
           }}
         />
       )}
-
     </div>
   );
 }
