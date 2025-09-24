@@ -20,7 +20,9 @@ import {
   signInWithGitHubApp,
   getSessionToken as getAppSessionToken,
   getSessionUser as getAppSessionUser,
+  ensureAppUserAvatarCached,
   clearSession as clearAppSession,
+  type AppUser,
 } from '../auth/app-auth';
 import {
   getRepoMetadata as apiGetRepoMetadata,
@@ -91,14 +93,11 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   const [showConfig, setShowConfig] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
-  const [ownerLogin, setOwnerLogin] = useState<string | null>(getAppSessionUser()?.login ?? null);
+  const initialAppUser = useMemo(() => getAppSessionUser(), []);
+  const [ownerLogin, setOwnerLogin] = useState<string | null>(initialAppUser?.login ?? null);
   const [linked, setLinked] = useState(() => slug !== 'new' && isRepoLinked(slug));
-  const [user, setUser] = useState<{ login: string; name?: string; avatar_url?: string } | null>(
-    () => {
-      const u = getAppSessionUser();
-      return u ? { login: u.login, name: undefined, avatar_url: u.avatarUrl ?? undefined } : null;
-    }
-  );
+  const [user, setUser] = useState<AppUser | null>(initialAppUser);
+  const userAvatarSrc = user?.avatarDataUrl ?? user?.avatarUrl ?? undefined;
   const [menuOpen, setMenuOpen] = useState(false);
   const [toast, setToast] = useState<{ text: string; href?: string } | null>(null);
   const [repoModalMode, setRepoModalMode] = useState<'onboard' | 'manage'>('manage');
@@ -138,6 +137,20 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     setLinked(slug !== 'new' && isRepoLinked(slug));
     setAutosync(slug !== 'new' && isAutosyncEnabled(slug));
   }, [slug]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!user || user.avatarDataUrl || !user.avatarUrl) return;
+    (async () => {
+      const updated = await ensureAppUserAvatarCached();
+      if (!cancelled && updated && updated.avatarDataUrl) {
+        setUser(updated);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.avatarDataUrl, user?.avatarUrl, ensureAppUserAvatarCached]);
 
   useEffect(() => {
     setSidebarOpen(false);
@@ -439,7 +452,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
       const result = await signInWithGitHubApp();
       if (result) {
         setSessionToken(result.token);
-        setUser({ login: result.user.login, avatar_url: result.user.avatarUrl ?? undefined });
+        setUser(result.user);
         setOwnerLogin(result.user.login);
       }
     } catch (e) {
@@ -851,8 +864,8 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                   onClick={() => setMenuOpen((v) => !v)}
                   aria-label="Account menu"
                 >
-                  {user.avatar_url ? (
-                    <img src={user.avatar_url} alt={user.login} />
+                  {userAvatarSrc ? (
+                    <img src={userAvatarSrc} alt={user.login} />
                   ) : (
                     <span className="account-avatar-fallback" aria-hidden>
                       {(user.name || user.login || '?').charAt(0).toUpperCase()}
@@ -1155,8 +1168,8 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
         <div className="account-menu">
           <div className="account-menu-header">
             <div className="account-menu-avatar" aria-hidden>
-              {user.avatar_url ? (
-                <img src={user.avatar_url} alt="" />
+              {userAvatarSrc ? (
+                <img src={userAvatarSrc} alt="" />
               ) : (
                 <span>{(user.name || user.login || '?').charAt(0).toUpperCase()}</span>
               )}

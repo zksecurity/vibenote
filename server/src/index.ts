@@ -59,7 +59,7 @@ app.get("/v1/auth/github/callback", async (req: express.Request, res: express.Re
     const html = `<!doctype html><meta charset="utf-8"><title>VibeNote Login</title><script>
       (function(){
         try {
-          const msg = { type: 'vibenote:auth', sessionToken: ${JSON.stringify(sessionToken)}, user: { id: ${JSON.stringify(String(u.id))}, login: ${JSON.stringify(String(u.login))}, avatarUrl: ${JSON.stringify(u.avatar_url ?? null)} } };
+          const msg = { type: 'vibenote:auth', sessionToken: ${JSON.stringify(sessionToken)}, user: { id: ${JSON.stringify(String(u.id))}, login: ${JSON.stringify(String(u.login))}, name: ${JSON.stringify((u.name as string | null) ?? null)}, avatarUrl: ${JSON.stringify(u.avatar_url ?? null)}, avatarDataUrl: null } };
           if (window.opener && '${origin}') { window.opener.postMessage(msg, '${origin}'); }
         } catch (e) {}
         setTimeout(function(){ window.close(); }, 50);
