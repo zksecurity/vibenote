@@ -39,7 +39,7 @@ export async function fetchPublicRepoInfo(owner: string, repo: string): Promise<
       `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
       {
         headers: { Accept: 'application/vnd.github+json' },
-      },
+      }
     );
     if (res.status === 200) {
       const data: any = await res.json();
@@ -101,14 +101,14 @@ function cacheKey(owner: string, repo: string): string {
 export async function fetchPublicTree(
   owner: string,
   repo: string,
-  ref: string,
+  ref: string
 ): Promise<Array<{ path: string; sha: string }>> {
   const key = `tree:${cacheKey(owner, repo)}@${ref}`;
   const now = Date.now();
   const cached = treeCache.get(key);
   if (cached && cached.expiresAt > now && cached.entries) return cached.entries;
   const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
-    repo,
+    repo
   )}/git/trees/${encodeURIComponent(ref)}?recursive=1`;
   const res = await fetch(url, { headers: { Accept: 'application/vnd.github+json' } });
   if (!res.ok) {
@@ -130,7 +130,7 @@ export async function fetchPublicFile(
   owner: string,
   repo: string,
   path: string,
-  ref?: string,
+  ref?: string
 ): Promise<{ contentBase64: string; sha: string }> {
   const key = `file:${cacheKey(owner, repo)}:${path}@${ref ?? ''}`;
   const now = Date.now();
@@ -138,8 +138,8 @@ export async function fetchPublicFile(
   if (cached && cached.expiresAt > now && cached.file) return cached.file;
   const url = new URL(
     `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
-      repo,
-    )}/contents/${encodeURIComponent(path)}`,
+      repo
+    )}/contents/${encodeURIComponent(path)}`
   );
   if (ref) url.searchParams.set('ref', ref);
   const res = await fetch(url, { headers: { Accept: 'application/vnd.github+json' } });

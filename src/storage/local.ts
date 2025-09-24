@@ -493,7 +493,7 @@ export function recordDeleteTombstone(
     path: string;
     lastRemoteSha?: string;
     deletedAt: number;
-  },
+  }
 ) {
   let ts = listTombstones(slug);
   ts.push({ type: 'delete', path: t.path, lastRemoteSha: t.lastRemoteSha, deletedAt: t.deletedAt });
@@ -508,7 +508,7 @@ export function recordRenameTombstone(
     to: string;
     lastRemoteSha?: string;
     renamedAt: number;
-  },
+  }
 ) {
   let ts = listTombstones(slug);
   ts.push({

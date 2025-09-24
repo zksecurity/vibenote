@@ -96,7 +96,7 @@ export function FileTree(props: FileTreeProps) {
         index = visibleItems.findIndex(
           (it) =>
             (it.kind === 'folder' && selected.kind === 'folder' && it.dir === selected.dir) ||
-            (it.kind === 'file' && selected.kind === 'file' && it.id === selected.id),
+            (it.kind === 'file' && selected.kind === 'file' && it.id === selected.id)
         );
       }
       if (index < 0) index = 0;
@@ -155,7 +155,7 @@ export function FileTree(props: FileTreeProps) {
   const toggleCollapse = (dir: string) => setCollapsed((m) => ({ ...m, [dir]: !m[dir] }));
 
   const submitEdit = (
-    context: { kind: 'file'; id?: string; dir?: string } | { kind: 'folder'; dir?: string },
+    context: { kind: 'file'; id?: string; dir?: string } | { kind: 'folder'; dir?: string }
   ) => {
     const name = editText.trim();
     if (name === '') {
@@ -328,7 +328,7 @@ function Row(props: {
         clear();
         remove();
       },
-      { once: true },
+      { once: true }
     );
     target.addEventListener(
       'pointercancel',
@@ -336,7 +336,7 @@ function Row(props: {
         clear();
         remove();
       },
-      { once: true },
+      { once: true }
     );
     target.addEventListener(
       'pointerleave',
@@ -344,7 +344,7 @@ function Row(props: {
         clear();
         remove();
       },
-      { once: true },
+      { once: true }
     );
   };
   if (node.kind === 'folder') {

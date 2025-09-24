@@ -1104,7 +1104,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                               const url = await apiGetInstallUrl(
                                 route.owner,
                                 route.repo,
-                                window.location.href,
+                                window.location.href
                               );
                               window.open(url, '_blank', 'noopener');
                             } catch (e) {
@@ -1155,7 +1155,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                                   const url = await apiGetInstallUrl(
                                     route.owner,
                                     route.repo,
-                                    window.location.href,
+                                    window.location.href
                                   );
                                   window.open(url, '_blank', 'noopener');
                                 } catch (e) {

@@ -29,7 +29,7 @@ export async function getRepoMetadata(owner: string, repo: string): Promise<Repo
 export async function getTree(
   owner: string,
   repo: string,
-  ref?: string,
+  ref?: string
 ): Promise<Array<{ path: string; type: string; sha?: string }>> {
   const base = getApiBase();
   const url = new URL(`${base}/v1/repos/${encode(owner)}/${encode(repo)}/tree`);
@@ -48,7 +48,7 @@ export async function getFile(
   owner: string,
   repo: string,
   path: string,
-  ref?: string,
+  ref?: string
 ): Promise<{ contentBase64: string; sha: string }> {
   const base = getApiBase();
   const url = new URL(`${base}/v1/repos/${encode(owner)}/${encode(repo)}/file`);
@@ -80,7 +80,7 @@ export async function commit(
     message: string;
     changes: Array<{ path: string; contentBase64?: string; delete?: boolean }>;
     baseSha?: string;
-  },
+  }
 ): Promise<CommitResponse> {
   const base = getApiBase();
   const res = await fetch(`${base}/v1/repos/${encode(owner)}/${encode(repo)}/commit`, {

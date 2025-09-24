@@ -195,7 +195,7 @@ function diffStructuredInternal(
   dmp: DiffMatchPatch,
   base: string,
   variant: string,
-  depth: number,
+  depth: number
 ): DMPDiff[] {
   // Base cases ensure empty strings collapse quickly without further recursion.
   if (base === variant) return base.length ? [[0, base]] : [];

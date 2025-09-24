@@ -12,7 +12,7 @@ export type { SessionClaims };
 export async function signSession(
   claims: SessionClaims,
   secret: string,
-  ttlSeconds = 60 * 60 * 24 * 90,
+  ttlSeconds = 60 * 60 * 24 * 90
 ): Promise<string> {
   const key = new TextEncoder().encode(secret);
   const now = Math.floor(Date.now() / 1000);
@@ -41,7 +41,7 @@ export async function verifySession(token: string, secret: string): Promise<Sess
 export async function signState(
   obj: Record<string, unknown>,
   secret: string,
-  ttlSeconds = 60 * 10,
+  ttlSeconds = 60 * 10
 ): Promise<string> {
   const key = new TextEncoder().encode(secret);
   const now = Math.floor(Date.now() / 1000);

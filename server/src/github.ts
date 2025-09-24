@@ -57,7 +57,7 @@ export async function getDefaultBranch(
   app: App,
   installationId: number,
   owner: string,
-  repo: string,
+  repo: string
 ): Promise<string | null> {
   const kit = await getInstallationOctokit(app, installationId);
   try {
@@ -72,7 +72,7 @@ export async function getRepoDetailsViaInstallation(
   app: App,
   installationId: number,
   owner: string,
-  repo: string,
+  repo: string
 ): Promise<{ isPrivate: boolean; defaultBranch: string | null } | null> {
   try {
     const kit = await getInstallationOctokit(app, installationId);

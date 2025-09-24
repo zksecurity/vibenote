@@ -42,7 +42,7 @@ describe('LocalStore cross-tab resilience', () => {
       b
         .listNotes()
         .map((n) => n.id)
-        .sort(),
+        .sort()
     ).toEqual([id1, id2].sort());
 
     // Tab A deletes note A

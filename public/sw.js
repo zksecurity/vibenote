@@ -12,7 +12,7 @@ self.addEventListener('activate', (event) => {
 
 async function putFile(config, file, token) {
   const url = `https://api.github.com/repos/${encodeURIComponent(config.owner)}/${encodeURIComponent(
-    config.repo,
+    config.repo
   )}/contents/${file.path.split('/').map(encodeURIComponent).join('/')}`;
   const res = await fetch(url, {
     method: 'PUT',
@@ -119,7 +119,7 @@ self.addEventListener('message', (event) => {
         }
       } catch {}
       await flush(data.payload);
-    })(),
+    })()
   );
 });
 

@@ -96,8 +96,8 @@ app.get('/v1/auth/github/callback', async (req: express.Request, res: express.Re
           const msg = { type: 'vibenote:auth', sessionToken: ${JSON.stringify(
             sessionToken
           )}, user: { id: ${JSON.stringify(u.id)}, login: ${JSON.stringify(u.login)}, name: ${JSON.stringify(
-      u.name
-    )}, avatarUrl: ${JSON.stringify(u.avatarUrl)}, avatarDataUrl: null } };
+            u.name
+          )}, avatarUrl: ${JSON.stringify(u.avatarUrl)}, avatarDataUrl: null } };
           if (window.opener && '${origin}') { window.opener.postMessage(msg, '${origin}'); }
         } catch (e) {}
         setTimeout(function(){ window.close(); }, 50);

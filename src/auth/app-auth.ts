@@ -41,7 +41,7 @@ export function clearSession() {
 }
 
 export async function signInWithGitHubApp(
-  returnTo?: string,
+  returnTo?: string
 ): Promise<{ token: string; user: AppUser } | null> {
   const base = getApiBase();
   const url = new URL(base + '/v1/auth/github/start');
