@@ -205,6 +205,24 @@ app.get("/v1/repos/:owner/:repo/file", async (req: express.Request, res: express
   }
 });
 
+// Blob by sha (requires installation; used for 3-way merges)
+app.get("/v1/repos/:owner/:repo/blob/:sha", async (req: express.Request, res: express.Response) => {
+  const owner = String(req.params.owner);
+  const repo = String(req.params.repo);
+  const sha = String(req.params.sha);
+  const appClient = makeApp(env);
+  try {
+    const repoInst = await getRepositoryInstallation(appClient, owner, repo);
+    if (!repoInst) return res.status(403).json({ error: "app not installed for this repo" });
+    const kit = await getInstallationOctokit(appClient, repoInst.id);
+    const r: any = await kit.request("GET /repos/{owner}/{repo}/git/blobs/{file_sha}", { owner, repo, file_sha: sha });
+    // r.data.content is base64
+    return res.json({ contentBase64: r.data.content, encoding: r.data.encoding });
+  } catch (e: any) {
+    res.status(500).json({ error: String(e?.message ?? e) });
+  }
+});
+
 // Auth guard for write endpoints
 function requireSession(req: express.Request, res: express.Response, next: express.NextFunction) {
   const h = req.header("authorization") || req.header("Authorization");
@@ -221,7 +239,6 @@ app.post("/v1/repos/:owner/:repo/commit", requireSession, async (req: express.Re
   const branch = String(body.branch ?? "");
   const message = String(body.message ?? "Update from VibeNote");
   const changes = Array.isArray(body.changes) ? body.changes as Array<{ path: string; contentBase64?: string; sha?: string; delete?: boolean }> : [];
-  const baseSha = body.baseSha ? String(body.baseSha) : null;
   if (!branch || changes.length === 0) return res.status(400).json({ error: "branch and changes required" });
 
   try {
@@ -231,11 +248,8 @@ app.post("/v1/repos/:owner/:repo/commit", requireSession, async (req: express.Re
     const kit = await getInstallationOctokit(appClient, repoInst.id);
 
     // Resolve HEAD commit sha
-    let headSha = baseSha;
-    if (!headSha) {
-      const ref = await kit.request("GET /repos/{owner}/{repo}/git/ref/{ref}", { owner, repo, ref: `heads/${branch}` });
-      headSha = String((ref.data.object as any).sha);
-    }
+    const ref = await kit.request("GET /repos/{owner}/{repo}/git/ref/{ref}", { owner, repo, ref: `heads/${branch}` });
+    const headSha = String((ref.data.object as any).sha);
     const headCommit = await kit.request("GET /repos/{owner}/{repo}/git/commits/{commit_sha}", { owner, repo, commit_sha: headSha! });
     const baseTreeSha = String(headCommit.data.tree.sha);
 

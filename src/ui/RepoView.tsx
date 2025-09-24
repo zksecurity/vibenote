@@ -14,7 +14,9 @@ import {
   type NoteMeta,
   type NoteDoc,
 } from '../storage/local';
-import { getStoredToken, requestDeviceCode, fetchCurrentUser, clearToken } from '../auth/github';
+import { clearToken } from '../auth/github';
+import { signInWithGitHubApp, getSessionToken as getAppSessionToken, getSessionUser as getAppSessionUser, clearSession as clearAppSession } from '../auth/app-auth';
+import { getRepoMetadata as apiGetRepoMetadata, getInstallUrl as apiGetInstallUrl, type RepoMetadata } from '../lib/backend';
 import {
   buildRemoteConfig,
   pullNote,
@@ -30,7 +32,6 @@ import { hashText } from '../storage/local';
 import { RepoSwitcher } from './RepoSwitcher';
 import { RepoConfigModal } from './RepoConfigModal';
 import { Toggle } from './Toggle';
-import { DeviceCodeModal } from './DeviceCodeModal';
 import type { Route } from './routing';
 
 type RepoViewProps = {
@@ -67,16 +68,16 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selection, setSelection] = useState<{ kind: 'folder'; dir: string } | { kind: 'file'; id: string } | null>(null);
   const [newEntry, setNewEntry] = useState<{ kind: 'file' | 'folder'; parentDir: string; key: number } | null>(null);
-  const [token, setToken] = useState<string | null>(getStoredToken());
+  const [sessionToken, setSessionToken] = useState<string | null>(getAppSessionToken());
   const [showConfig, setShowConfig] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
-  const [device, setDevice] = useState<import('../auth/github').DeviceCodeResponse | null>(null);
-  const [ownerLogin, setOwnerLogin] = useState<string | null>(null);
+  const [ownerLogin, setOwnerLogin] = useState<string | null>(getAppSessionUser()?.login ?? null);
   const [linked, setLinked] = useState(() => slug !== 'new' && isRepoLinked(slug));
-  const [user, setUser] = useState<{ login: string; name?: string; avatar_url?: string } | null>(
-    null
-  );
+  const [user, setUser] = useState<{ login: string; name?: string; avatar_url?: string } | null>(() => {
+    const u = getAppSessionUser();
+    return u ? { login: u.login, name: undefined, avatar_url: u.avatarUrl ?? undefined } : null;
+  });
   const [menuOpen, setMenuOpen] = useState(false);
   const [toast, setToast] = useState<{ text: string; href?: string } | null>(null);
   const [repoModalMode, setRepoModalMode] = useState<'onboard' | 'manage'>('manage');
@@ -85,6 +86,10 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   const [accessState, setAccessState] = useState<'unknown' | 'reachable' | 'unreachable'>(
     'unknown'
   );
+  const [repoMeta, setRepoMeta] = useState<RepoMetadata | null>(null);
+  const canEdit = !!(repoMeta && repoMeta.installed && (repoMeta.repoSelected || repoMeta.repositorySelection === 'all'));
+  const isPublicReadonly = !!(repoMeta && repoMeta.isPrivate === false && !canEdit);
+  const needsInstallForPrivate = !!(repoMeta && repoMeta.isPrivate === true && !canEdit);
   const [refreshTick, setRefreshTick] = useState(0);
   const initialPullRef = useState({ done: false })[0];
   const [autosync, setAutosync] = useState<boolean>(() =>
@@ -117,7 +122,6 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     (async () => {
       if (route.kind !== 'repo') return;
       if (accessState !== 'reachable') return;
-      if (!token) return;
       if (linked) return;
       if (initialPullRef.done) return;
       try {
@@ -140,24 +144,21 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
         initialPullRef.done = true;
       }
     })();
-  }, [route, accessState, token, linked, slug, store, initialPullRef]);
+  }, [route, accessState, linked, slug, store, initialPullRef]);
 
-  // Determine whether the current repository is reachable with the current token
+  // Determine repository access via backend metadata
   useEffect(() => {
     let cancelled = false;
     if (route.kind !== 'repo') {
       setAccessState('unknown');
       return;
     }
-    if (!token) {
-      // Without a token, treat as unreachable for private repos; show guidance UI
-      setAccessState('unreachable');
-      return;
-    }
     (async () => {
       try {
-        const ok = await repoExists(route.owner, route.repo);
-        if (!cancelled) setAccessState(ok ? 'reachable' : 'unreachable');
+        const meta = await apiGetRepoMetadata(route.owner, route.repo);
+        const reachable = meta.isPrivate === false || meta.installed === true;
+        if (!cancelled) setAccessState(reachable ? 'reachable' : 'unreachable');
+        setRepoMeta(meta);
       } catch {
         if (!cancelled) setAccessState('unreachable');
       }
@@ -165,7 +166,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     return () => {
       cancelled = true;
     };
-  }, [route, token]);
+  }, [route]);
 
   useEffect(() => {
     let nextNotes = store.listNotes();
@@ -220,7 +221,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   const scheduleAutoSync = (debounceMs: number = AUTO_SYNC_DEBOUNCE_MS) => {
     if (!autosync) return;
     if (route.kind !== 'repo') return;
-    if (!token || !linked || slug === 'new') return;
+    if (!sessionToken || !linked || slug === 'new' || !canEdit) return;
     // Respect min interval across tabs
     let last = getLastAutoSyncAt(slug) ?? 0;
     let now = Date.now();
@@ -238,7 +239,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     autoSyncBusyRef.busy = true;
     setSyncing(true);
     try {
-      if (!token || !linked || slug === 'new') return;
+      if (!sessionToken || !linked || slug === 'new' || !canEdit) return;
       let summary = await syncBidirectional(store, slug);
       recordAutoSyncRun(slug);
       setNotes(store.listNotes());
@@ -324,11 +325,15 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
 
   const onConnect = async () => {
     try {
-      const d = await requestDeviceCode();
-      setDevice(d);
+      const result = await signInWithGitHubApp();
+      if (result) {
+        setSessionToken(result.token);
+        setUser({ login: result.user.login, avatar_url: result.user.avatarUrl ?? undefined });
+        setOwnerLogin(result.user.login);
+      }
     } catch (e) {
       console.error(e);
-      setSyncMsg('Failed to start GitHub authorization');
+      setSyncMsg('Failed to sign in');
     }
   };
 
@@ -355,30 +360,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
       let hadRemoteBefore = matchesCurrent && linked;
       let targetConfig: RemoteConfig = buildRemoteConfig(targetSlug);
 
-      let currentLogin = ownerLogin;
-      if (!currentLogin) {
-        let u = await fetchCurrentUser();
-        currentLogin = u?.login ?? null;
-        setOwnerLogin(u?.login ?? null);
-      }
-
-      let existed = await repoExists(targetOwner, targetRepo);
-      if (!existed) {
-        if (!currentLogin || currentLogin !== targetOwner) {
-          const msg =
-            'Repository not found. VibeNote can only auto-create repositories under your username.';
-          setRepoModalError(msg);
-          setSyncMsg(msg);
-          return;
-        }
-        let created = await ensureRepoExists(targetOwner, targetRepo, true);
-        if (!created) {
-          const msg = 'Failed to create repository under your account.';
-          setRepoModalError(msg);
-          setSyncMsg(msg);
-          return;
-        }
-      }
+      // No in-app repo creation with GitHub App model; we simply link and guide via install CTAs
 
       markRepoLinked(targetSlug);
       setAutosyncEnabled(targetSlug, cfg.autosync === true);
@@ -388,30 +370,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
         setAutosync(cfg.autosync === true);
       }
 
-      if (!existed) {
-        if (!hadRemoteBefore) {
-          let files: { path: string; text: string; baseSha?: string }[] = [];
-          for (let noteMeta of store.listNotes()) {
-            let local = store.loadNote(noteMeta.id);
-            if (!local) continue;
-            files.push({ path: local.path, text: local.text });
-          }
-          if (files.length > 0) {
-            await commitBatch(targetConfig, files, 'vibenote: initialize notes');
-          }
-        } else if (matchesCurrent) {
-          clearAllTombstones(slug);
-          store.replaceWithRemote([]);
-          let notesSnapshot = store.listNotes();
-          setNotes(notesSnapshot);
-          setActiveId(notesSnapshot[0]?.id ?? null);
-        }
-        await ensureIntroReadme(targetConfig);
-        setToast({
-          text: 'Repository ready',
-          href: `https://github.com/${targetOwner}/${targetRepo}`,
-        });
-      }
+      // With the GitHub App model, initialization happens once access is granted.
 
       const entries = await listNoteFiles(targetConfig);
       const remoteFiles: { path: string; text: string; sha?: string }[] = [];
@@ -422,7 +381,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
       }
       targetStore.replaceWithRemote(remoteFiles);
 
-      let statusMsg = existed ? 'Connected to repository' : 'Repository created and initialized';
+      let statusMsg = 'Connected to repository';
       if (matchesCurrent) {
         let syncedNotes = targetStore.listNotes();
         setNotes(syncedNotes);
@@ -449,8 +408,8 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   };
 
   const ensureOwnerAndOpen = async () => {
-    if (!ownerLogin && token) {
-      const u = await fetchCurrentUser();
+    if (!ownerLogin) {
+      const u = getAppSessionUser();
       setOwnerLogin(u?.login ?? null);
     }
     setShowSwitcher(true);
@@ -488,7 +447,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [ownerLogin, token]);
+  }, [ownerLogin]);
 
   const GitHubIcon = () => (
     <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
@@ -559,37 +518,29 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     return () => document.removeEventListener('click', onDoc);
   }, []);
 
-  // Restore user/account info on reload when a token is present
-  useEffect(() => {
-    if (!token) return;
-    (async () => {
-      const u = await fetchCurrentUser();
-      setUser(u);
-      setOwnerLogin(u?.login ?? null);
-    })();
-  }, [token]);
+  // Session-based user is restored from localStorage on init (see getAppSessionUser())
 
   // Kick off an autosync on load/connect when enabled
   useEffect(() => {
     if (route.kind !== 'repo') return;
     if (!autosync) return;
-    if (!token || !linked || slug === 'new') return;
+    if (!sessionToken || !linked || slug === 'new' || !canEdit) return;
     scheduleAutoSync(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [route.kind, autosync, token, linked, slug]);
+  }, [route.kind, autosync, sessionToken, linked, slug, canEdit]);
 
   // Periodic background autosync to pick up remote-only changes
   useEffect(() => {
     if (route.kind !== 'repo') return;
-    if (!autosync || !token || !linked || slug === 'new') return;
+    if (!autosync || !sessionToken || !linked || slug === 'new' || !canEdit) return;
     let id = window.setInterval(() => scheduleAutoSync(0), 180_000); // every 3 minutes
     return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [route.kind, autosync, token, linked, slug]);
+  }, [route.kind, autosync, sessionToken, linked, slug, canEdit]);
 
   // Attempt a final background push via Service Worker when the page is closing.
   useEffect(() => {
-    const shouldFlush = () => autosync && token !== null && linked && slug !== 'new';
+    const shouldFlush = () => false; // SW flush disabled for GitHub App backend v1
     const onPageHide = () => {
       if (!shouldFlush()) return;
       const sendViaSW = async () => {
@@ -607,10 +558,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
             .map((d) => ({ path: d.path, text: d.text || '', baseSha: d.lastRemoteSha }));
           if (files.length === 0) return true;
           const [owner, repo] = slug.split('/', 2);
-          ctrl.postMessage({
-            type: 'vibenote-flush',
-            payload: { token, config: { owner, repo, branch: 'main' }, files },
-          });
+          void files; void owner; void repo;
           return true;
         } catch {
           return false;
@@ -628,12 +576,12 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
       window.removeEventListener('pagehide', onPageHide);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [autosync, token, linked, slug, store]);
+  }, [autosync, linked, slug, store]);
 
   const onSignOut = () => {
-    clearToken();
+    clearAppSession();
     clearRepoLink(slug);
-    setToken(null);
+    setSessionToken(null);
     setUser(null);
     setOwnerLogin(null);
     setLinked(false);
@@ -648,7 +596,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     try {
       setSyncMsg(null);
       setSyncing(true);
-      if (!token || !linked || slug === 'new') {
+      if (!sessionToken || !linked || slug === 'new' || !canEdit) {
         setSyncMsg('Connect GitHub and configure repo first');
         return;
       }
@@ -718,7 +666,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                 <ExternalLinkIcon />
               </a>
             </span>
-          ) : token ? (
+          ) : sessionToken ? (
             <button
               type="button"
               className="btn ghost repo-btn align-workspace repo-btn-empty"
@@ -738,7 +686,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
           ) : null}
         </div>
         <div className="topbar-actions">
-          {!token ? (
+          {!sessionToken ? (
             <>
               <button className="btn primary" onClick={onConnect}>
                 Connect GitHub
@@ -746,7 +694,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
             </>
           ) : (
             <>
-              {linked && !isRepoUnreachable && (
+              {linked && !isRepoUnreachable && canEdit && (
                 <button
                   className={`btn secondary sync-btn ${syncing ? 'is-syncing' : ''}`}
                   onClick={onSyncNow}
@@ -885,8 +833,57 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
             </aside>
             <section className="workspace">
               <div className="workspace-body">
-                {doc ? (
+                {route.kind === 'repo' && needsInstallForPrivate ? (
+                  <div className="empty-state">
+                    <h2>Can't access this repository</h2>
+                    <p>
+                      This repository is private or not yet enabled for the VibeNote GitHub App.
+                    </p>
+                    <p>
+                      Continue to GitHub and either select <strong>Only select repositories</strong> and pick
+                      <code> {route.owner}/{route.repo} </code>, or grant access to all repositories (not recommended).
+                    </p>
+                    <button
+                      className="btn primary"
+                      onClick={() => {
+                        (async () => {
+                          try {
+                            const url = await apiGetInstallUrl(route.owner, route.repo, window.location.href);
+                            window.location.href = url;
+                          } catch (e) {
+                            console.error(e);
+                            setSyncMsg('Failed to open GitHub');
+                          }
+                        })();
+                      }}
+                    >
+                      Get Read/Write Access
+                    </button>
+                  </div>
+                ) : doc ? (
                   <div className="workspace-panels">
+                    {isPublicReadonly && (
+                      <div className="alert">
+                        <span className="badge">Read-only</span>
+                        <button
+                          className="btn primary"
+                          onClick={() => {
+                            (async () => {
+                              if (route.kind !== 'repo') return;
+                              try {
+                                const url = await apiGetInstallUrl(route.owner, route.repo, window.location.href);
+                                window.location.href = url;
+                              } catch (e) {
+                                console.error(e);
+                                setSyncMsg('Failed to open GitHub');
+                              }
+                            })();
+                          }}
+                        >
+                          Get Write Access
+                        </button>
+                      </div>
+                    )}
                     <Editor
                       key={doc.id}
                       doc={doc}
@@ -920,6 +917,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
         )}
       </div>
       {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
+      
       {menuOpen && user && (
         <div className="account-menu">
           <div className="account-menu-header">
@@ -978,30 +976,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
           }}
         />
       )}
-      {device && (
-        <DeviceCodeModal
-          device={device}
-          onDone={(t) => {
-            if (t) {
-              localStorage.setItem('vibenote:gh-token', t);
-              setToken(t);
-              fetchCurrentUser()
-                .then((u) => {
-                  setOwnerLogin(u?.login ?? null);
-                  setUser(u);
-                })
-                .catch(() => undefined)
-                .finally(() => {
-                  setRepoModalError(null);
-                  setRepoModalMode('onboard');
-                  setShowConfig(true);
-                });
-            }
-            setDevice(null);
-          }}
-          onCancel={() => setDevice(null)}
-        />
-      )}
+
     </div>
   );
 }

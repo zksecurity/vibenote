@@ -45,6 +45,13 @@ export async function getFile(owner: string, repo: string, path: string, ref?: s
   return (await res.json()) as { contentBase64: string; sha: string };
 }
 
+export async function getBlob(owner: string, repo: string, sha: string): Promise<{ contentBase64: string }> {
+  const base = getApiBase();
+  const res = await fetch(`${base}/v1/repos/${encode(owner)}/${encode(repo)}/blob/${encode(sha)}`);
+  if (!res.ok) throw new Error('blob fetch failed');
+  return (await res.json()) as { contentBase64: string };
+}
+
 export async function commit(owner: string, repo: string, body: { branch: string; message: string; changes: Array<{ path: string; contentBase64?: string; delete?: boolean }>; baseSha?: string }): Promise<{ commitSha: string }> {
   const base = getApiBase();
   const res = await fetch(`${base}/v1/repos/${encode(owner)}/${encode(repo)}/commit`, {
@@ -69,4 +76,3 @@ export async function getInstallUrl(owner: string, repo: string, returnTo: strin
 }
 
 function encode(s: string): string { return encodeURIComponent(s); }
-

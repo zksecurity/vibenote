@@ -2,7 +2,7 @@
 // Uses a stored OAuth token to read and write note files in a repository.
 
 import { getStoredToken } from '../auth/github';
-import { getRepoMetadata as backendGetRepoMetadata, getTree as backendGetTree, getFile as backendGetFile, commit as backendCommit } from '../lib/backend';
+import { getRepoMetadata as backendGetRepoMetadata, getTree as backendGetTree, getFile as backendGetFile, getBlob as backendGetBlob, commit as backendCommit } from '../lib/backend';
 import type { LocalStore } from '../storage/local';
 import {
   listTombstones,
@@ -85,12 +85,6 @@ export type SyncSummary = {
   merged: number;
 };
 
-// Fetch raw blob content by SHA
-export async function fetchBlob(config: RemoteConfig, sha: string): Promise<string | null> {
-  // Backend v1 does not expose blob-by-sha. Fall back to empty base to bias toward local changes.
-  void config; void sha;
-  return '';
-}
 
 // Upsert a single file and return its new content sha
 export async function putFile(
@@ -172,6 +166,16 @@ function fromBase64(b64: string): string {
   for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
   const decoder = new TextDecoder();
   return decoder.decode(bytes);
+}
+
+// Fetch raw blob content by SHA using backend (requires installation for the repo)
+export async function fetchBlob(config: RemoteConfig, sha: string): Promise<string | null> {
+  try {
+    const b = await backendGetBlob(config.owner, config.repo, sha);
+    return fromBase64((b.contentBase64 || '').replace(/\n/g, ''));
+  } catch {
+    return '';
+  }
 }
 
 export async function ensureRepoExists(
