@@ -31,7 +31,6 @@ Vercel deployment instructions and preview setup are documented in `AGENTS.md`.
 
 A lightweight optional backend (in `server/`) supports the upcoming GitHub App auth + write flow. Most users can ignore it while the app still supports the OAuth Device Flow. If you intend to self‑host the GitHub App backend, see the detailed deployment guide in `AGENTS.md` (section: "Backend Deployment (GitHub App)").
 
-
 ## GitHub OAuth (Device Flow)
 
 This app uses GitHub’s Device Authorization Flow via serverless proxy endpoints (no CORS issues in the browser).
