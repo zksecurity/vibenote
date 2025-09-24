@@ -108,17 +108,20 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     'unknown'
   );
   const [repoMeta, setRepoMeta] = useState<RepoMetadata | null>(null);
+  const [hasMetadataResolved, setHasMetadataResolved] = useState(false);
+  const [metadataError, setMetadataError] = useState<string | null>(null);
   const buildConfigWithMeta = () => {
     const cfg: RemoteConfig = buildRemoteConfig(slug);
     if (repoMeta?.defaultBranch) cfg.branch = repoMeta.defaultBranch;
     return cfg;
   };
-  const canEdit = !!(
-    sessionToken &&
+  const metadataAllowsEdit = !!(
     repoMeta &&
     repoMeta.installed &&
     (repoMeta.repoSelected || repoMeta.repositorySelection === 'all')
   );
+  const canEdit =
+    !!sessionToken && (metadataAllowsEdit || ((!hasMetadataResolved || !!metadataError) && linked));
   const isPublicReadonly = !!(repoMeta && repoMeta.isPrivate === false && !canEdit);
   const needsInstallForPrivate = !!(repoMeta && repoMeta.isPrivate === true && !canEdit);
   const [refreshTick, setRefreshTick] = useState(0);
@@ -190,14 +193,19 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
       setAccessState('unknown');
       return;
     }
+    setHasMetadataResolved(false);
+    setMetadataError(null);
     (async () => {
       try {
         const meta = await apiGetRepoMetadata(route.owner, route.repo);
         const reachable = meta.isPrivate === false || meta.installed === true;
         if (!cancelled) setAccessState(reachable ? 'reachable' : 'unreachable');
         setRepoMeta(meta);
-      } catch {
-        if (!cancelled) setAccessState('unreachable');
+        setHasMetadataResolved(true);
+      } catch (err) {
+        if (!cancelled) setAccessState('unknown');
+        setMetadataError(err instanceof Error ? err.message : 'unknown-error');
+        setHasMetadataResolved(true);
       }
     })();
     return () => {
@@ -696,6 +704,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     setNotes([]);
     setFolders([]);
     setReadOnlyNotes([]);
+    setMetadataError(null);
     setNewEntry(null);
     setActiveId(null);
     setDoc(null);
@@ -1056,6 +1065,14 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                   </div>
                 ) : (
                   <>
+                    {metadataError && (
+                      <div className="alert warning">
+                        <span className="badge">Offline</span>
+                        <span className="alert-text">
+                          Can’t reach GitHub right now. Showing cached notes only.
+                        </span>
+                      </div>
+                    )}
                     {isPublicReadonly && (
                       <div className="alert">
                         <span className="badge">Read-only</span>
