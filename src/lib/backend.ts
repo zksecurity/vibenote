@@ -2,11 +2,12 @@ import { getSessionToken } from '../auth/app-auth';
 import { getApiBase } from '../auth/app-auth';
 
 export type RepoMetadata = {
-  isPrivate: boolean;
+  isPrivate: boolean | null;
   installed: boolean;
   repoSelected: boolean;
   repositorySelection: 'all' | 'selected' | null;
   defaultBranch: string | null;
+  rateLimited?: boolean;
 };
 
 function headers(auth: boolean): HeadersInit {

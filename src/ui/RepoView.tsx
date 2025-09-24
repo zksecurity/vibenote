@@ -109,6 +109,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   const [repoMeta, setRepoMeta] = useState<RepoMetadata | null>(null);
   const [hasMetadataResolved, setHasMetadataResolved] = useState(false);
   const [metadataError, setMetadataError] = useState<string | null>(null);
+  const [metadataRateLimited, setMetadataRateLimited] = useState(false);
   const buildConfigWithMeta = () => {
     const cfg: RemoteConfig = buildRemoteConfig(slug);
     if (repoMeta?.defaultBranch) cfg.branch = repoMeta.defaultBranch;
@@ -156,6 +157,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     setSidebarOpen(false);
     setSyncMsg(null);
     setAccessState('unknown');
+    setMetadataRateLimited(false);
   }, [slug]);
 
   useEffect(() => {
@@ -211,13 +213,15 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     (async () => {
       try {
         const meta = await apiGetRepoMetadata(route.owner, route.repo);
-        const reachable = meta.isPrivate === false || meta.installed === true;
+        const reachable = meta.installed === true || meta.isPrivate !== true;
         if (!cancelled) setAccessState(reachable ? 'reachable' : 'unreachable');
         setRepoMeta(meta);
+        setMetadataRateLimited(Boolean(meta.rateLimited));
         setHasMetadataResolved(true);
       } catch (err) {
         if (!cancelled) setAccessState('unknown');
         setMetadataError(err instanceof Error ? err.message : 'unknown-error');
+        setMetadataRateLimited(false);
         setHasMetadataResolved(true);
       }
     })();
@@ -1083,6 +1087,15 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                         <span className="badge">Offline</span>
                         <span className="alert-text">
                           Could not reach GitHub. You can still edit notes offline.
+                        </span>
+                      </div>
+                    )}
+                    {metadataError == null && metadataRateLimited && (
+                      <div className="alert warning">
+                        <span className="badge">Limited</span>
+                        <span className="alert-text">
+                          GitHub rate limits temporarily prevent checking repository access.
+                          Public repositories remain viewable; retry shortly for private access checks.
                         </span>
                       </div>
                     )}

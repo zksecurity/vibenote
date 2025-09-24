@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import { getEnv } from "./env.ts";
 import { signSession, verifySession, signState, verifyState, type SessionClaims } from "./jwt.ts";
-import { makeApp, getRepositoryInstallation, getOwnerInstallation, getDefaultBranch, getRepoMetadataUnauthed, getInstallationOctokit } from "./github.ts";
+import { makeApp, getRepositoryInstallation, getOwnerInstallation, getDefaultBranch, getRepoMetadataUnauthed, getInstallationOctokit, getRepoDetailsViaInstallation } from "./github.ts";
 
 const env = getEnv();
 const app = express();
@@ -105,38 +105,63 @@ app.get("/v1/repos/:owner/:repo/metadata", async (req: express.Request, res: exp
   const repo = String(req.params.repo);
   const appClient = makeApp(env);
   try {
-    const pub = await getRepoMetadataUnauthed(owner, repo);
     let isPrivate: boolean | null = null;
     let defaultBranch: string | null = null;
-    if (pub.ok) {
-      isPrivate = Boolean(pub.isPrivate);
-      defaultBranch = pub.defaultBranch ?? null;
-    }
+    let installed = false;
+    let repoSelected = false;
+    let repositorySelection: "all" | "selected" | null = null;
+    let rateLimited = false;
+
     const repoInst = await getRepositoryInstallation(appClient, owner, repo);
     if (repoInst) {
-      const installed = true;
-      const repoSelected = true;
-      if (!defaultBranch) {
-        defaultBranch = await getDefaultBranch(appClient, repoInst.id, owner, repo);
+      installed = true;
+      repoSelected = true;
+      repositorySelection = (repoInst.repository_selection as ("all" | "selected" | undefined)) ?? null;
+      const details = await getRepoDetailsViaInstallation(appClient, repoInst.id, owner, repo);
+      if (details) {
+        isPrivate = details.isPrivate;
+        defaultBranch = details.defaultBranch;
       }
-      // If we couldn't fetch public metadata, and we know we are installed, treat as private
-      if (isPrivate === null) isPrivate = true;
-      return res.json({ isPrivate, installed, repoSelected, repositorySelection: repoInst.repository_selection ?? null, defaultBranch });
-    }
-    const ownerInst = await getOwnerInstallation(appClient, owner);
-    if (ownerInst) {
-      const repositorySelection = ownerInst.repository_selection as ("all" | "selected" | undefined) ?? null;
-      const installed = true;
-      const repoSelected = repositorySelection === "all" ? true : false;
-      if (repoSelected && !defaultBranch) {
-        defaultBranch = await getDefaultBranch(appClient, ownerInst.id, owner, repo);
+    } else {
+      const ownerInst = await getOwnerInstallation(appClient, owner);
+      if (ownerInst) {
+        installed = true;
+        repositorySelection = (ownerInst.repository_selection as ("all" | "selected" | undefined)) ?? null;
+        repoSelected = repositorySelection === "all" ? true : false;
+        if (repoSelected) {
+          const details = await getRepoDetailsViaInstallation(appClient, ownerInst.id, owner, repo);
+          if (details) {
+            isPrivate = details.isPrivate;
+            defaultBranch = details.defaultBranch;
+          }
+        }
       }
-      if (isPrivate === null) isPrivate = !pub.ok; // likely private or missing
-      return res.json({ isPrivate, installed, repoSelected, repositorySelection, defaultBranch });
+
+      if (isPrivate === null || defaultBranch === null) {
+        const pub = await getRepoMetadataUnauthed(owner, repo);
+        if (pub.ok) {
+          if (isPrivate === null && typeof pub.isPrivate === "boolean") {
+            isPrivate = pub.isPrivate;
+          }
+          if (defaultBranch === null && pub.defaultBranch) {
+            defaultBranch = pub.defaultBranch ?? null;
+          }
+        } else {
+          if (pub.rateLimited) {
+            rateLimited = true;
+          } else if (pub.status === 404 || pub.status === 403) {
+            if (isPrivate === null) isPrivate = true;
+          }
+        }
+      }
     }
-    // Not installed anywhere
-    if (isPrivate === null) isPrivate = !pub.ok; // if unknown, assume private
-    return res.json({ isPrivate, installed: false, repoSelected: false, repositorySelection: null, defaultBranch });
+
+    if (isPrivate === null && !installed && !rateLimited) {
+      // Default to private when unknown and not rate limited, so CTA errs on safety
+      isPrivate = true;
+    }
+
+    return res.json({ isPrivate, installed, repoSelected, repositorySelection, defaultBranch, rateLimited });
   } catch (e: any) {
     res.status(500).json({ error: String(e?.message ?? e) });
   }

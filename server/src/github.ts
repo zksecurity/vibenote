@@ -12,15 +12,40 @@ export async function getInstallationOctokit(app: App, installationId: number): 
   return await app.getInstallationOctokit(installationId);
 }
 
-export async function getRepoMetadataUnauthed(owner: string, repo: string): Promise<{ ok: boolean; isPrivate?: boolean; defaultBranch?: string }> {
+export async function getRepoMetadataUnauthed(owner: string, repo: string): Promise<{
+  ok: boolean;
+  isPrivate?: boolean;
+  defaultBranch?: string;
+  status?: number;
+  rateLimited?: boolean;
+}> {
   const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
     headers: { "Accept": "application/vnd.github+json" },
   });
-  if (res.status === 200) {
+  const status = res.status;
+  const remaining = Number(res.headers.get("x-ratelimit-remaining") ?? "-1");
+  const maybeRateLimited = remaining === 0 || status === 403;
+  if (status === 200) {
     const data: any = await res.json();
-    return { ok: true, isPrivate: Boolean(data.private), defaultBranch: String(data.default_branch) };
+    return {
+      ok: true,
+      isPrivate: Boolean(data.private),
+      defaultBranch: data.default_branch ? String(data.default_branch) : undefined,
+      status,
+      rateLimited: false,
+    };
   }
-  return { ok: false };
+  let rateLimited = false;
+  if (maybeRateLimited) {
+    try {
+      const body: any = await res.json();
+      const msg = typeof body?.message === "string" ? body.message.toLowerCase() : "";
+      rateLimited = msg.includes("rate limit") || msg.includes("abuse detection");
+    } catch {
+      rateLimited = maybeRateLimited && remaining === 0;
+    }
+  }
+  return { ok: false, status, rateLimited };
 }
 
 export async function getRepositoryInstallation(app: App, owner: string, repo: string) {
@@ -67,5 +92,19 @@ export async function getDefaultBranch(app: App, installationId: number, owner: 
     return String(r.data.default_branch);
   } catch {
     return null;
+  }
+}
+
+export async function getRepoDetailsViaInstallation(app: App, installationId: number, owner: string, repo: string): Promise<{ isPrivate: boolean; defaultBranch: string | null } | null> {
+  try {
+    const kit = await getInstallationOctokit(app, installationId);
+    const r = await kit.request("GET /repos/{owner}/{repo}", { owner, repo });
+    return {
+      isPrivate: Boolean(r.data.private),
+      defaultBranch: r.data.default_branch ? String(r.data.default_branch) : null,
+    };
+  } catch (e: any) {
+    if (e.status === 404) return null;
+    throw e;
   }
 }
