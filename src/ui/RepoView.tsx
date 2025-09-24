@@ -77,6 +77,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   });
   type ReadOnlyNote = { id: string; path: string; title: string; dir: string; sha?: string };
   const [readOnlyNotes, setReadOnlyNotes] = useState<ReadOnlyNote[]>([]);
+  const [readOnlyLoading, setReadOnlyLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selection, setSelection] = useState<
     { kind: 'folder'; dir: string } | { kind: 'file'; id: string } | null
@@ -107,7 +108,13 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     'unknown'
   );
   const [repoMeta, setRepoMeta] = useState<RepoMetadata | null>(null);
+  const buildConfigWithMeta = () => {
+    const cfg: RemoteConfig = buildRemoteConfig(slug);
+    if (repoMeta?.defaultBranch) cfg.branch = repoMeta.defaultBranch;
+    return cfg;
+  };
   const canEdit = !!(
+    sessionToken &&
     repoMeta &&
     repoMeta.installed &&
     (repoMeta.repoSelected || repoMeta.repositorySelection === 'all')
@@ -155,7 +162,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
       if (linked) return;
       if (initialPullRef.done) return;
       try {
-        const cfg: RemoteConfig = buildRemoteConfig(slug);
+        const cfg: RemoteConfig = buildConfigWithMeta();
         const entries = await listNoteFiles(cfg);
         const files: { path: string; text: string; sha?: string }[] = [];
         for (const e of entries) {
@@ -201,12 +208,14 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   useEffect(() => {
     if (!isPublicReadonly) {
       setReadOnlyNotes([]);
+      setReadOnlyLoading(false);
       return;
     }
     let cancelled = false;
+    setReadOnlyLoading(true);
     (async () => {
       try {
-        const cfg: RemoteConfig = buildRemoteConfig(slug);
+        const cfg = buildConfigWithMeta();
         const entries = await listNoteFiles(cfg);
         const toTitle = (path: string) => {
           const base = path.slice(path.lastIndexOf('/') + 1);
@@ -241,19 +250,22 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
           setDoc(null);
           setActiveId(null);
         }
+        if (!cancelled) setReadOnlyLoading(false);
       } catch (e) {
         console.error(e);
+        if (!cancelled) setReadOnlyLoading(false);
       }
     })();
     return () => {
       cancelled = true;
+      setReadOnlyLoading(false);
     };
-  }, [isPublicReadonly, slug]);
+  }, [isPublicReadonly, slug, repoMeta?.defaultBranch]);
 
   useEffect(() => {
     if (!canEdit) return;
-    let nextNotes = store.listNotes();
-    let nextFolders = store.listFolders();
+    const nextNotes = store.listNotes();
+    const nextFolders = store.listFolders();
     setNotes(nextNotes);
     setFolders(nextFolders);
     setActiveId((prev) => {
@@ -684,6 +696,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     setNotes([]);
     setFolders([]);
     setReadOnlyNotes([]);
+    setNewEntry(null);
     setActiveId(null);
     setDoc(null);
     setRepoMeta(null);
@@ -720,7 +733,13 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     }
   };
 
-  const isRepoUnreachable = route.kind === 'repo' && accessState === 'unreachable';
+  const isRepoUnreachable =
+    route.kind === 'repo' &&
+    accessState === 'unreachable' &&
+    !isPublicReadonly &&
+    !needsInstallForPrivate;
+  const showSidebar = canEdit || (isPublicReadonly && readOnlyNotes.length > 0);
+  const layoutClass = showSidebar ? (isRepoUnreachable ? 'single' : '') : 'single';
   const readOnlyFolders = useMemo(() => {
     const set = new Set<string>();
     for (const note of readOnlyNotes) {
@@ -837,7 +856,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
           )}
         </div>
       </header>
-      <div className={`app-layout ${isRepoUnreachable ? 'single' : ''}`}>
+      <div className={`app-layout ${layoutClass}`}>
         {isRepoUnreachable ? (
           <section className="workspace" style={{ width: '100%' }}>
             <div className="workspace-body">
@@ -857,11 +876,13 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
           </section>
         ) : (
           <>
-            <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
-              <div className="sidebar-header">
-                <div className="sidebar-title">
-                  <span>Notes</span>
-                  <span className="note-count">{noteList.length}</span>
+            {showSidebar && (
+              <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
+                <div className="sidebar-header">
+                  <div className="sidebar-title">
+                    <span>Notes</span>
+                    <span className="note-count">{noteList.length}</span>
+                  </div>
                   <button
                     className="btn icon only-mobile"
                     onClick={() => setSidebarOpen(false)}
@@ -891,9 +912,8 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                     </button>
                   </div>
                 )}
-              </div>
-              <div className="sidebar-body">
-                <FileTree
+                <div className="sidebar-body">
+                  <FileTree
                   files={
                     noteList.map((n) => ({
                       id: n.id,
@@ -911,7 +931,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                       setSidebarOpen(false);
                       const entry = readOnlyNotes.find((n) => n.id === id);
                       if (!entry) return;
-                      const cfg: RemoteConfig = buildRemoteConfig(slug);
+                      const cfg = buildConfigWithMeta();
                       void (async () => {
                         try {
                           const remote = await pullNote(cfg, entry.path);
@@ -967,25 +987,31 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                   newEntry={canEdit ? newEntry : null}
                   onFinishCreate={() => canEdit && setNewEntry(null)}
                 />
-              </div>
-              {route.kind === 'repo' && linked && canEdit ? (
-                <div className="repo-autosync-toggle">
-                  <Toggle
-                    checked={autosync}
-                    onChange={(enabled) => {
-                      setAutosync(enabled);
-                      setAutosyncEnabled(slug, enabled);
-                      if (enabled) scheduleAutoSync(0);
-                    }}
-                    label="Autosync"
-                    description="Runs background sync after edits and periodically."
-                  />
                 </div>
-              ) : null}
-            </aside>
+                {route.kind === 'repo' && linked && canEdit ? (
+                  <div className="repo-autosync-toggle">
+                    <Toggle
+                      checked={autosync}
+                      onChange={(enabled) => {
+                        setAutosync(enabled);
+                        setAutosyncEnabled(slug, enabled);
+                        if (enabled) scheduleAutoSync(0);
+                      }}
+                      label="Autosync"
+                      description="Runs background sync after edits and periodically."
+                    />
+                  </div>
+                ) : null}
+              </aside>
+            )}
             <section className="workspace">
               <div className="workspace-body">
-                {route.kind === 'repo' && needsInstallForPrivate ? (
+                {readOnlyLoading ? (
+                  <div className="empty-state">
+                    <h2>Loading repository…</h2>
+                    <p>Fetching files from GitHub. Hang tight.</p>
+                  </div>
+                ) : route.kind === 'repo' && needsInstallForPrivate ? (
                   <div className="empty-state">
                     <h2>Can't access this repository</h2>
                     <p>
@@ -1000,26 +1026,30 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                       </code>
                       , or grant access to all repositories (not recommended).
                     </p>
-                    <button
-                      className="btn primary"
-                      onClick={() => {
-                        (async () => {
-                          try {
-                            const url = await apiGetInstallUrl(
-                              route.owner,
-                              route.repo,
-                              window.location.href
-                            );
-                            window.open(url, '_blank', 'noopener');
-                          } catch (e) {
-                            console.error(e);
-                            setSyncMsg('Failed to open GitHub');
-                          }
-                        })();
-                      }}
-                    >
-                      Get Read/Write Access
-                    </button>
+                    {sessionToken ? (
+                      <button
+                        className="btn primary"
+                        onClick={() => {
+                          (async () => {
+                            try {
+                              const url = await apiGetInstallUrl(
+                                route.owner,
+                                route.repo,
+                                window.location.href
+                              );
+                              window.open(url, '_blank', 'noopener');
+                            } catch (e) {
+                              console.error(e);
+                              setSyncMsg('Failed to open GitHub');
+                            }
+                          })();
+                        }}
+                      >
+                        Get Read/Write Access
+                      </button>
+                    ) : (
+                      <p>Please sign in with GitHub to request access.</p>
+                    )}
                   </div>
                 ) : (
                   <>
@@ -1029,27 +1059,29 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                         <span className="alert-text">
                           You can view, but not edit files in this repository.
                         </span>
-                        <button
-                          className="btn primary"
-                          onClick={() => {
-                            (async () => {
-                              if (route.kind !== 'repo') return;
-                              try {
-                                const url = await apiGetInstallUrl(
-                                  route.owner,
-                                  route.repo,
-                                  window.location.href
-                                );
-                                window.open(url, '_blank', 'noopener');
-                              } catch (e) {
-                                console.error(e);
-                                setSyncMsg('Failed to open GitHub');
-                              }
-                            })();
-                          }}
-                        >
-                          Get Write Access
-                        </button>
+                        {sessionToken ? (
+                          <button
+                            className="btn primary"
+                            onClick={() => {
+                              (async () => {
+                                if (route.kind !== 'repo') return;
+                                try {
+                                  const url = await apiGetInstallUrl(
+                                    route.owner,
+                                    route.repo,
+                                    window.location.href
+                                  );
+                                  window.open(url, '_blank', 'noopener');
+                                } catch (e) {
+                                  console.error(e);
+                                  setSyncMsg('Failed to open GitHub');
+                                }
+                              })();
+                            }}
+                          >
+                            Get Write Access
+                          </button>
+                        ) : null}
                       </div>
                     )}
                     {doc ? (
@@ -1063,6 +1095,15 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                             scheduleAutoSync();
                           }}
                         />
+                      </div>
+                    ) : isPublicReadonly ? (
+                      <div className="empty-state">
+                        <h2>Browse on GitHub to view files</h2>
+                        <p>This repository has no notes cached locally yet.</p>
+                        <p>
+                          Open the repository on GitHub or select a file from the sidebar to load
+                          it in VibeNote.
+                        </p>
                       </div>
                     ) : (
                       <div className="empty-state">
