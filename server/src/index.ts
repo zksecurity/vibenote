@@ -341,12 +341,19 @@ app.post(
           continue;
         }
         const contentBase64 = ch.contentBase64 ?? '';
+        let decoded: string;
+        try {
+          decoded = Buffer.from(contentBase64, 'base64').toString('utf-8');
+        } catch (err) {
+          console.warn('[vibenote] failed to decode base64 content for', ch.path, err);
+          decoded = '';
+        }
         treeItems.push({
           path: ch.path,
           mode: '100644',
           type: 'blob',
-          content: contentBase64,
-          encoding: 'base64',
+          content: decoded,
+          encoding: 'utf-8',
         });
         trackedPaths.add(ch.path);
       }
