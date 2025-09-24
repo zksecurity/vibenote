@@ -74,6 +74,8 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     let firstId = initialNotes[0]?.id ?? null;
     return firstId ? store.loadNote(firstId) : null;
   });
+  type ReadOnlyNote = { id: string; path: string; title: string; dir: string; sha?: string };
+  const [readOnlyNotes, setReadOnlyNotes] = useState<ReadOnlyNote[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selection, setSelection] = useState<
     { kind: 'folder'; dir: string } | { kind: 'file'; id: string } | null
@@ -135,14 +137,20 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   useEffect(() => {
     if (route.kind !== 'repo') return;
     if (accessState !== 'reachable') return; // only record reachable repos
-    onRecordRecent({ slug, owner: route.owner, repo: route.repo, connected: linked });
-  }, [slug, route, linked, onRecordRecent, accessState]);
+    onRecordRecent({
+      slug,
+      owner: route.owner,
+      repo: route.repo,
+      connected: canEdit && linked,
+    });
+  }, [slug, route, linked, onRecordRecent, accessState, canEdit]);
 
   // When we navigate to a reachable repo we haven't linked locally yet, auto-load its notes
   useEffect(() => {
     (async () => {
       if (route.kind !== 'repo') return;
       if (accessState !== 'reachable') return;
+      if (!canEdit) return;
       if (linked) return;
       if (initialPullRef.done) return;
       try {
@@ -165,7 +173,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
         initialPullRef.done = true;
       }
     })();
-  }, [route, accessState, linked, slug, store, initialPullRef]);
+  }, [route, accessState, linked, slug, store, initialPullRef, canEdit]);
 
   // Determine repository access via backend metadata
   useEffect(() => {
@@ -190,6 +198,59 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   }, [route]);
 
   useEffect(() => {
+    if (!isPublicReadonly) {
+      setReadOnlyNotes([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const cfg: RemoteConfig = buildRemoteConfig(slug);
+        const entries = await listNoteFiles(cfg);
+        const toTitle = (path: string) => {
+          const base = path.slice(path.lastIndexOf('/') + 1);
+          return base.replace(/\.md$/i, '');
+        };
+        const mapped: ReadOnlyNote[] = entries.map((entry) => {
+          const title = toTitle(entry.path);
+          const dir = (() => {
+            const idx = entry.path.lastIndexOf('/');
+            return idx >= 0 ? entry.path.slice(0, idx) : '';
+          })();
+          return { id: entry.path, path: entry.path, title, dir, sha: entry.sha };
+        });
+        if (cancelled) return;
+        setReadOnlyNotes(mapped);
+        if (mapped.length > 0) {
+          const first = mapped[0]!;
+          setActiveId(first.id);
+          const remote = await pullNote(cfg, first.path);
+          if (!remote || cancelled) return;
+          setDoc({
+            id: first.id,
+            path: first.path,
+            title: first.title,
+            dir: first.dir,
+            text: remote.text,
+            updatedAt: Date.now(),
+            lastRemoteSha: remote.sha,
+            lastSyncedHash: hashText(remote.text),
+          });
+        } else {
+          setDoc(null);
+          setActiveId(null);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isPublicReadonly, slug]);
+
+  useEffect(() => {
+    if (!canEdit) return;
     let nextNotes = store.listNotes();
     let nextFolders = store.listFolders();
     setNotes(nextNotes);
@@ -198,14 +259,16 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
       if (prev && nextNotes.some((n) => n.id === prev)) return prev;
       return nextNotes[0]?.id ?? null;
     });
-  }, [store]);
+  }, [store, canEdit]);
 
   useEffect(() => {
+    if (!canEdit) return;
     setDoc(activeId ? store.loadNote(activeId) : null);
-  }, [store, activeId]);
+  }, [store, activeId, canEdit]);
 
   // Cross-tab coherence: listen to localStorage changes for this repo slug
   useEffect(() => {
+    if (!canEdit) return;
     const encodedSlug = encodeURIComponent(slug);
     const prefix = `vibenote:repo:${encodedSlug}:`;
     let timer: number | null = null;
@@ -278,6 +341,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   };
 
   const onCreate = () => {
+    if (!canEdit) return;
     let parentDir = '';
     if (selection?.kind === 'folder') parentDir = selection.dir;
     if (selection?.kind === 'file') {
@@ -288,10 +352,12 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   };
 
   const onCreateFolder = (parentDir: string) => {
+    if (!canEdit) return;
     setNewEntry({ kind: 'folder', parentDir, key: Date.now() });
   };
 
   const onRenameFolder = (dir: string, newName: string) => {
+    if (!canEdit) return;
     try {
       store.renameFolder(dir, newName);
       setNotes(store.listNotes());
@@ -307,6 +373,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   const onMoveFolder = (_fromDir: string, _toDir?: string) => {};
 
   const onDeleteFolder = (dir: string) => {
+    if (!canEdit) return;
     // Skip confirmation if folder (and subtree) contains no files
     let hasNotes = notes.some((n) => {
       let d = (n.dir as string) || '';
@@ -324,6 +391,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   };
 
   const onRename = (id: string, title: string) => {
+    if (!canEdit) return;
     try {
       store.renameNote(id, title);
       setNotes(store.listNotes());
@@ -336,6 +404,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   };
 
   const onDelete = (id: string) => {
+    if (!canEdit) return;
     store.deleteNote(id);
     const list = store.listNotes();
     setNotes(list);
@@ -644,6 +713,15 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   };
 
   const isRepoUnreachable = route.kind === 'repo' && accessState === 'unreachable';
+  const readOnlyFolders = useMemo(() => {
+    const set = new Set<string>();
+    for (const note of readOnlyNotes) {
+      if (note.dir) set.add(note.dir);
+    }
+    return Array.from(set).sort();
+  }, [readOnlyNotes]);
+  const noteList = canEdit ? notes : readOnlyNotes;
+  const folderList = canEdit ? folders : readOnlyFolders;
 
   return (
     <div className="app-shell">
@@ -775,7 +853,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
               <div className="sidebar-header">
                 <div className="sidebar-title">
                   <span>Notes</span>
-                  <span className="note-count">{notes.length}</span>
+                  <span className="note-count">{noteList.length}</span>
                   <button
                     className="btn icon only-mobile"
                     onClick={() => setSidebarOpen(false)}
@@ -784,69 +862,105 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                     <CloseIcon />
                   </button>
                 </div>
-                <div className="sidebar-actions">
-                  <button className="btn primary" onClick={onCreate}>
-                    New note
-                  </button>
-                  <button
-                    className="btn secondary"
-                    onClick={() => {
-                      let parentDir = '';
-                      if (selection?.kind === 'folder') parentDir = selection.dir;
-                      if (selection?.kind === 'file') {
-                        let n = notes.find((x) => x.id === selection.id);
-                        if (n) parentDir = (n.dir as string) || '';
-                      }
-                      onCreateFolder(parentDir);
-                    }}
-                  >
-                    New folder
-                  </button>
-                </div>
+                {canEdit && (
+                  <div className="sidebar-actions">
+                    <button className="btn primary" onClick={onCreate}>
+                      New note
+                    </button>
+                    <button
+                      className="btn secondary"
+                      onClick={() => {
+                        let parentDir = '';
+                        if (selection?.kind === 'folder') parentDir = selection.dir;
+                        if (selection?.kind === 'file') {
+                          let n = noteList.find((x) => x.id === selection.id);
+                          if (n) parentDir = (n.dir as string) || '';
+                        }
+                        onCreateFolder(parentDir);
+                      }}
+                    >
+                      New folder
+                    </button>
+                  </div>
+                )}
               </div>
               <div className="sidebar-body">
                 <FileTree
                   files={
-                    notes.map((n) => ({
+                    noteList.map((n) => ({
                       id: n.id,
                       name: n.title || 'Untitled',
                       path: n.path,
                       dir: (n.dir as string) || '',
                     })) as FileEntry[]
                   }
-                  folders={folders}
+                  folders={folderList}
                   activeId={activeId}
                   onSelectionChange={(sel) => setSelection(sel as any)}
                   onSelectFile={(id) => {
+                    if (!canEdit) {
+                      setActiveId(id);
+                      setSidebarOpen(false);
+                      const entry = readOnlyNotes.find((n) => n.id === id);
+                      if (!entry) return;
+                      const cfg: RemoteConfig = buildRemoteConfig(slug);
+                      void (async () => {
+                        try {
+                          const remote = await pullNote(cfg, entry.path);
+                          if (!remote) return;
+                          setDoc({
+                            id: entry.id,
+                            path: entry.path,
+                            title: entry.title,
+                            dir: entry.dir,
+                            text: remote.text,
+                            updatedAt: Date.now(),
+                            lastRemoteSha: remote.sha,
+                            lastSyncedHash: hashText(remote.text),
+                          });
+                        } catch (e) {
+                          console.error(e);
+                        }
+                      })();
+                      return;
+                    }
                     setActiveId(id);
                     setSidebarOpen(false);
                   }}
-                  onRenameFile={onRename}
-                  onDeleteFile={onDelete}
-                  onCreateFile={(dir, name) => {
-                    let id = store.createNote(name, '', dir);
-                    setNotes(store.listNotes());
-                    setFolders(store.listFolders());
-                    setActiveId(id);
-                    scheduleAutoSync();
-                    return id;
-                  }}
-                  onCreateFolder={(parentDir, name) => {
-                    try {
-                      store.createFolder(parentDir, name);
-                      setFolders(store.listFolders());
-                    } catch (e) {
-                      console.error(e);
-                      setSyncMsg('Invalid folder name.');
-                    }
-                  }}
-                  onRenameFolder={onRenameFolder}
-                  onDeleteFolder={onDeleteFolder}
-                  newEntry={newEntry}
-                  onFinishCreate={() => setNewEntry(null)}
+                  onRenameFile={canEdit ? onRename : () => undefined}
+                  onDeleteFile={canEdit ? onDelete : () => undefined}
+                  onCreateFile={
+                    canEdit
+                      ? (dir, name) => {
+                          let id = store.createNote(name, '', dir);
+                          setNotes(store.listNotes());
+                          setFolders(store.listFolders());
+                          setActiveId(id);
+                          scheduleAutoSync();
+                          return id;
+                        }
+                      : () => undefined
+                  }
+                  onCreateFolder={
+                    canEdit
+                      ? (parentDir, name) => {
+                          try {
+                            store.createFolder(parentDir, name);
+                            setFolders(store.listFolders());
+                          } catch (e) {
+                            console.error(e);
+                            setSyncMsg('Invalid folder name.');
+                          }
+                        }
+                      : () => undefined
+                  }
+                  onRenameFolder={canEdit ? onRenameFolder : () => undefined}
+                  onDeleteFolder={canEdit ? onDeleteFolder : () => undefined}
+                  newEntry={canEdit ? newEntry : null}
+                  onFinishCreate={() => canEdit && setNewEntry(null)}
                 />
               </div>
-              {route.kind === 'repo' && linked ? (
+              {route.kind === 'repo' && linked && canEdit ? (
                 <div className="repo-autosync-toggle">
                   <Toggle
                     checked={autosync}
