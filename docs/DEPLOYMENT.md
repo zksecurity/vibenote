@@ -37,6 +37,7 @@ Steps
 4. Verify
    - `curl -s "$VIBENOTE_API_BASE/v1/healthz"`
    - You should see `{ "ok": true }`
+   - If you hit the domain without scheme or over HTTP (http://), a `301 Moved Permanently` is expected after TLS setup. Use HTTPS or `-L` to follow the redirect.
 
 Notes
 
