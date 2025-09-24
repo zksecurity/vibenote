@@ -95,11 +95,9 @@ app.get('/v1/auth/github/callback', async (req: express.Request, res: express.Re
         try {
           const msg = { type: 'vibenote:auth', sessionToken: ${JSON.stringify(
             sessionToken
-          )}, user: { id: ${JSON.stringify(u.id)}, login: ${JSON.stringify(
-      u.login
-    )}, name: ${JSON.stringify(u.name)}, avatarUrl: ${JSON.stringify(
-      u.avatarUrl
-    )}, avatarDataUrl: null } };
+          )}, user: { id: ${JSON.stringify(u.id)}, login: ${JSON.stringify(u.login)}, name: ${JSON.stringify(
+      u.name
+    )}, avatarUrl: ${JSON.stringify(u.avatarUrl)}, avatarDataUrl: null } };
           if (window.opener && '${origin}') { window.opener.postMessage(msg, '${origin}'); }
         } catch (e) {}
         setTimeout(function(){ window.close(); }, 50);
@@ -156,7 +154,7 @@ app.get('/v1/repos/:owner/:repo/metadata', async (req: express.Request, res: exp
     if (repoInst) {
       installed = true;
       repoSelected = true;
-      repositorySelection = (repoInst.repository_selection as 'all' | 'selected' | undefined) ?? null;
+      repositorySelection = repoInst.repository_selection;
       const details = await getRepoDetailsViaInstallation(appClient, repoInst.id, owner, repo);
       if (details) {
         isPrivate = details.isPrivate;
@@ -166,7 +164,7 @@ app.get('/v1/repos/:owner/:repo/metadata', async (req: express.Request, res: exp
       const ownerInst = await getOwnerInstallation(appClient, owner);
       if (ownerInst) {
         installed = true;
-        repositorySelection = (ownerInst.repository_selection as 'all' | 'selected' | undefined) ?? null;
+        repositorySelection = ownerInst.repository_selection;
         repoSelected = repositorySelection === 'all' ? true : false;
         if (repoSelected) {
           const details = await getRepoDetailsViaInstallation(appClient, ownerInst.id, owner, repo);
@@ -304,11 +302,10 @@ app.post(
         throw new Error('unexpected ref target');
       }
       const headSha = refData.object.sha;
-      const { data: headCommitData } = await kit.request('GET /repos/{owner}/{repo}/git/commits/{commit_sha}', {
-        owner,
-        repo,
-        commit_sha: headSha,
-      });
+      const { data: headCommitData } = await kit.request(
+        'GET /repos/{owner}/{repo}/git/commits/{commit_sha}',
+        { owner, repo, commit_sha: headSha }
+      );
       const baseTreeSha = headCommitData.tree.sha;
 
       const treeItems: Array<{
@@ -413,7 +410,12 @@ function parseAccessToken(json: unknown): string {
   return token;
 }
 
-function parseGitHubUser(json: unknown): { id: string; login: string; name: string | null; avatarUrl: string | null } {
+function parseGitHubUser(json: unknown): {
+  id: string;
+  login: string;
+  name: string | null;
+  avatarUrl: string | null;
+} {
   if (!json || typeof json !== 'object') throw new Error('invalid user response');
   const obj = json as Record<string, unknown>;
   const idValue = obj.id;
@@ -431,7 +433,11 @@ function parseGitHubUser(json: unknown): { id: string; login: string; name: stri
   };
 }
 
-function parseCommitRequestBody(input: unknown): { branch: string; message?: string; changes: CommitChange[] } {
+function parseCommitRequestBody(input: unknown): {
+  branch: string;
+  message?: string;
+  changes: CommitChange[];
+} {
   if (!input || typeof input !== 'object') throw new Error('invalid commit payload');
   const record = input as Record<string, unknown>;
   const branchValue = typeof record.branch === 'string' ? record.branch.trim() : '';
