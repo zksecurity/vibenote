@@ -870,6 +870,16 @@ export function isRepoLinked(slug: string): boolean {
   return false;
 }
 
+export function clearAllLocalData() {
+  const remove: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (!key) continue;
+    if (key.startsWith(`${NS}:`)) remove.push(key);
+  }
+  for (const key of remove) localStorage.removeItem(key);
+}
+
 // --- Per-repository preferences ---
 export type RepoPrefs = {
   autosync?: boolean;

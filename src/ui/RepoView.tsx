@@ -13,6 +13,7 @@ import {
   recordAutoSyncRun,
   type NoteMeta,
   type NoteDoc,
+  clearAllLocalData,
 } from '../storage/local';
 import { clearToken } from '../auth/github';
 import {
@@ -672,15 +673,22 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
 
   const onSignOut = () => {
     clearAppSession();
-    clearRepoLink(slug);
+    clearAllLocalData();
+    store.replaceWithRemote([]);
     setSessionToken(null);
     setUser(null);
     setOwnerLogin(null);
     setLinked(false);
+    setAutosync(false);
     setMenuOpen(false);
-    const id = store.resetToWelcome();
-    setNotes(store.listNotes());
-    setActiveId(id);
+    setNotes([]);
+    setFolders([]);
+    setReadOnlyNotes([]);
+    setActiveId(null);
+    setDoc(null);
+    setRepoMeta(null);
+    setAccessState('unknown');
+    initialPullRef.done = false;
     setSyncMsg('Signed out');
   };
 
