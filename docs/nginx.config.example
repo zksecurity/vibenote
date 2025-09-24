@@ -1,25 +1,13 @@
-# Example NGINX config for VibeNote API reverse proxy
-# Copy to /etc/nginx/sites-available/vibenote.conf (Debian/Ubuntu style) and enable.
-# Replace api.example.com with your domain. Add real TLS cert paths (LetsEncrypt, etc.).
+# Example NGINX config for VibeNote API reverse proxy (pre‑TLS)
+# Copy to /etc/nginx/sites-available/vibenote.conf (Debian/Ubuntu) and enable.
+# Replace api.example.com with your domain. TLS will be added by Certbot.
 
 server {
   server_name api.example.com;
 
-  # Listen on 80 and redirect to HTTPS (optional if you terminate TLS elsewhere)
+  # Initial HTTP listener (no redirect until TLS is issued by Certbot)
   listen 80;
   listen [::]:80;
-  return 301 https://$host$request_uri;
-}
-
-server {
-  server_name api.example.com;
-  listen 443 ssl http2;
-  listen [::]:443 ssl http2;
-
-  # ssl_certificate /etc/letsencrypt/live/api.example.com/fullchain.pem;
-  # ssl_certificate_key /etc/letsencrypt/live/api.example.com/privkey.pem;
-  # include /etc/letsencrypt/options-ssl-nginx.conf;
-  # ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
   # Basic security headers (add CSP/etc. on frontend domain layer if needed)
   add_header X-Frame-Options SAMEORIGIN;
@@ -48,3 +36,6 @@ server {
   gzip_types application/json text/plain application/javascript text/css;
   gzip_min_length 256;
 }
+
+# After running `npm run tls:issue`, Certbot will add a 443 SSL server block
+# and enable HTTP→HTTPS redirects automatically (because we use --redirect).
