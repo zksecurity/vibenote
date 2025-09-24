@@ -260,10 +260,25 @@ app.post("/v1/webhooks/github", (req: express.Request, res: express.Response) =>
   res.status(204).end();
 });
 
-app.listen(env.PORT, () => {
-  // eslint-disable-next-line no-console
-  console.log(`VibeNote backend listening on :${env.PORT}`);
+const server = app.listen(env.PORT, () => {
+  console.log(`[vibenote] api listening on :${env.PORT}`);
 });
+
+// Graceful shutdown (systemd / docker stop)
+for (const sig of ["SIGINT", "SIGTERM"]) {
+  process.on(sig, () => {
+    console.log(`[vibenote] received ${sig}, shutting down...`);
+    server.close(() => {
+      console.log("[vibenote] shutdown complete");
+      process.exit(0);
+    });
+    // Force exit if not closed in 8s
+    setTimeout(() => {
+      console.error("[vibenote] force exit after timeout");
+      process.exit(1);
+    }, 8000).unref();
+  });
+}
 
 function callbackURL(req: express.Request): string {
   // Matches what you configured in the GitHub App

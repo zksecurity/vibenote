@@ -9,7 +9,7 @@ Development Setup
 - Run dev (UI + API): `npm start` (Vercel dev on `http://localhost:3000`)
 - Env: copy `.env.example` → `.env` and set `GITHUB_CLIENT_ID` (GitHub OAuth App Client ID)
 - Routing: `vercel dev` runs Vite on the same origin and serves `/api/*` via its router. Vite’s `/api` proxy is automatically disabled in this mode (see `vite.config.ts`).
- 
+
 Local dev
 
 - Single command: `npm start`
@@ -99,3 +99,88 @@ Agent Conventions
 - When you make a change that is simple enough and doesn't touch UI, try to confirm its correctness directly by running tests, and if successful, commit the change right away.
 - Do NOT commit UI changes until verified by the user
 - When we introduce new conventions or useful workflows, record them in this AGENTS.md so future work is consistent.
+
+## Backend Deployment (GitHub App)
+
+The standalone backend in `server/` (see `OAUTH_REFACTOR.md`) provides the GitHub App authentication endpoints and repo/file/commit API after migrating away from the Device Flow.
+
+Overview
+
+- Express server (TypeScript) – entrypoint: `server/src/index.ts`
+- No database; all state is transient (JWT sessions, installation lookups via GitHub API)
+- Installation tokens minted on demand; never expose GitHub tokens directly to the client
+- CORS allow‑list driven by `ALLOWED_ORIGINS`
+
+Endpoints (prefix `/v1`)
+
+- Health: `GET /v1/healthz`
+- Auth popup: `GET /v1/auth/github/start`, `GET /v1/auth/github/callback`
+- App install: `GET /v1/app/install-url`, `GET /v1/app/setup`
+- Repo metadata: `GET /v1/repos/:owner/:repo/metadata`
+- Tree listing: `GET /v1/repos/:owner/:repo/tree?ref=<branch>`
+- File fetch: `GET /v1/repos/:owner/:repo/file?path=...&ref=<branch>`
+- Commit (write): `POST /v1/repos/:owner/:repo/commit` (JSON body; session required)
+- Webhooks placeholder: `POST /v1/webhooks/github` (currently no‑op)
+
+Environment Variables
+See `.env.example` for reference. Required for production:
+
+```
+GITHUB_APP_ID=            # numeric app id
+GITHUB_APP_SLUG=          # app slug
+GITHUB_OAUTH_CLIENT_ID=   # app OAuth client id
+GITHUB_OAUTH_CLIENT_SECRET=
+GITHUB_APP_PRIVATE_KEY_BASE64= # base64 of the PEM (or set GITHUB_APP_PRIVATE_KEY_PATH or GITHUB_APP_PRIVATE_KEY)
+SESSION_JWT_SECRET=       # long random string
+ALLOWED_ORIGINS=https://your-frontend.example
+PORT=8787
+```
+
+Optional:
+
+- `GITHUB_WEBHOOK_SECRET` (future webhook validation)
+
+Private Key Options
+Provide exactly one of:
+
+- `GITHUB_APP_PRIVATE_KEY_BASE64` – base64 of full PEM file
+- `GITHUB_APP_PRIVATE_KEY_PATH` – absolute path to PEM on disk
+- `GITHUB_APP_PRIVATE_KEY` – inline PEM with literal `\n` newlines
+
+Building / Running
+Node 22+ can execute TypeScript directly; we rely on that (no ts-node / tsx).
+
+PM2 (recommended persistent process):
+
+```
+pm2 start ecosystem.config.cjs --env production
+pm2 save
+pm2 status
+```
+
+See `ecosystem.config.cjs` for settings.
+
+```
+
+Security Notes
+- Never expose the private key outside the server VM or container.
+- Keep the server behind a reverse proxy (rate limiting, TLS termination).
+- Rotate `SESSION_JWT_SECRET` if compromised (invalidates sessions).
+- Lock down inbound firewall to only 80/443 (not the internal 8787 port directly) if possible.
+
+Frontend Integration
+- Point the UI to the backend via a runtime config variable (planned: `VIBENOTE_API_BASE`).
+- Ensure the frontend origin (scheme+host+port) is listed verbatim in `ALLOWED_ORIGINS`.
+
+Troubleshooting
+- 400 @ `/v1/auth/github/callback`: GitHub App callback URL mismatch or expired state token.
+- CORS error: Origin not exactly (string‑equal) listed in `ALLOWED_ORIGINS`.
+- 403 commit: App not installed, or repo not selected in a selected‑repos installation.
+- Unknown default branch: App not installed and public metadata fetch failed (private repo) → user must install app.
+
+Future Enhancements (Not Yet Implemented)
+- Webhook signature verification + event handling (installation, push) for caching.
+- Rate limiting / request logging middleware.
+- Optional ETag/If-None-Match caching for tree and file responses.
+
+```

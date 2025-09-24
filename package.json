@@ -10,7 +10,14 @@
     "preview": "vite preview",
     "check": "tsc -b",
     "test": "vitest run",
-    "server:start": "node server/src/index.ts"
+    "server:start": "node server/src/index.ts",
+    "pm2:start": "pm2 start ecosystem.config.cjs --env production",
+    "pm2:logs": "pm2 logs vibenote-api",
+    "nginx:configure": "bash scripts/nginx-configure.sh",
+    "nginx:test": "sudo nginx -t",
+    "nginx:reload": "sudo systemctl reload nginx",
+    "tls:issue": "bash scripts/tls-issue.sh",
+    "generate-secret": "openssl rand -hex 32"
   },
   "dependencies": {
     "@types/dompurify": "^3.0.5",
