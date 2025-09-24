@@ -860,11 +860,12 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                       Get Read/Write Access
                     </button>
                   </div>
-                ) : doc ? (
-                  <div className="workspace-panels">
+                ) : (
+                  <>
                     {isPublicReadonly && (
                       <div className="alert">
                         <span className="badge">Read-only</span>
+                        <span>Install VibeNote to enable editing.</span>
                         <button
                           className="btn primary"
                           onClick={() => {
@@ -884,26 +885,29 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                         </button>
                       </div>
                     )}
-                    <Editor
-                      key={doc.id}
-                      doc={doc}
-                      onChange={(id, text) => {
-                        // Persist precisely to the note that produced the change
-                        store.saveNote(id, text);
-                        scheduleAutoSync();
-                      }}
-                    />
-                  </div>
-                ) : (
-                  <div className="empty-state">
-                    <h2>Welcome to VibeNote</h2>
-                    <p>Select a note from the sidebar or create a new one to get started.</p>
-                    <p>
-                      To sync with GitHub, connect your account and link a repository. Once
-                      connected, use <strong>Sync now</strong> anytime to pull and push updates.
-                    </p>
-                    {syncMsg && <p className="empty-state-status">{syncMsg}</p>}
-                  </div>
+                    {doc ? (
+                      <div className="workspace-panels">
+                        <Editor
+                          key={doc.id}
+                          doc={doc}
+                          onChange={(id, text) => {
+                            store.saveNote(id, text);
+                            scheduleAutoSync();
+                          }}
+                        />
+                      </div>
+                    ) : (
+                      <div className="empty-state">
+                        <h2>Welcome to VibeNote</h2>
+                        <p>Select a note from the sidebar or create a new one to get started.</p>
+                        <p>
+                          To sync with GitHub, connect your account and link a repository. Once
+                          connected, use <strong>Sync now</strong> anytime to pull and push updates.
+                        </p>
+                        {syncMsg && <p className="empty-state-status">{syncMsg}</p>}
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
               {syncMsg && (
