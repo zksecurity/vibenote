@@ -29,6 +29,10 @@ Steps
 
    - `npm run tls:issue` (reads `VIBENOTE_API_BASE` and `CERTBOT_EMAIL` from .env)
    - This will install certbot if missing, request a cert, and configure NGINX with HTTPS + redirect.
+   - Renewal:
+     - Certbot installs a systemd timer on Ubuntu/Debian and renews automatically.
+     - To force a renewal now: `npm run tls:renew`
+     - To test renewal without changing certs: `npm run tls:renew:dry-run`
 
 4. Verify
    - `curl -s "$VIBENOTE_API_BASE/v1/healthz"`

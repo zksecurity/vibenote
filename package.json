@@ -17,6 +17,8 @@
     "nginx:test": "sudo nginx -t",
     "nginx:reload": "sudo systemctl reload nginx",
     "tls:issue": "bash scripts/tls-issue.sh",
+    "tls:renew": "bash scripts/tls-renew.sh",
+    "tls:renew:dry-run": "bash scripts/tls-renew-dry-run.sh",
     "generate-secret": "openssl rand -hex 32"
   },
   "dependencies": {
