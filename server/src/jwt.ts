@@ -4,6 +4,7 @@ type SessionClaims = {
   sub: string; // user id
   login: string;
   avatarUrl: string | null;
+  name: string | null;
 };
 
 export type { SessionClaims };
@@ -11,7 +12,7 @@ export type { SessionClaims };
 export async function signSession(claims: SessionClaims, secret: string, ttlSeconds = 60 * 60 * 24 * 90): Promise<string> {
   const key = new TextEncoder().encode(secret);
   const now = Math.floor(Date.now() / 1000);
-  return await new SignJWT({ login: claims.login, avatarUrl: claims.avatarUrl })
+  return await new SignJWT({ login: claims.login, avatarUrl: claims.avatarUrl, name: claims.name })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(claims.sub)
     .setIssuedAt(now)
@@ -25,7 +26,12 @@ export async function verifySession(token: string, secret: string): Promise<Sess
   if (!payload.sub || typeof payload.sub !== "string") {
     throw new Error("invalid session token (sub)");
   }
-  return { sub: payload.sub, login: String(payload.login ?? ""), avatarUrl: (payload.avatarUrl as string | null) ?? null };
+  return {
+    sub: payload.sub,
+    login: String(payload.login ?? ""),
+    avatarUrl: (payload.avatarUrl as string | null) ?? null,
+    name: (payload.name as string | null) ?? null,
+  };
 }
 
 export async function signState(obj: Record<string, unknown>, secret: string, ttlSeconds = 60 * 10): Promise<string> {
@@ -43,4 +49,3 @@ export async function verifyState(token: string, secret: string): Promise<Record
   const { payload } = await jwtVerify(token, key, { algorithms: ["HS256"] });
   return payload as Record<string, unknown>;
 }
-

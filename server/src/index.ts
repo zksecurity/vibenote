@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import { getEnv } from "./env.ts";
-import { signSession, verifySession, signState, verifyState } from "./jwt.ts";
+import { signSession, verifySession, signState, verifyState, type SessionClaims } from "./jwt.ts";
 import { makeApp, getRepositoryInstallation, getOwnerInstallation, getDefaultBranch, getRepoMetadataUnauthed, getInstallationOctokit } from "./github.ts";
 
 const env = getEnv();
@@ -47,7 +47,12 @@ app.get("/v1/auth/github/callback", async (req: express.Request, res: express.Re
     const ures = await fetch("https://api.github.com/user", { headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/vnd.github+json" } });
     if (!ures.ok) throw new Error(`user fetch failed: ${ures.status}`);
     const u: any = await ures.json();
-    const sessionToken = await signSession({ sub: String(u.id), login: String(u.login), avatarUrl: (u.avatar_url as string) ?? null }, env.SESSION_JWT_SECRET);
+    const sessionToken = await signSession({
+      sub: String(u.id),
+      login: String(u.login),
+      avatarUrl: (u.avatar_url as string) ?? null,
+      name: (u.name as string | null) ?? null,
+    }, env.SESSION_JWT_SECRET);
 
     const rt = new URL(returnTo, returnTo.startsWith("http") ? undefined : `https://${req.headers.host}`);
     const origin = rt.origin;
@@ -228,7 +233,12 @@ function requireSession(req: express.Request, res: express.Response, next: expre
   const h = req.header("authorization") || req.header("Authorization");
   if (!h || !h.toLowerCase().startsWith("bearer ")) return res.status(401).json({ error: "missing auth" });
   const token = h.slice(7).trim();
-  verifySession(token, env.SESSION_JWT_SECRET).then(() => next()).catch(() => res.status(401).json({ error: "invalid session" }));
+  verifySession(token, env.SESSION_JWT_SECRET)
+    .then((claims) => {
+      (req as any).sessionUser = claims;
+      next();
+    })
+    .catch(() => res.status(401).json({ error: "invalid session" }));
 }
 
 // Commit endpoint (atomic commit via Git Data API)
@@ -237,7 +247,7 @@ app.post("/v1/repos/:owner/:repo/commit", requireSession, async (req: express.Re
   const repo = String(req.params.repo);
   const body = req.body as any;
   const branch = String(body.branch ?? "");
-  const message = String(body.message ?? "Update from VibeNote");
+  let message = String(body.message ?? "Update from VibeNote");
   const changes = Array.isArray(body.changes) ? body.changes as Array<{ path: string; contentBase64?: string; sha?: string; delete?: boolean }> : [];
   if (!branch || changes.length === 0) return res.status(400).json({ error: "branch and changes required" });
 
@@ -265,8 +275,17 @@ app.post("/v1/repos/:owner/:repo/commit", requireSession, async (req: express.Re
       treeItems.push({ path: ch.path, mode: "100644", type: "blob", sha: String((blob as any).data.sha) });
     }
 
+    const session = (req as any).sessionUser as SessionClaims | undefined;
+    if (session && session.login && session.sub) {
+      const display = session.name && session.name.trim().length > 0 ? session.name : session.login;
+      const coAuthorLine = `Co-authored-by: ${display} <${session.sub}+${session.login}@users.noreply.github.com>`;
+      if (!message.includes("Co-authored-by:")) {
+        message = `${message.trim()}\n\n${coAuthorLine}`;
+      }
+    }
+
     const newTree: any = await kit.request("POST /repos/{owner}/{repo}/git/trees", { owner, repo, base_tree: baseTreeSha, tree: treeItems as any });
-    const newCommit: any = await kit.request("POST /repos/{owner}/{repo}/git/commits", { owner, repo, message, tree: String(newTree.data.sha), parents: [headSha!] });
+    const newCommit: any = await kit.request("POST /repos/{owner}/{repo}/git/commits", { owner, repo, message, tree: String(newTree.data.sha), parents: [headSha] });
     await kit.request("PATCH /repos/{owner}/{repo}/git/refs/{ref}", { owner, repo, ref: `heads/${branch}`, sha: String(newCommit.data.sha), force: false });
     res.json({ commitSha: newCommit.data.sha });
   } catch (e: any) {
