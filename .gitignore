@@ -3,5 +3,5 @@ dist/
 .env
 .DS_Store
 tsconfig.tsbuildinfo
-
+*.pem
 .vercel
