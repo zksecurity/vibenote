@@ -80,8 +80,7 @@ export function FileTree(props: FileTreeProps) {
     setEditing({ kind: props.newEntry.kind === 'file' ? 'file' : 'folder', id: '' } as any);
     setEditText('');
     // Expand parent folder
-    if (props.newEntry.parentDir)
-      setCollapsed((m) => ({ ...m, [props.newEntry!.parentDir]: false }));
+    if (props.newEntry.parentDir) setCollapsed((m) => ({ ...m, [props.newEntry!.parentDir]: false }));
   }, [props.newEntry?.key]);
 
   // Keyboard bindings
@@ -255,7 +254,10 @@ export function FileTree(props: FileTreeProps) {
           menuSel={menuSel}
           editing={editing}
           editText={editText}
-          onSelectFolder={(dir) => { setMenuSel(null); setSelected({ kind: 'folder', dir }); }}
+          onSelectFolder={(dir) => {
+            setMenuSel(null);
+            setSelected({ kind: 'folder', dir });
+          }}
           onSelectFile={(id) => {
             setMenuSel(null);
             setSelected({ kind: 'file', id });
@@ -294,9 +296,7 @@ function Row(props: {
   onToggleFolder: (dir: string) => void;
   onStartEdit: (sel: Selection, text: string) => void;
   onEditTextChange: (t: string) => void;
-  onSubmitEdit: (
-    ctx: { kind: 'file'; id?: string; dir?: string } | { kind: 'folder'; dir?: string }
-  ) => void;
+  onSubmitEdit: (ctx: { kind: 'file'; id?: string; dir?: string } | { kind: 'folder'; dir?: string }) => void;
   newEntry: NewEntry | null;
   onCancelEditing: () => void;
   onRequestMenu: (sel: Selection) => void;
@@ -305,9 +305,10 @@ function Row(props: {
   onDeleteFolder: (dir: string) => void;
 }) {
   const { node, depth } = props;
-  const isMenuHere = props.menuSel &&
+  const isMenuHere =
+    props.menuSel &&
     ((props.menuSel.kind === 'folder' && node.kind === 'folder' && props.menuSel.dir === node.dir) ||
-     (props.menuSel.kind === 'file' && node.kind === 'file' && props.menuSel.id === node.id));
+      (props.menuSel.kind === 'file' && node.kind === 'file' && props.menuSel.id === node.id));
 
   const startLongPress = (e: React.PointerEvent, sel: Selection) => {
     if (e.pointerType !== 'touch') return; // mobile gesture
@@ -321,9 +322,30 @@ function Row(props: {
       target.removeEventListener('pointercancel', clear);
       target.removeEventListener('pointerleave', clear);
     };
-    target.addEventListener('pointerup', () => { clear(); remove(); }, { once: true });
-    target.addEventListener('pointercancel', () => { clear(); remove(); }, { once: true });
-    target.addEventListener('pointerleave', () => { clear(); remove(); }, { once: true });
+    target.addEventListener(
+      'pointerup',
+      () => {
+        clear();
+        remove();
+      },
+      { once: true }
+    );
+    target.addEventListener(
+      'pointercancel',
+      () => {
+        clear();
+        remove();
+      },
+      { once: true }
+    );
+    target.addEventListener(
+      'pointerleave',
+      () => {
+        clear();
+        remove();
+      },
+      { once: true }
+    );
   };
   if (node.kind === 'folder') {
     const isCollapsed = props.collapsed[node.dir] === true;
@@ -335,7 +357,10 @@ function Row(props: {
           className={`tree-row ${isActive ? 'is-active' : ''}`}
           style={{ paddingLeft: 6 + depth * 10 }}
           onClick={() => props.onSelectFolder(node.dir)}
-          onContextMenu={(e) => { e.preventDefault(); props.onRequestMenu({ kind: 'folder', dir: node.dir }); }}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            props.onRequestMenu({ kind: 'folder', dir: node.dir });
+          }}
           onPointerDown={(e) => startLongPress(e, { kind: 'folder', dir: node.dir })}
         >
           <button
@@ -390,7 +415,10 @@ function Row(props: {
               {node.dir !== '' && (
                 <button
                   className="btn small subtle danger"
-                  onClick={() => { props.onDeleteFolder(node.dir); props.onCloseMenu(); }}
+                  onClick={() => {
+                    props.onDeleteFolder(node.dir);
+                    props.onCloseMenu();
+                  }}
                 >
                   Delete
                 </button>
@@ -467,7 +495,10 @@ function Row(props: {
       className={`tree-row ${isActive || isSelected ? 'is-active' : ''}`}
       style={{ paddingLeft: 6 + depth * 10 }}
       onClick={() => props.onSelectFile(node.id)}
-      onContextMenu={(e) => { e.preventDefault(); props.onRequestMenu({ kind: 'file', id: node.id }); }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        props.onRequestMenu({ kind: 'file', id: node.id });
+      }}
       onPointerDown={(e) => startLongPress(e, { kind: 'file', id: node.id })}
       onDoubleClick={() => props.onSelectFile(node.id)}
     >
@@ -503,13 +534,19 @@ function Row(props: {
         <div className="tree-menu" onClick={(e) => e.stopPropagation()}>
           <button
             className="btn small subtle"
-            onClick={() => { props.onStartEdit({ kind: 'file', id: node.id }, node.name); props.onCloseMenu(); }}
+            onClick={() => {
+              props.onStartEdit({ kind: 'file', id: node.id }, node.name);
+              props.onCloseMenu();
+            }}
           >
             Rename
           </button>
           <button
             className="btn small subtle danger"
-            onClick={() => { props.onDeleteFile(node.id); props.onCloseMenu(); }}
+            onClick={() => {
+              props.onDeleteFile(node.id);
+              props.onCloseMenu();
+            }}
           >
             Delete
           </button>
@@ -528,10 +565,7 @@ function Icon({
 }) {
   const isFolder = kind === 'folder';
   return (
-    <span
-      className={`tree-icon ${isFolder ? (open ? 'folder-open' : 'folder') : 'file'}`}
-      aria-hidden
-    />
+    <span className={`tree-icon ${isFolder ? (open ? 'folder-open' : 'folder') : 'file'}`} aria-hidden />
   );
 }
 

@@ -3,14 +3,15 @@ import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import type { NoteDoc } from '../storage/local';
 
-interface Props {
+type Props = {
   doc: NoteDoc;
   // Pass id explicitly to eliminate any chance of routing a change
   // to the wrong note due to stale closures higher up the tree.
   onChange: (id: string, text: string) => void;
-}
+  readOnly?: boolean;
+};
 
-export function Editor({ doc, onChange }: Props) {
+export function Editor({ doc, onChange, readOnly = false }: Props) {
   const [text, setText] = useState(doc.text);
 
   // Reset editor when switching to a different note
@@ -25,6 +26,7 @@ export function Editor({ doc, onChange }: Props) {
   }, [doc.text]);
 
   const onInput = (val: string) => {
+    if (readOnly) return;
     setText(val);
     onChange(doc.id, val);
   };
@@ -42,8 +44,11 @@ export function Editor({ doc, onChange }: Props) {
 
   return (
     <>
-      <textarea value={text} onChange={(e) => onInput(e.target.value)} spellCheck={false} />
-      <div className="preview" dangerouslySetInnerHTML={{ __html: html }} />
+      {!readOnly && <textarea value={text} onChange={(e) => onInput(e.target.value)} spellCheck={false} />}
+      <div
+        className={`preview${readOnly ? ' preview-only' : ''}`}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
     </>
   );
 }

@@ -13,24 +13,35 @@ import {
   recordAutoSyncRun,
   type NoteMeta,
   type NoteDoc,
+  clearAllLocalData,
 } from '../storage/local';
-import { getStoredToken, requestDeviceCode, fetchCurrentUser, clearToken } from '../auth/github';
+import { clearToken } from '../auth/github';
+import {
+  signInWithGitHubApp,
+  getSessionToken as getAppSessionToken,
+  getSessionUser as getAppSessionUser,
+  ensureAppUserAvatarCached,
+  clearSession as clearAppSession,
+  type AppUser,
+} from '../auth/app-auth';
+import {
+  getRepoMetadata as apiGetRepoMetadata,
+  getInstallUrl as apiGetInstallUrl,
+  type RepoMetadata,
+} from '../lib/backend';
+import { fetchPublicRepoInfo } from '../lib/github-public';
 import {
   buildRemoteConfig,
   pullNote,
-  commitBatch,
-  ensureRepoExists,
   repoExists,
   listNoteFiles,
   syncBidirectional,
   type RemoteConfig,
 } from '../sync/git-sync';
-import { ensureIntroReadme } from '../sync/readme';
 import { hashText } from '../storage/local';
 import { RepoSwitcher } from './RepoSwitcher';
 import { RepoConfigModal } from './RepoConfigModal';
 import { Toggle } from './Toggle';
-import { DeviceCodeModal } from './DeviceCodeModal';
 import type { Route } from './routing';
 
 type RepoViewProps = {
@@ -64,6 +75,9 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     let firstId = initialNotes[0]?.id ?? null;
     return firstId ? store.loadNote(firstId) : null;
   });
+  type ReadOnlyNote = { id: string; path: string; title: string; dir: string; sha?: string };
+  const [readOnlyNotes, setReadOnlyNotes] = useState<ReadOnlyNote[]>([]);
+  const [readOnlyLoading, setReadOnlyLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selection, setSelection] = useState<
     { kind: 'folder'; dir: string } | { kind: 'file'; id: string } | null
@@ -73,20 +87,46 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     parentDir: string;
     key: number;
   } | null>(null);
-  const [token, setToken] = useState<string | null>(getStoredToken());
+  const [sessionToken, setSessionToken] = useState<string | null>(getAppSessionToken());
   const [showConfig, setShowConfig] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
-  const [device, setDevice] = useState<import('../auth/github').DeviceCodeResponse | null>(null);
-  const [ownerLogin, setOwnerLogin] = useState<string | null>(null);
+  const initialAppUser = useMemo(() => getAppSessionUser(), []);
+  const [ownerLogin, setOwnerLogin] = useState<string | null>(initialAppUser?.login ?? null);
   const [linked, setLinked] = useState(() => slug !== 'new' && isRepoLinked(slug));
-  const [user, setUser] = useState<{ login: string; name?: string; avatar_url?: string } | null>(null);
+  const [user, setUser] = useState<AppUser | null>(initialAppUser);
+  const userAvatarSrc = user?.avatarDataUrl ?? user?.avatarUrl ?? undefined;
   const [menuOpen, setMenuOpen] = useState(false);
   const [toast, setToast] = useState<{ text: string; href?: string } | null>(null);
   const [repoModalMode, setRepoModalMode] = useState<'onboard' | 'manage'>('manage');
   const [repoModalError, setRepoModalError] = useState<string | null>(null);
   const [showSwitcher, setShowSwitcher] = useState(false);
   const [accessState, setAccessState] = useState<'unknown' | 'reachable' | 'unreachable'>('unknown');
+  const [repoMeta, setRepoMeta] = useState<RepoMetadata | null>(null);
+  const [hasMetadataResolved, setHasMetadataResolved] = useState(false);
+  const [metadataError, setMetadataError] = useState<string | null>(null);
+  const [publicRepoMeta, setPublicRepoMeta] = useState<{
+    isPrivate: boolean;
+    defaultBranch: string | null;
+  } | null>(null);
+  const [publicRateLimited, setPublicRateLimited] = useState(false);
+  const [, setPublicMetaError] = useState<string | null>(null);
+  const manageUrl = repoMeta?.manageUrl ?? null;
+  const buildConfigWithMeta = () => {
+    const cfg: RemoteConfig = buildRemoteConfig(slug);
+    const branch = repoMeta?.defaultBranch ?? publicRepoMeta?.defaultBranch;
+    if (branch) cfg.branch = branch;
+    return cfg;
+  };
+  const metadataAllowsEdit = !!repoMeta?.repoSelected;
+  const canEdit =
+    !!sessionToken && (metadataAllowsEdit || ((!hasMetadataResolved || !!metadataError) && linked));
+  const repoIsPublic =
+    repoMeta?.isPrivate === false || (!repoMeta?.repoSelected && publicRepoMeta?.isPrivate === false);
+  const repoIsPrivate = repoMeta?.isPrivate === true || publicRepoMeta?.isPrivate === true;
+  const isPublicReadonly = repoIsPublic && !canEdit;
+  const needsInstallForPrivate = repoIsPrivate && !canEdit;
+  const isRateLimited = !metadataError && (publicRateLimited || repoMeta?.rateLimited === true);
   const [refreshTick, setRefreshTick] = useState(0);
   const initialPullRef = useState({ done: false })[0];
   const [autosync, setAutosync] = useState<boolean>(() => (slug !== 'new' ? isAutosyncEnabled(slug) : false));
@@ -101,27 +141,49 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   }, [slug]);
 
   useEffect(() => {
+    let cancelled = false;
+    if (!user || user.avatarDataUrl || !user.avatarUrl) return;
+    (async () => {
+      const updated = await ensureAppUserAvatarCached();
+      if (!cancelled && updated && updated.avatarDataUrl) {
+        setUser(updated);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.avatarDataUrl, user?.avatarUrl, ensureAppUserAvatarCached]);
+
+  useEffect(() => {
     setSidebarOpen(false);
     setSyncMsg(null);
     setAccessState('unknown');
+    setPublicRepoMeta(null);
+    setPublicRateLimited(false);
+    setPublicMetaError(null);
   }, [slug]);
 
   useEffect(() => {
     if (route.kind !== 'repo') return;
     if (accessState !== 'reachable') return; // only record reachable repos
-    onRecordRecent({ slug, owner: route.owner, repo: route.repo, connected: linked });
-  }, [slug, route, linked, onRecordRecent, accessState]);
+    onRecordRecent({
+      slug,
+      owner: route.owner,
+      repo: route.repo,
+      connected: canEdit && linked,
+    });
+  }, [slug, route, linked, onRecordRecent, accessState, canEdit]);
 
   // When we navigate to a reachable repo we haven't linked locally yet, auto-load its notes
   useEffect(() => {
     (async () => {
       if (route.kind !== 'repo') return;
       if (accessState !== 'reachable') return;
-      if (!token) return;
+      if (!canEdit) return;
       if (linked) return;
       if (initialPullRef.done) return;
       try {
-        const cfg: RemoteConfig = buildRemoteConfig(slug);
+        const cfg: RemoteConfig = buildConfigWithMeta();
         const entries = await listNoteFiles(cfg);
         const files: { path: string; text: string; sha?: string }[] = [];
         for (const e of entries) {
@@ -140,50 +202,164 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
         initialPullRef.done = true;
       }
     })();
-  }, [route, accessState, token, linked, slug, store, initialPullRef]);
+  }, [route, accessState, linked, slug, store, initialPullRef, canEdit]);
 
-  // Determine whether the current repository is reachable with the current token
+  // Determine repository access via backend metadata
   useEffect(() => {
     let cancelled = false;
     if (route.kind !== 'repo') {
       setAccessState('unknown');
       return;
     }
-    if (!token) {
-      // Without a token, treat as unreachable for private repos; show guidance UI
-      setAccessState('unreachable');
-      return;
-    }
+    setHasMetadataResolved(false);
+    setMetadataError(null);
     (async () => {
       try {
-        const ok = await repoExists(route.owner, route.repo);
-        if (!cancelled) setAccessState(ok ? 'reachable' : 'unreachable');
-      } catch {
-        if (!cancelled) setAccessState('unreachable');
+        const meta = await apiGetRepoMetadata(route.owner, route.repo);
+        if (!cancelled) {
+          setRepoMeta(meta);
+          if (meta.repoSelected) {
+            setAccessState('reachable');
+            setPublicRepoMeta(null);
+            setPublicRateLimited(false);
+            setPublicMetaError(null);
+          } else if (meta.isPrivate === false) {
+            setAccessState('reachable');
+          } else if (meta.isPrivate === true) {
+            setAccessState('unreachable');
+          } else {
+            setAccessState('unknown');
+          }
+        }
+        setHasMetadataResolved(true);
+      } catch (err) {
+        if (!cancelled) setAccessState('unknown');
+        setMetadataError(err instanceof Error ? err.message : 'unknown-error');
+        setHasMetadataResolved(true);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [route, token]);
+  }, [route]);
 
   useEffect(() => {
-    let nextNotes = store.listNotes();
-    let nextFolders = store.listFolders();
+    if (route.kind !== 'repo') return;
+    if (repoMeta?.repoSelected) return;
+    if (repoMeta?.isPrivate === true) return;
+    if (publicRepoMeta || publicRateLimited) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        setPublicMetaError(null);
+        const info = await fetchPublicRepoInfo(route.owner, route.repo);
+        if (cancelled) return;
+        if (info.ok && typeof info.isPrivate === 'boolean') {
+          setPublicRepoMeta({
+            isPrivate: info.isPrivate,
+            defaultBranch: info.defaultBranch ?? null,
+          });
+          setPublicRateLimited(false);
+          setPublicMetaError(null);
+          setAccessState(info.isPrivate ? 'unreachable' : 'reachable');
+        } else if (info.rateLimited) {
+          setPublicRateLimited(true);
+        } else if (info.notFound) {
+          setPublicRepoMeta({ isPrivate: true, defaultBranch: null });
+          setAccessState('unreachable');
+        } else {
+          setPublicMetaError(info.message ?? 'unknown-error');
+          console.warn('vibenote: public repo metadata fetch failed', info);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setPublicMetaError(err instanceof Error ? err.message : 'unknown-error');
+          console.warn('vibenote: public repo metadata fetch error', err);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [route, repoMeta?.installed, repoMeta?.isPrivate, publicRepoMeta, publicRateLimited]);
+
+  useEffect(() => {
+    if (!isPublicReadonly) {
+      setReadOnlyNotes([]);
+      setReadOnlyLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setReadOnlyLoading(true);
+    (async () => {
+      try {
+        const cfg = buildConfigWithMeta();
+        const entries = await listNoteFiles(cfg);
+        const toTitle = (path: string) => {
+          const base = path.slice(path.lastIndexOf('/') + 1);
+          return base.replace(/\.md$/i, '');
+        };
+        const mapped: ReadOnlyNote[] = entries.map((entry) => {
+          const title = toTitle(entry.path);
+          const dir = (() => {
+            const idx = entry.path.lastIndexOf('/');
+            return idx >= 0 ? entry.path.slice(0, idx) : '';
+          })();
+          return { id: entry.path, path: entry.path, title, dir, sha: entry.sha };
+        });
+        if (cancelled) return;
+        setReadOnlyNotes(mapped);
+        if (mapped.length > 0) {
+          const first = mapped[0]!;
+          setActiveId(first.id);
+          const remote = await pullNote(cfg, first.path);
+          if (!remote || cancelled) return;
+          setDoc({
+            id: first.id,
+            path: first.path,
+            title: first.title,
+            dir: first.dir,
+            text: remote.text,
+            updatedAt: Date.now(),
+            lastRemoteSha: remote.sha,
+            lastSyncedHash: hashText(remote.text),
+          });
+        } else {
+          setDoc(null);
+          setActiveId(null);
+        }
+        if (!cancelled) setReadOnlyLoading(false);
+      } catch (e) {
+        console.error(e);
+        if (!cancelled) setReadOnlyLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      setReadOnlyLoading(false);
+    };
+  }, [isPublicReadonly, slug, repoMeta?.defaultBranch, publicRepoMeta?.defaultBranch]);
+
+  useEffect(() => {
+    if (!canEdit) return;
+    const nextNotes = store.listNotes();
+    const nextFolders = store.listFolders();
     setNotes(nextNotes);
     setFolders(nextFolders);
     setActiveId((prev) => {
       if (prev && nextNotes.some((n) => n.id === prev)) return prev;
       return nextNotes[0]?.id ?? null;
     });
-  }, [store]);
+  }, [store, canEdit]);
 
   useEffect(() => {
+    if (!canEdit) return;
     setDoc(activeId ? store.loadNote(activeId) : null);
-  }, [store, activeId]);
+  }, [store, activeId, canEdit]);
 
   // Cross-tab coherence: listen to localStorage changes for this repo slug
   useEffect(() => {
+    if (!canEdit) return;
     const encodedSlug = encodeURIComponent(slug);
     const prefix = `vibenote:repo:${encodedSlug}:`;
     let timer: number | null = null;
@@ -220,7 +396,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   const scheduleAutoSync = (debounceMs: number = AUTO_SYNC_DEBOUNCE_MS) => {
     if (!autosync) return;
     if (route.kind !== 'repo') return;
-    if (!token || !linked || slug === 'new') return;
+    if (!sessionToken || !linked || slug === 'new' || !canEdit) return;
     // Respect min interval across tabs
     let last = getLastAutoSyncAt(slug) ?? 0;
     let now = Date.now();
@@ -238,7 +414,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     autoSyncBusyRef.busy = true;
     setSyncing(true);
     try {
-      if (!token || !linked || slug === 'new') return;
+      if (!sessionToken || !linked || slug === 'new' || !canEdit) return;
       let summary = await syncBidirectional(store, slug);
       recordAutoSyncRun(slug);
       setNotes(store.listNotes());
@@ -256,6 +432,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   };
 
   const onCreate = () => {
+    if (!canEdit) return;
     let parentDir = '';
     if (selection?.kind === 'folder') parentDir = selection.dir;
     if (selection?.kind === 'file') {
@@ -266,10 +443,12 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   };
 
   const onCreateFolder = (parentDir: string) => {
+    if (!canEdit) return;
     setNewEntry({ kind: 'folder', parentDir, key: Date.now() });
   };
 
   const onRenameFolder = (dir: string, newName: string) => {
+    if (!canEdit) return;
     try {
       store.renameFolder(dir, newName);
       setNotes(store.listNotes());
@@ -285,6 +464,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   const onMoveFolder = (_fromDir: string, _toDir?: string) => {};
 
   const onDeleteFolder = (dir: string) => {
+    if (!canEdit) return;
     // Skip confirmation if folder (and subtree) contains no files
     let hasNotes = notes.some((n) => {
       let d = (n.dir as string) || '';
@@ -302,6 +482,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   };
 
   const onRename = (id: string, title: string) => {
+    if (!canEdit) return;
     try {
       store.renameNote(id, title);
       setNotes(store.listNotes());
@@ -314,6 +495,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   };
 
   const onDelete = (id: string) => {
+    if (!canEdit) return;
     store.deleteNote(id);
     const list = store.listNotes();
     setNotes(list);
@@ -324,11 +506,32 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
 
   const onConnect = async () => {
     try {
-      const d = await requestDeviceCode();
-      setDevice(d);
+      const result = await signInWithGitHubApp();
+      if (result) {
+        setSessionToken(result.token);
+        setUser(result.user);
+        setOwnerLogin(result.user.login);
+      }
     } catch (e) {
       console.error(e);
-      setSyncMsg('Failed to start GitHub authorization');
+      setSyncMsg('Failed to sign in');
+    }
+  };
+
+  const openAccessSetup = async () => {
+    try {
+      // the app is already installed and we go straight into the right user's settings to manage repos
+      if (manageUrl && repoMeta?.repoSelected === false) {
+        window.open(manageUrl, '_blank', 'noopener');
+        return;
+      }
+      // otherwise, we build a link that will first prompt to select the organization/user to install in
+      if (route.kind !== 'repo') return;
+      const url = await apiGetInstallUrl(route.owner, route.repo, window.location.href);
+      window.open(url, '_blank', 'noopener');
+    } catch (e) {
+      console.error(e);
+      setSyncMsg('Failed to open GitHub');
     }
   };
 
@@ -350,29 +553,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
       let hadRemoteBefore = matchesCurrent && linked;
       let targetConfig: RemoteConfig = buildRemoteConfig(targetSlug);
 
-      let currentLogin = ownerLogin;
-      if (!currentLogin) {
-        let u = await fetchCurrentUser();
-        currentLogin = u?.login ?? null;
-        setOwnerLogin(u?.login ?? null);
-      }
-
-      let existed = await repoExists(targetOwner, targetRepo);
-      if (!existed) {
-        if (!currentLogin || currentLogin !== targetOwner) {
-          const msg = 'Repository not found. VibeNote can only auto-create repositories under your username.';
-          setRepoModalError(msg);
-          setSyncMsg(msg);
-          return;
-        }
-        let created = await ensureRepoExists(targetOwner, targetRepo, true);
-        if (!created) {
-          const msg = 'Failed to create repository under your account.';
-          setRepoModalError(msg);
-          setSyncMsg(msg);
-          return;
-        }
-      }
+      // No in-app repo creation with GitHub App model; we simply link and guide via install CTAs
 
       markRepoLinked(targetSlug);
       setAutosyncEnabled(targetSlug, cfg.autosync === true);
@@ -382,30 +563,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
         setAutosync(cfg.autosync === true);
       }
 
-      if (!existed) {
-        if (!hadRemoteBefore) {
-          let files: { path: string; text: string; baseSha?: string }[] = [];
-          for (let noteMeta of store.listNotes()) {
-            let local = store.loadNote(noteMeta.id);
-            if (!local) continue;
-            files.push({ path: local.path, text: local.text });
-          }
-          if (files.length > 0) {
-            await commitBatch(targetConfig, files, 'vibenote: initialize notes');
-          }
-        } else if (matchesCurrent) {
-          clearAllTombstones(slug);
-          store.replaceWithRemote([]);
-          let notesSnapshot = store.listNotes();
-          setNotes(notesSnapshot);
-          setActiveId(notesSnapshot[0]?.id ?? null);
-        }
-        await ensureIntroReadme(targetConfig);
-        setToast({
-          text: 'Repository ready',
-          href: `https://github.com/${targetOwner}/${targetRepo}`,
-        });
-      }
+      // With the GitHub App model, initialization happens once access is granted.
 
       const entries = await listNoteFiles(targetConfig);
       const remoteFiles: { path: string; text: string; sha?: string }[] = [];
@@ -416,7 +574,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
       }
       targetStore.replaceWithRemote(remoteFiles);
 
-      let statusMsg = existed ? 'Connected to repository' : 'Repository created and initialized';
+      let statusMsg = 'Connected to repository';
       if (matchesCurrent) {
         let syncedNotes = targetStore.listNotes();
         setNotes(syncedNotes);
@@ -443,8 +601,8 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   };
 
   const ensureOwnerAndOpen = async () => {
-    if (!ownerLogin && token) {
-      const u = await fetchCurrentUser();
+    if (!ownerLogin) {
+      const u = getAppSessionUser();
       setOwnerLogin(u?.login ?? null);
     }
     setShowSwitcher(true);
@@ -482,7 +640,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [ownerLogin, token]);
+  }, [ownerLogin]);
 
   const GitHubIcon = () => (
     <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
@@ -543,37 +701,29 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     return () => document.removeEventListener('click', onDoc);
   }, []);
 
-  // Restore user/account info on reload when a token is present
-  useEffect(() => {
-    if (!token) return;
-    (async () => {
-      const u = await fetchCurrentUser();
-      setUser(u);
-      setOwnerLogin(u?.login ?? null);
-    })();
-  }, [token]);
+  // Session-based user is restored from localStorage on init (see getAppSessionUser())
 
   // Kick off an autosync on load/connect when enabled
   useEffect(() => {
     if (route.kind !== 'repo') return;
     if (!autosync) return;
-    if (!token || !linked || slug === 'new') return;
+    if (!sessionToken || !linked || slug === 'new' || !canEdit) return;
     scheduleAutoSync(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [route.kind, autosync, token, linked, slug]);
+  }, [route.kind, autosync, sessionToken, linked, slug, canEdit]);
 
   // Periodic background autosync to pick up remote-only changes
   useEffect(() => {
     if (route.kind !== 'repo') return;
-    if (!autosync || !token || !linked || slug === 'new') return;
+    if (!autosync || !sessionToken || !linked || slug === 'new' || !canEdit) return;
     let id = window.setInterval(() => scheduleAutoSync(0), 180_000); // every 3 minutes
     return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [route.kind, autosync, token, linked, slug]);
+  }, [route.kind, autosync, sessionToken, linked, slug, canEdit]);
 
   // Attempt a final background push via Service Worker when the page is closing.
   useEffect(() => {
-    const shouldFlush = () => autosync && token !== null && linked && slug !== 'new';
+    const shouldFlush = () => false; // SW flush disabled for GitHub App backend v1
     const onPageHide = () => {
       if (!shouldFlush()) return;
       const sendViaSW = async () => {
@@ -591,10 +741,9 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
             .map((d) => ({ path: d.path, text: d.text || '', baseSha: d.lastRemoteSha }));
           if (files.length === 0) return true;
           const [owner, repo] = slug.split('/', 2);
-          ctrl.postMessage({
-            type: 'vibenote-flush',
-            payload: { token, config: { owner, repo, branch: 'main' }, files },
-          });
+          void files;
+          void owner;
+          void repo;
           return true;
         } catch {
           return false;
@@ -612,19 +761,31 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
       window.removeEventListener('pagehide', onPageHide);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [autosync, token, linked, slug, store]);
+  }, [autosync, linked, slug, store]);
 
   const onSignOut = () => {
-    clearToken();
-    clearRepoLink(slug);
-    setToken(null);
+    clearAppSession();
+    clearAllLocalData();
+    store.replaceWithRemote([]);
+    setSessionToken(null);
     setUser(null);
     setOwnerLogin(null);
     setLinked(false);
+    setAutosync(false);
     setMenuOpen(false);
-    const id = store.resetToWelcome();
-    setNotes(store.listNotes());
-    setActiveId(id);
+    setNotes([]);
+    setFolders([]);
+    setReadOnlyNotes([]);
+    setMetadataError(null);
+    setPublicRepoMeta(null);
+    setPublicRateLimited(false);
+    setPublicMetaError(null);
+    setNewEntry(null);
+    setActiveId(null);
+    setDoc(null);
+    setRepoMeta(null);
+    setAccessState('unknown');
+    initialPullRef.done = false;
     setSyncMsg('Signed out');
   };
 
@@ -632,7 +793,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     try {
       setSyncMsg(null);
       setSyncing(true);
-      if (!token || !linked || slug === 'new') {
+      if (!sessionToken || !linked || slug === 'new' || !canEdit) {
         setSyncMsg('Connect GitHub and configure repo first');
         return;
       }
@@ -656,7 +817,21 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     }
   };
 
-  const isRepoUnreachable = route.kind === 'repo' && accessState === 'unreachable';
+  const isRepoUnreachable =
+    route.kind === 'repo' && accessState === 'unreachable' && !isPublicReadonly && !needsInstallForPrivate;
+  const showSidebar = (notes.length > 0 && linked) || (isPublicReadonly && readOnlyNotes.length > 0);
+  const layoutClass = showSidebar ? (isRepoUnreachable ? 'single' : '') : 'single';
+  const noteList = isPublicReadonly ? readOnlyNotes : notes;
+  const folderList = useMemo(() => {
+    if (isPublicReadonly) {
+      const set = new Set<string>();
+      for (const note of readOnlyNotes) {
+        if (note.dir) set.add(note.dir);
+      }
+      return Array.from(set).sort();
+    }
+    return folders;
+  }, [folders, isPublicReadonly, readOnlyNotes]);
 
   return (
     <div className="app-shell">
@@ -702,7 +877,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                 <ExternalLinkIcon />
               </a>
             </span>
-          ) : token ? (
+          ) : sessionToken ? (
             <button
               type="button"
               className="btn ghost repo-btn align-workspace repo-btn-empty"
@@ -722,7 +897,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
           ) : null}
         </div>
         <div className="topbar-actions">
-          {!token ? (
+          {!sessionToken ? (
             <>
               <button className="btn primary" onClick={onConnect}>
                 Connect GitHub
@@ -730,7 +905,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
             </>
           ) : (
             <>
-              {linked && !isRepoUnreachable && (
+              {linked && !isRepoUnreachable && canEdit && (
                 <button
                   className={`btn secondary sync-btn ${syncing ? 'is-syncing' : ''}`}
                   onClick={onSyncNow}
@@ -747,8 +922,8 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                   onClick={() => setMenuOpen((v) => !v)}
                   aria-label="Account menu"
                 >
-                  {user.avatar_url ? (
-                    <img src={user.avatar_url} alt={user.login} />
+                  {userAvatarSrc ? (
+                    <img src={userAvatarSrc} alt={user.login} />
                   ) : (
                     <span className="account-avatar-fallback" aria-hidden>
                       {(user.name || user.login || '?').charAt(0).toUpperCase()}
@@ -764,7 +939,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
           )}
         </div>
       </header>
-      <div className={`app-layout ${isRepoUnreachable ? 'single' : ''}`}>
+      <div className={`app-layout ${layoutClass}`}>
         {isRepoUnreachable ? (
           <section className="workspace" style={{ width: '100%' }}>
             <div className="workspace-body">
@@ -784,120 +959,228 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
           </section>
         ) : (
           <>
-            <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
-              <div className="sidebar-header">
-                <div className="sidebar-title">
-                  <span>Notes</span>
-                  <span className="note-count">{notes.length}</span>
-                  <button
-                    className="btn icon only-mobile"
-                    onClick={() => setSidebarOpen(false)}
-                    aria-label="Close notes"
-                  >
-                    <CloseIcon />
-                  </button>
+            {showSidebar && (
+              <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
+                <div className="sidebar-header">
+                  <div className="sidebar-title">
+                    <div className="sidebar-title-main">
+                      <span>Notes</span>
+                      <span className="note-count">{noteList.length}</span>
+                    </div>
+                    <button
+                      className="btn icon only-mobile"
+                      onClick={() => setSidebarOpen(false)}
+                      aria-label="Close notes"
+                    >
+                      <CloseIcon />
+                    </button>
+                  </div>
                 </div>
-                <div className="sidebar-actions">
-                  <button className="btn primary" onClick={onCreate}>
-                    New note
-                  </button>
-                  <button
-                    className="btn secondary"
-                    onClick={() => {
-                      let parentDir = '';
-                      if (selection?.kind === 'folder') parentDir = selection.dir;
-                      if (selection?.kind === 'file') {
-                        let n = notes.find((x) => x.id === selection.id);
-                        if (n) parentDir = (n.dir as string) || '';
-                      }
-                      onCreateFolder(parentDir);
-                    }}
-                  >
-                    New folder
-                  </button>
-                </div>
-              </div>
-              <div className="sidebar-body">
-                <FileTree
-                  files={
-                    notes.map((n) => ({
-                      id: n.id,
-                      name: n.title || 'Untitled',
-                      path: n.path,
-                      dir: (n.dir as string) || '',
-                    })) as FileEntry[]
-                  }
-                  folders={folders}
-                  activeId={activeId}
-                  onSelectionChange={(sel) => setSelection(sel as any)}
-                  onSelectFile={(id) => {
-                    setActiveId(id);
-                    setSidebarOpen(false);
-                  }}
-                  onRenameFile={onRename}
-                  onDeleteFile={onDelete}
-                  onCreateFile={(dir, name) => {
-                    let id = store.createNote(name, '', dir);
-                    setNotes(store.listNotes());
-                    setFolders(store.listFolders());
-                    setActiveId(id);
-                    scheduleAutoSync();
-                    return id;
-                  }}
-                  onCreateFolder={(parentDir, name) => {
-                    try {
-                      store.createFolder(parentDir, name);
-                      setFolders(store.listFolders());
-                    } catch (e) {
-                      console.error(e);
-                      setSyncMsg('Invalid folder name.');
+                {canEdit && (
+                  <div className="sidebar-actions">
+                    <button className="btn primary" onClick={onCreate}>
+                      New note
+                    </button>
+                    <button
+                      className="btn secondary"
+                      onClick={() => {
+                        let parentDir = '';
+                        if (selection?.kind === 'folder') parentDir = selection.dir;
+                        if (selection?.kind === 'file') {
+                          let n = noteList.find((x) => x.id === selection.id);
+                          if (n) parentDir = (n.dir as string) || '';
+                        }
+                        onCreateFolder(parentDir);
+                      }}
+                    >
+                      New folder
+                    </button>
+                  </div>
+                )}
+                <div className="sidebar-body">
+                  <FileTree
+                    files={
+                      noteList.map((n) => ({
+                        id: n.id,
+                        name: n.title || 'Untitled',
+                        path: n.path,
+                        dir: (n.dir as string) || '',
+                      })) as FileEntry[]
                     }
-                  }}
-                  onRenameFolder={onRenameFolder}
-                  onDeleteFolder={onDeleteFolder}
-                  newEntry={newEntry}
-                  onFinishCreate={() => setNewEntry(null)}
-                />
-              </div>
-              {route.kind === 'repo' && linked ? (
-                <div className="repo-autosync-toggle">
-                  <Toggle
-                    checked={autosync}
-                    onChange={(enabled) => {
-                      setAutosync(enabled);
-                      setAutosyncEnabled(slug, enabled);
-                      if (enabled) scheduleAutoSync(0);
+                    folders={folderList}
+                    activeId={activeId}
+                    onSelectionChange={(sel) => setSelection(sel as any)}
+                    onSelectFile={(id) => {
+                      if (!canEdit) {
+                        setActiveId(id);
+                        setSidebarOpen(false);
+                        const entry = readOnlyNotes.find((n) => n.id === id);
+                        if (!entry) return;
+                        const cfg = buildConfigWithMeta();
+                        void (async () => {
+                          try {
+                            const remote = await pullNote(cfg, entry.path);
+                            if (!remote) return;
+                            setDoc({
+                              id: entry.id,
+                              path: entry.path,
+                              title: entry.title,
+                              dir: entry.dir,
+                              text: remote.text,
+                              updatedAt: Date.now(),
+                              lastRemoteSha: remote.sha,
+                              lastSyncedHash: hashText(remote.text),
+                            });
+                          } catch (e) {
+                            console.error(e);
+                          }
+                        })();
+                        return;
+                      }
+                      setActiveId(id);
+                      setSidebarOpen(false);
                     }}
-                    label="Autosync"
-                    description="Runs background sync after edits and periodically."
+                    onRenameFile={canEdit ? onRename : () => undefined}
+                    onDeleteFile={canEdit ? onDelete : () => undefined}
+                    onCreateFile={
+                      canEdit
+                        ? (dir, name) => {
+                            let id = store.createNote(name, '', dir);
+                            setNotes(store.listNotes());
+                            setFolders(store.listFolders());
+                            setActiveId(id);
+                            scheduleAutoSync();
+                            return id;
+                          }
+                        : () => undefined
+                    }
+                    onCreateFolder={
+                      canEdit
+                        ? (parentDir, name) => {
+                            try {
+                              store.createFolder(parentDir, name);
+                              setFolders(store.listFolders());
+                            } catch (e) {
+                              console.error(e);
+                              setSyncMsg('Invalid folder name.');
+                            }
+                          }
+                        : () => undefined
+                    }
+                    onRenameFolder={canEdit ? onRenameFolder : () => undefined}
+                    onDeleteFolder={canEdit ? onDeleteFolder : () => undefined}
+                    newEntry={canEdit ? newEntry : null}
+                    onFinishCreate={() => canEdit && setNewEntry(null)}
                   />
                 </div>
-              ) : null}
-            </aside>
-            <section className="workspace">
-              <div className="workspace-body">
-                {doc ? (
-                  <div className="workspace-panels">
-                    <Editor
-                      key={doc.id}
-                      doc={doc}
-                      onChange={(id, text) => {
-                        // Persist precisely to the note that produced the change
-                        store.saveNote(id, text);
-                        scheduleAutoSync();
+                {route.kind === 'repo' && linked && canEdit ? (
+                  <div className="repo-autosync-toggle">
+                    <Toggle
+                      checked={autosync}
+                      onChange={(enabled) => {
+                        setAutosync(enabled);
+                        setAutosyncEnabled(slug, enabled);
+                        if (enabled) scheduleAutoSync(0);
                       }}
+                      label="Autosync"
+                      description="Runs background sync after edits and periodically."
                     />
                   </div>
-                ) : (
+                ) : null}
+              </aside>
+            )}
+            <section className="workspace">
+              <div className="workspace-body">
+                {readOnlyLoading ? (
                   <div className="empty-state">
-                    <h2>Welcome to VibeNote</h2>
-                    <p>Select a note from the sidebar or create a new one to get started.</p>
-                    <p>
-                      To sync with GitHub, connect your account and link a repository. Once connected, use{' '}
-                      <strong>Sync now</strong> anytime to pull and push updates.
-                    </p>
-                    {syncMsg && <p className="empty-state-status">{syncMsg}</p>}
+                    <h2>Loading repository…</h2>
+                    <p>Fetching files from GitHub. Hang tight.</p>
                   </div>
+                ) : route.kind === 'repo' && needsInstallForPrivate ? (
+                  <div className="empty-state">
+                    <h2>Can't access this repository</h2>
+                    <p>This repository is private or not yet enabled for the VibeNote GitHub App.</p>
+                    <p>
+                      Continue to GitHub and either select <strong>Only select repositories</strong> and pick
+                      <code>
+                        {' '}
+                        {route.owner}/{route.repo}{' '}
+                      </code>
+                      , or grant access to all repositories (not recommended).
+                    </p>
+                    {sessionToken ? (
+                      <button className="btn primary" onClick={openAccessSetup}>
+                        Get Read/Write Access
+                      </button>
+                    ) : (
+                      <p>Please sign in with GitHub to request access.</p>
+                    )}
+                  </div>
+                ) : (
+                  <>
+                    {metadataError && (
+                      <div className="alert warning">
+                        <span className="badge">Offline</span>
+                        <span className="alert-text">
+                          Could not reach GitHub. You can still edit notes offline.
+                        </span>
+                      </div>
+                    )}
+                    {metadataError == null && isRateLimited && (
+                      <div className="alert warning">
+                        <span className="badge">Limited</span>
+                        <span className="alert-text">
+                          GitHub rate limits temporarily prevent checking repository access. Public
+                          repositories remain viewable; retry shortly for private access checks.
+                        </span>
+                      </div>
+                    )}
+                    {isPublicReadonly && (
+                      <div className="alert">
+                        <span className="badge">Read-only</span>
+                        <span className="alert-text">
+                          You can view, but not edit files in this repository.
+                        </span>
+                        {sessionToken ? (
+                          <button className="btn primary" onClick={openAccessSetup}>
+                            Get Write Access
+                          </button>
+                        ) : null}
+                      </div>
+                    )}
+                    {doc ? (
+                      <div className="workspace-panels">
+                        <Editor
+                          key={doc.id}
+                          doc={doc}
+                          readOnly={isPublicReadonly || needsInstallForPrivate || !canEdit}
+                          onChange={(id, text) => {
+                            store.saveNote(id, text);
+                            scheduleAutoSync();
+                          }}
+                        />
+                      </div>
+                    ) : isPublicReadonly ? (
+                      <div className="empty-state">
+                        <h2>Browse on GitHub to view files</h2>
+                        <p>This repository has no notes cached locally yet.</p>
+                        <p>
+                          Open the repository on GitHub or select a file from the sidebar to load it in
+                          VibeNote.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="empty-state">
+                        <h2>Welcome to VibeNote</h2>
+                        <p>Select a note from the sidebar or create a new one to get started.</p>
+                        <p>
+                          To sync with GitHub, connect your account and link a repository. Once connected, use{' '}
+                          <strong>Sync now</strong> anytime to pull and push updates.
+                        </p>
+                        {syncMsg && <p className="empty-state-status">{syncMsg}</p>}
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
               {syncMsg && (
@@ -911,12 +1194,13 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
         )}
       </div>
       {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
+
       {menuOpen && user && (
         <div className="account-menu">
           <div className="account-menu-header">
             <div className="account-menu-avatar" aria-hidden>
-              {user.avatar_url ? (
-                <img src={user.avatar_url} alt="" />
+              {userAvatarSrc ? (
+                <img src={userAvatarSrc} alt="" />
               ) : (
                 <span>{(user.name || user.login || '?').charAt(0).toUpperCase()}</span>
               )}
@@ -943,7 +1227,6 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
       )}
       {showSwitcher && (
         <RepoSwitcher
-          accountOwner={ownerLogin}
           route={route}
           slug={slug}
           navigate={navigate}
@@ -967,30 +1250,6 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
             setRepoModalError(null);
             void ensureOwnerAndOpen();
           }}
-        />
-      )}
-      {device && (
-        <DeviceCodeModal
-          device={device}
-          onDone={(t) => {
-            if (t) {
-              localStorage.setItem('vibenote:gh-token', t);
-              setToken(t);
-              fetchCurrentUser()
-                .then((u) => {
-                  setOwnerLogin(u?.login ?? null);
-                  setUser(u);
-                })
-                .catch(() => undefined)
-                .finally(() => {
-                  setRepoModalError(null);
-                  setRepoModalMode('onboard');
-                  setShowConfig(true);
-                });
-            }
-            setDevice(null);
-          }}
-          onCancel={() => setDevice(null)}
         />
       )}
     </div>

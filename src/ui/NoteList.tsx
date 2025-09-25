@@ -40,13 +40,20 @@ export function NoteList({ notes, activeId, onSelect, onRename, onDelete }: Prop
           {editing === n.id ? (
             <form
               className="note-item-edit"
-              onSubmit={(e) => { e.preventDefault(); submit(n.id); }}
+              onSubmit={(e) => {
+                e.preventDefault();
+                submit(n.id);
+              }}
               onClick={(e) => e.stopPropagation()}
             >
               <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
               <div className="note-item-edit-actions">
-                <button type="submit" className="btn primary small">Save</button>
-                <button type="button" className="btn subtle small" onClick={cancel}>Cancel</button>
+                <button type="submit" className="btn primary small">
+                  Save
+                </button>
+                <button type="button" className="btn subtle small" onClick={cancel}>
+                  Cancel
+                </button>
               </div>
             </form>
           ) : (
@@ -56,8 +63,12 @@ export function NoteList({ notes, activeId, onSelect, onRename, onDelete }: Prop
                 <div className="note-item-meta">{new Date(n.updatedAt).toLocaleString()}</div>
               </div>
               <div className="note-item-actions" onClick={(e) => e.stopPropagation()}>
-                <button className="btn subtle small" type="button" onClick={() => startEdit(n)}>Rename</button>
-                <button className="btn subtle small danger" type="button" onClick={() => onDelete(n.id)}>Delete</button>
+                <button className="btn subtle small" type="button" onClick={() => startEdit(n)}>
+                  Rename
+                </button>
+                <button className="btn subtle small danger" type="button" onClick={() => onDelete(n.id)}>
+                  Delete
+                </button>
               </div>
             </div>
           )}

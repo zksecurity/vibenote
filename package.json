@@ -9,7 +9,18 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "check": "tsc -b",
-    "test": "vitest run"
+    "test": "vitest run",
+    "format": "prettier --write .",
+    "server:start": "node server/src/index.ts",
+    "pm2:start": "pm2 start ecosystem.config.cjs --env production",
+    "pm2:logs": "pm2 logs vibenote-api",
+    "nginx:configure": "bash scripts/nginx-configure.sh",
+    "nginx:test": "sudo nginx -t",
+    "nginx:reload": "sudo systemctl reload nginx",
+    "tls:issue": "bash scripts/tls-issue.sh",
+    "tls:renew": "bash scripts/tls-renew.sh",
+    "tls:renew:dry-run": "bash scripts/tls-renew-dry-run.sh",
+    "generate-secret": "openssl rand -hex 32"
   },
   "dependencies": {
     "@types/dompurify": "^3.0.5",
@@ -18,13 +29,22 @@
     "marked": "^11.2.0",
     "react": "18.2.0",
     "react-dom": "18.2.0",
-    "yjs": "^13.6.27"
+    "yjs": "^13.6.27",
+    "@octokit/app": "^15.1.1",
+    "@octokit/core": "^6.1.2",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "jose": "^5.9.3",
+    "dotenv": "^16.4.5"
   },
   "devDependencies": {
     "@types/diff-match-patch": "^1.0.36",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
     "@types/node": "^24.5.2",
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
+    "@vercel/node": "^3.1.10",
     "typescript": "^5.5.4",
     "vite": "^5.4.0",
     "vitest": "^2.1.2"

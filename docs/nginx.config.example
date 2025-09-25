@@ -1,0 +1,41 @@
+# Example NGINX config for VibeNote API reverse proxy (pre‑TLS)
+# Copy to /etc/nginx/sites-available/vibenote.conf (Debian/Ubuntu) and enable.
+# Replace api.example.com with your domain. TLS will be added by Certbot.
+
+server {
+  server_name api.example.com;
+
+  # Initial HTTP listener (no redirect until TLS is issued by Certbot)
+  listen 80;
+  listen [::]:80;
+
+  # Basic security headers (add CSP/etc. on frontend domain layer if needed)
+  add_header X-Frame-Options SAMEORIGIN;
+  add_header X-Content-Type-Options nosniff;
+  add_header Referrer-Policy no-referrer-when-downgrade;
+
+  # Upstream Node server (PM2) on localhost
+  location /v1/ {
+    proxy_pass http://127.0.0.1:8787/v1/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Connection "";
+    proxy_buffering off;
+  }
+
+  # Health endpoint fast path (optional micro‑cache)
+  location = /v1/healthz {
+    proxy_pass http://127.0.0.1:8787/v1/healthz;
+    expires -1;
+  }
+
+  # Optional gzip (JSON responses are small, so this is fine to disable):
+  gzip on;
+  gzip_types application/json text/plain application/javascript text/css;
+  gzip_min_length 256;
+}
+
+# After running `npm run tls:issue`, Certbot will add a 443 SSL server block
+# and enable HTTP→HTTPS redirects automatically (because we use --redirect).

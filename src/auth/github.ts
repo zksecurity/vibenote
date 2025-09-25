@@ -1,3 +1,5 @@
+// LEGACY FILE - device token flow is not currently used in the app
+
 /// <reference types="vite/client" />
 // GitHub OAuth device flow helper functions.
 // Calls Vercel serverless functions (api/github/*) to avoid browser CORS issues.
@@ -64,7 +66,11 @@ export function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
 }
 
-export async function fetchCurrentUser(): Promise<{ login: string; name?: string; avatar_url?: string } | null> {
+export async function fetchCurrentUser(): Promise<{
+  login: string;
+  name?: string;
+  avatar_url?: string;
+} | null> {
   const token = getStoredToken();
   if (!token) return null;
   const res = await fetch('https://api.github.com/user', {
@@ -75,5 +81,9 @@ export async function fetchCurrentUser(): Promise<{ login: string; name?: string
   });
   if (!res.ok) return null;
   const data = await res.json();
-  return { login: data.login as string, name: data.name as string | undefined, avatar_url: data.avatar_url as string | undefined };
+  return {
+    login: data.login as string,
+    name: data.name as string | undefined,
+    avatar_url: data.avatar_url as string | undefined,
+  };
 }

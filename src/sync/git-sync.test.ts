@@ -239,11 +239,7 @@ describe('syncBidirectional', () => {
     remote.configure('user', 'repo');
     globalAny.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
       const raw =
-        typeof input === 'string'
-          ? input
-          : input instanceof URL
-          ? input.toString()
-          : (input as Request).url;
+        typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url;
       return remote.handleFetch(new URL(raw), init);
     };
     const mod = await import('./git-sync');
@@ -367,7 +363,10 @@ describe('syncBidirectional', () => {
     remote.setFile('README.md', 'root readme');
     remote.setFile('sub/README.md', 'sub readme');
     await syncBidirectional(store, 'user/repo');
-    const paths = store.listNotes().map((n) => n.path).sort();
+    const paths = store
+      .listNotes()
+      .map((n) => n.path)
+      .sort();
     expect(paths).toEqual(['sub/README.md']);
   });
 });

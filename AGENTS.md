@@ -4,23 +4,23 @@ Read both README.md and DESIGN.md for product and architecture context. This doc
 
 Development Setup
 
-- Prereqs: Node 18+, npm
+- Prereqs: Node 22+, npm
 - Install: `npm install`
 - Run dev (UI + API): `npm start` (Vercel dev on `http://localhost:3000`)
-- Env: copy `.env.example` → `.env` and set `GITHUB_CLIENT_ID` (GitHub OAuth App Client ID)
-- Routing: `vercel dev` runs Vite on the same origin and serves `/api/*` via its router. Vite’s `/api` proxy is automatically disabled in this mode (see `vite.config.ts`).
- 
+- Env: copy `.env.example` → `.env` and fill the GitHub App variables (`GITHUB_APP_*`, `SESSION_JWT_SECRET`, `ALLOWED_ORIGINS`, etc.). `GITHUB_CLIENT_ID` is optional legacy support for Device Flow.
+- Routing: `vercel dev` runs Vite on the same origin and serves `/api/*` via the Vercel router. No manual proxy setup is required.
+
 Local dev
 
 - Single command: `npm start`
   - Opens `http://localhost:3000/` for the UI; `/api/*` served by Vercel functions.
 - Node runs TypeScript directly (2025+): use `node path/to/file.ts` for quick scripts; no ts-node/tsx needed.
 
-Local Auth (Device Flow)
+Local Auth (GitHub App)
 
-- Click “Connect GitHub” → DeviceCodeModal shows the code; click “Open GitHub” and paste the code.
-- The client polls `/api/github/device-token` and stores the user token locally on success.
-- Tokens are stored in `localStorage` (MVP). Do not log or persist them elsewhere.
+- “Connect GitHub” opens the GitHub App popup flow (`/v1/auth/github/*`).
+- The backend signs JWT sessions; no GitHub tokens persist in localStorage.
+- Legacy Device Flow endpoints live in `api/_legacy_github/_*.ts` (prefixed with `_` so Vercel ignores them). Only revive them intentionally if you bring back Device Flow.
 
 Deploying to Vercel
 
@@ -51,8 +51,8 @@ UI/UX Conventions
 
 Auth Modes
 
-- Default: OAuth Device Flow via serverless proxy; requests `repo` scope.
-- Planned: GitHub App (selected repos, least‑privilege) — see DESIGN.md.
+- Default: GitHub App popup (per repo/owner install).
+- Legacy: Device Flow (disabled by default; endpoints kept in `_legacy_github`).
 
 Security Notes
 
@@ -85,6 +85,7 @@ function mainMethod() { // ...
   - `if (text === "")` rather than `if (!text)`
   - `number !== 0 && array.includes(number)` rather than `number && array.includes(number)`
 - When writing shared modules, prefer placing exported/high-level APIs at the top of the file and push low-level helpers toward the bottom, so readers can grasp intent before implementation details.
+- Nullish values: In data types, prefer `undefined` (and `?` on object properties) to model inexistent values. Do not use `null` unless there is a specific strong reason. A valid reason to use `null` is if the data type needs to be JSON-stringified.
 
 Type Checking
 
@@ -99,3 +100,41 @@ Agent Conventions
 - When you make a change that is simple enough and doesn't touch UI, try to confirm its correctness directly by running tests, and if successful, commit the change right away.
 - Do NOT commit UI changes until verified by the user
 - When we introduce new conventions or useful workflows, record them in this AGENTS.md so future work is consistent.
+
+## Backend Deployment (GitHub App)
+
+We share the same backend logic (`server/src/api.ts`) across two deployment targets:
+
+1. **Serverless API (Vercel `/api`)** — primary deployment. Configure the GitHub App env vars in Vercel. The Hobby plan allows at most **12** functions per deployment; we currently ship 11 active routes. Legacy Device Flow handlers live in `api/_legacy_github/_*.ts` so they don’t count toward the limit.
+2. **Express server (server/src/index.ts)** — the PM2/NGINX VPS setup in `docs/DEPLOYMENT.md`. Keep it as fallback or when we need stateful features later.
+
+Switch between them by changing `VIBENOTE_API_BASE` (and keeping the env variables in sync).
+
+See DEPLOYMENT.md for instructions to deploy the backend (mostly automatic with Vercel, based on scripts in this repo on a VPS.)
+
+### API surface (common routes)
+
+- `GET /v1/healthz`
+- `GET /v1/auth/github/start`
+- `GET /v1/auth/github/callback`
+- `GET /v1/app/install-url`
+- `GET /v1/app/setup`
+- `GET /v1/repos/:owner/:repo/metadata`
+- `GET /v1/repos/:owner/:repo/tree`
+- `GET /v1/repos/:owner/:repo/file`
+- `GET /v1/repos/:owner/:repo/blob/:sha`
+- `POST /v1/repos/:owner/:repo/commit`
+- `POST /v1/webhooks/github` (placeholder)
+
+### Environment variables
+
+See `.env.example` for a detailed breakdown.
+
+### Security & Ops quick notes
+
+- Never expose the GitHub App private key; keep it on the server / Vercel secrets only.
+- Ensure frontend origins are exactly listed in `ALLOWED_ORIGINS`.
+- 403s on commit typically mean the app isn’t installed for that repo; direct users to the manage URL in metadata.
+- Rotate `SESSION_JWT_SECRET` if compromised (all sessions invalidate).
+
+Future improvements: webhook validation/handling, request logging, smarter caching.

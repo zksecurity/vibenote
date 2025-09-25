@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 
-export type Route =
-  | { kind: 'home' }
-  | { kind: 'new' }
-  | { kind: 'repo'; owner: string; repo: string };
+export type Route = { kind: 'home' } | { kind: 'new' } | { kind: 'repo'; owner: string; repo: string };
 
 type NavigateOptions = {
   replace?: boolean;

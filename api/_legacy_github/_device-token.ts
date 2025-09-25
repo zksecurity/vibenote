@@ -58,4 +58,3 @@ export default async function handler(req: any, res: any) {
     res.end(JSON.stringify({ error: 'proxy_error', message: String(err?.message || err) }));
   }
 }
-

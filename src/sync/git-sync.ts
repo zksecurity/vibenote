@@ -2,6 +2,20 @@
 // Uses a stored OAuth token to read and write note files in a repository.
 
 import { getStoredToken } from '../auth/github';
+import {
+  getRepoMetadata as backendGetRepoMetadata,
+  getTree as backendGetTree,
+  getFile as backendGetFile,
+  getBlob as backendGetBlob,
+  commit as backendCommit,
+  type CommitResponse,
+} from '../lib/backend';
+import {
+  fetchPublicFile,
+  fetchPublicTree,
+  fetchPublicRepoInfo,
+  PublicFetchError,
+} from '../lib/github-public';
 import type { LocalStore } from '../storage/local';
 import {
   listTombstones,
@@ -34,10 +48,21 @@ export function buildRemoteConfig(slug: string): RemoteConfig {
 }
 
 export async function repoExists(owner: string, repo: string): Promise<boolean> {
-  const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
-    headers: authHeaders(),
-  });
-  return res.ok;
+  try {
+    const meta = await backendGetRepoMetadata(owner, repo);
+    if (meta.installed && (meta.repoSelected || meta.repositorySelection === 'all')) return true;
+    // public repo without install is still viewable (read-only)
+    if (meta.isPrivate === false) return true;
+    if (meta.isPrivate === true) return false;
+  } catch {
+    // ignore and fall through to public fetch
+  }
+  try {
+    const info = await fetchPublicRepoInfo(owner, repo);
+    return info.ok && info.isPrivate === false;
+  } catch {
+    return false;
+  }
 }
 
 function authHeaders() {
@@ -48,20 +73,26 @@ function authHeaders() {
   };
 }
 
-function encodeApiPath(path: string): string {
-  return path.split('/').map(encodeURIComponent).join('/');
-}
-
 export async function pullNote(config: RemoteConfig, path: string): Promise<RemoteFile | null> {
-  const url = `https://api.github.com/repos/${config.owner}/${config.repo}/contents/${encodeApiPath(
-    path
-  )}?ref=${encodeURIComponent(config.branch)}`;
-  const res = await fetch(url, { headers: authHeaders() });
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error('Failed to fetch note');
-  const data = await res.json();
-  const content = fromBase64((data.content as string).replace(/\n/g, ''));
-  return { path, text: content, sha: data.sha };
+  try {
+    const f = await backendGetFile(config.owner, config.repo, path, config.branch);
+    const content = fromBase64((f.contentBase64 || '').replace(/\n/g, ''));
+    return { path, text: content, sha: f.sha };
+  } catch (e: any) {
+    const status = typeof e === 'object' && e && 'status' in e ? Number((e as any).status) : null;
+    if (status === 403 || status === 404) {
+      const ref = config.branch || 'main';
+      try {
+        const publicFile = await fetchPublicFile(config.owner, config.repo, path, ref);
+        const content = fromBase64((publicFile.contentBase64 || '').replace(/\n/g, ''));
+        return { path, text: content, sha: publicFile.sha };
+      } catch (pubErr: unknown) {
+        if (pubErr instanceof PublicFetchError && pubErr.status === 404) return null;
+        throw pubErr;
+      }
+    }
+    throw e;
+  }
 }
 
 export type SyncSummary = {
@@ -72,42 +103,19 @@ export type SyncSummary = {
   merged: number;
 };
 
-// Fetch raw blob content by SHA
-export async function fetchBlob(config: RemoteConfig, sha: string): Promise<string | null> {
-  const url = `https://api.github.com/repos/${config.owner}/${
-    config.repo
-  }/git/blobs/${encodeURIComponent(sha)}`;
-  const res = await fetch(url, { headers: authHeaders() });
-  if (!res.ok) return null;
-  const data = await res.json();
-  const content = fromBase64((data.content as string).replace(/\n/g, ''));
-  return content;
-}
-
 // Upsert a single file and return its new content sha
 export async function putFile(
   config: RemoteConfig,
   file: { path: string; text: string; baseSha?: string },
   message: string
 ): Promise<string> {
-  const url = `https://api.github.com/repos/${config.owner}/${config.repo}/contents/${encodeApiPath(
-    file.path
-  )}`;
-  const res = await fetch(url, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({
-      message,
-      content: toBase64(file.text),
-      sha: file.baseSha,
-      branch: config.branch,
-    }),
+  const res = await backendCommit(config.owner, config.repo, {
+    branch: config.branch,
+    message,
+    baseSha: file.baseSha,
+    changes: [{ path: file.path, contentBase64: toBase64(file.text) }],
   });
-  if (!res.ok) throw new Error('Commit failed');
-  const data = await res.json();
-  const contentSha: string | undefined = data.content?.sha;
-  if (!contentSha) throw new Error('Missing content sha');
-  return contentSha;
+  return extractBlobSha(res, file.path) ?? res.commitSha;
 }
 
 export async function commitBatch(
@@ -116,62 +124,48 @@ export async function commitBatch(
   message: string
 ): Promise<string | null> {
   if (files.length === 0) return null;
-  let commitSha: string | null = null;
-  for (const f of files) {
-    const url = `https://api.github.com/repos/${config.owner}/${
-      config.repo
-    }/contents/${encodeApiPath(f.path)}`;
-    const res = await fetch(url, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({
-        message,
-        content: toBase64(f.text),
-        sha: f.baseSha,
-        branch: config.branch,
-      }),
-    });
-    if (!res.ok) throw new Error('Commit failed');
-    const data = await res.json();
-    commitSha = data.commit?.sha || commitSha;
-  }
-  return commitSha;
+  const res = await backendCommit(config.owner, config.repo, {
+    branch: config.branch,
+    message,
+    changes: files.map((f) => ({ path: f.path, contentBase64: toBase64(f.text) })),
+    baseSha: files[0]?.baseSha,
+  });
+  // Return the first blob sha if available to align with caller expectations
+  const firstPath = files[0]?.path;
+  return firstPath ? extractBlobSha(res, firstPath) ?? res.commitSha : res.commitSha;
 }
 
 // List Markdown files under the configured notesDir at HEAD
 export async function listNoteFiles(config: RemoteConfig): Promise<{ path: string; sha: string }[]> {
   const rootDir = (config.notesDir || '').replace(/(^\/+|\/+?$)/g, '');
-  const results: { path: string; sha: string }[] = [];
-  async function walk(dir: string, depth: number) {
-    const base = `https://api.github.com/repos/${config.owner}/${config.repo}/contents`;
-    const url = `${base}${dir ? '/' + encodeApiPath(dir) : ''}?ref=${encodeURIComponent(
-      config.branch
-    )}`;
-    const res = await fetch(url, { headers: authHeaders() });
-    if (res.status === 404) return;
-    if (!res.ok) throw new Error('Failed to list notes directory');
-    const data = await res.json();
-    if (!Array.isArray(data)) return;
-    for (const e of data) {
-      if (!e || typeof e !== 'object') continue;
-      const type = (e as any).type as string | undefined;
-      const path = (e as any).path as string | undefined;
-      const name = (e as any).name as string | undefined;
-      const sha = (e as any).sha as string | undefined;
-      if (!type || !name || !path) continue;
-      if (type === 'dir') {
-        await walk(path, depth + 1);
-        continue;
-      }
-      if (type !== 'file' || !/\.md$/i.test(name)) continue;
-      // Exclude README.md only at the root level relative to notesDir
-      if (depth === 0 && name.toLowerCase() === 'readme.md') continue;
-      if (!sha) continue;
+  const filterEntries = (entries: Array<{ path?: string; sha?: string; type?: string }>) => {
+    const results: { path: string; sha: string }[] = [];
+    for (const e of entries) {
+      const type = e.type;
+      const path = e.path;
+      const sha = e.sha;
+      if (type !== 'blob' || !path || !sha) continue;
+      if (rootDir && !path.startsWith(rootDir + '/')) continue;
+      if (!/\.md$/i.test(path)) continue;
+      const name = path.slice(path.lastIndexOf('/') + 1);
+      if (!rootDir && name.toLowerCase() === 'readme.md') continue;
       results.push({ path, sha });
     }
+    return results;
+  };
+
+  try {
+    const entries = await backendGetTree(config.owner, config.repo, config.branch);
+    return filterEntries(entries);
+  } catch (e: any) {
+    const status = typeof e === 'object' && e && 'status' in e ? Number((e as any).status) : null;
+    if (status === 403 || status === 404) {
+      const ref = config.branch || 'main';
+      const entries = await fetchPublicTree(config.owner, config.repo, ref);
+      return filterEntries(entries.map((entry) => ({ path: entry.path, sha: entry.sha, type: 'blob' })));
+    }
+    throw e;
   }
-  await walk(rootDir, 0);
-  return results;
 }
 
 // --- base64 helpers that safely handle UTF-8 ---
@@ -189,25 +183,12 @@ export async function deleteFiles(
   message: string
 ): Promise<string | null> {
   if (files.length === 0) return null;
-  let commitSha: string | null = null;
-  for (const f of files) {
-    const url = `https://api.github.com/repos/${config.owner}/${
-      config.repo
-    }/contents/${encodeApiPath(f.path)}`;
-    const res = await fetch(url, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({
-        message,
-        sha: f.sha,
-        branch: config.branch,
-      }),
-    });
-    if (!res.ok) throw new Error('Delete failed');
-    const data = await res.json();
-    commitSha = data.commit?.sha || commitSha;
-  }
-  return commitSha;
+  const res = await backendCommit(config.owner, config.repo, {
+    branch: config.branch,
+    message,
+    changes: files.map((f) => ({ path: f.path, delete: true })),
+  });
+  return res.commitSha || null;
 }
 
 function fromBase64(b64: string): string {
@@ -219,21 +200,24 @@ function fromBase64(b64: string): string {
   return decoder.decode(bytes);
 }
 
-export async function ensureRepoExists(
-  owner: string,
-  repo: string,
-  isPrivate = true
-): Promise<boolean> {
-  const token = getStoredToken();
-  if (!token) return false;
-  const exists = await repoExists(owner, repo);
-  if (exists) return true;
-  const res = await fetch(`https://api.github.com/user/repos`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ name: repo, private: isPrivate, auto_init: true }),
-  });
-  return res.ok;
+// Fetch raw blob content by SHA using backend (requires installation for the repo)
+export async function fetchBlob(config: RemoteConfig, sha: string): Promise<string | null> {
+  try {
+    const b = await backendGetBlob(config.owner, config.repo, sha);
+    return fromBase64((b.contentBase64 || '').replace(/\n/g, ''));
+  } catch {
+    return '';
+  }
+}
+
+function extractBlobSha(res: CommitResponse, path: string): string | undefined {
+  const map = res.blobShas;
+  if (!map) return undefined;
+  if (path in map) return map[path];
+  // Git stores paths exactly as provided; attempt normalized
+  const alt = path.replace(/^\.\//, '');
+  if (alt in map) return map[alt];
+  return undefined;
 }
 
 function hashText(text: string): string {
@@ -305,7 +289,11 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         if (mergedText !== localText) {
           updateNoteText(storeSlug, id, mergedText);
         }
-        const newSha = await putFile(config, { path: doc.path, text: mergedText, baseSha: rf.sha }, 'vibenote: merge notes');
+        const newSha = await putFile(
+          config,
+          { path: doc.path, text: mergedText, baseSha: rf.sha },
+          'vibenote: merge notes'
+        );
         markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: hashText(mergedText) });
         merged++;
         pushed++;
@@ -381,8 +369,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         // Nothing tracked for this rename: remote already missing
         removeTombstones(
           storeSlug,
-          (x) =>
-            x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt
+          (x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt
         );
         debugLog(slug, 'sync:tombstone:rename:remote-missing', { from: t.from, to: t.to });
         continue;
@@ -393,11 +380,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         if (!remoteFile) {
           removeTombstones(
             storeSlug,
-            (x) =>
-              x.type === 'rename' &&
-              x.from === t.from &&
-              x.to === t.to &&
-              x.renamedAt === t.renamedAt
+            (x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt
           );
           continue;
         }
@@ -405,13 +388,16 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         remoteMap.set(t.from, shaToDelete);
       }
       if (!t.lastRemoteSha || t.lastRemoteSha === shaToDelete) {
-        await deleteFiles(config, [{ path: t.from, sha: shaToDelete }], 'vibenote: delete old path after rename');
+        await deleteFiles(
+          config,
+          [{ path: t.from, sha: shaToDelete }],
+          'vibenote: delete old path after rename'
+        );
         deletedRemote++;
         remoteMap.delete(t.from);
         removeTombstones(
           storeSlug,
-          (x) =>
-            x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt
+          (x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt
         );
         debugLog(slug, 'sync:tombstone:rename:remote-deleted', { from: t.from, to: t.to });
         continue;
@@ -443,8 +429,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       }
       removeTombstones(
         storeSlug,
-        (x) =>
-          x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt
+        (x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt
       );
     }
   }

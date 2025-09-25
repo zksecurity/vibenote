@@ -533,11 +533,7 @@ export function clearAllTombstones(slug: string) {
   debugLog(slug, 'tombstone:clearAll', {});
 }
 
-export function markSynced(
-  slug: string,
-  id: string,
-  patch: { remoteSha?: string; syncedHash?: string }
-) {
+export function markSynced(slug: string, id: string, patch: { remoteSha?: string; syncedHash?: string }) {
   let key = `${repoKey(slug, 'note')}:${id}`;
   let docRaw = localStorage.getItem(key);
   if (!docRaw) return;
@@ -785,9 +781,7 @@ function loadRecentRepos(): RecentRepo[] {
   try {
     let parsed = JSON.parse(raw) as RecentRepo[];
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (item) => typeof item?.slug === 'string' && typeof item?.lastOpenedAt === 'number'
-    );
+    return parsed.filter((item) => typeof item?.slug === 'string' && typeof item?.lastOpenedAt === 'number');
   } catch {
     return [];
   }
@@ -868,6 +862,16 @@ export function isRepoLinked(slug: string): boolean {
     return true;
   }
   return false;
+}
+
+export function clearAllLocalData() {
+  const remove: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (!key) continue;
+    if (key.startsWith(`${NS}:`)) remove.push(key);
+  }
+  for (const key of remove) localStorage.removeItem(key);
 }
 
 // --- Per-repository preferences ---

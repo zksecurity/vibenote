@@ -1,12 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { Route } from './routing';
-import { listRecentRepos, markRepoLinked, type RecentRepo } from '../storage/local';
-import { buildRemoteConfig, commitBatch, listNoteFiles, pullNote, repoExists, ensureRepoExists, type RemoteConfig } from '../sync/git-sync';
-import { ensureIntroReadme } from '../sync/readme';
-import { LocalStore } from '../storage/local';
+import { listRecentRepos, type RecentRepo } from '../storage/local';
+import { repoExists } from '../sync/git-sync';
 
 type Props = {
-  accountOwner: string | null;
   route: Route;
   slug: string;
   navigate: (route: Route, options?: { replace?: boolean }) => void;
@@ -23,7 +20,7 @@ function parseOwnerRepo(input: string): Parsed {
   return { owner, repo };
 }
 
-export function RepoSwitcher({ accountOwner, route, slug, navigate, onClose, onRecordRecent }: Props) {
+export function RepoSwitcher({ route, slug, navigate, onClose, onRecordRecent }: Props) {
   const [input, setInput] = useState('');
   const [recents, setRecents] = useState<RecentRepo[]>(() => listRecentRepos());
   const [checking, setChecking] = useState(false);
@@ -62,7 +59,8 @@ export function RepoSwitcher({ accountOwner, route, slug, navigate, onClose, onR
     const q = input.trim().toLowerCase();
     const base = recents;
     if (!q) return base.slice(0, 8);
-    const score = (slug: string) => (slug.toLowerCase().startsWith(q) ? 0 : slug.toLowerCase().includes(q) ? 1 : 2);
+    const score = (slug: string) =>
+      slug.toLowerCase().startsWith(q) ? 0 : slug.toLowerCase().includes(q) ? 1 : 2;
     return base
       .slice()
       .sort((a, b) => score(a.slug) - score(b.slug) || b.lastOpenedAt - a.lastOpenedAt)
@@ -117,41 +115,7 @@ export function RepoSwitcher({ accountOwner, route, slug, navigate, onClose, onR
     if (parsed) goTo(parsed.owner, parsed.repo);
   };
 
-  const createRepo = async (owner: string, repo: string) => {
-    if (!accountOwner || accountOwner !== owner) return;
-    const confirmed = window.confirm(`Create private repository ${owner}/${repo}?`);
-    if (!confirmed) return;
-    const ok = await ensureRepoExists(owner, repo, true);
-    if (!ok) return;
-    const targetSlug = `${owner}/${repo}`;
-    markRepoLinked(targetSlug);
-    const config: RemoteConfig = buildRemoteConfig(targetSlug);
-    // If creating for current slug and it had local notes, seed them
-    const matchesCurrent = slug === targetSlug;
-    if (matchesCurrent) {
-      const local = new LocalStore(targetSlug, { seedWelcome: false });
-      const files: { path: string; text: string; baseSha?: string }[] = [];
-      for (const meta of local.listNotes()) {
-        const doc = local.loadNote(meta.id);
-        if (doc) files.push({ path: doc.path, text: doc.text });
-      }
-      if (files.length > 0) await commitBatch(config, files, 'vibenote: initialize notes');
-    }
-    await ensureIntroReadme(config);
-    // Pull remote notes to hydrate local namespace
-    const entries = await listNoteFiles(config);
-    const remoteFiles: { path: string; text: string; sha?: string }[] = [];
-    for (const entry of entries) {
-      const rf = await pullNote(config, entry.path);
-      if (rf) remoteFiles.push({ path: rf.path, text: rf.text, sha: rf.sha });
-    }
-    const targetStore = new LocalStore(targetSlug, { seedWelcome: false });
-    targetStore.replaceWithRemote(remoteFiles);
-    goTo(owner, repo);
-  };
-
   const parsed = parseOwnerRepo(input);
-  const canCreate = Boolean(parsed && accountOwner && parsed.owner === accountOwner && exists === false);
 
   const statusText = checking
     ? 'Checking repository…'
@@ -159,9 +123,7 @@ export function RepoSwitcher({ accountOwner, route, slug, navigate, onClose, onR
     ? exists === true
       ? 'Press Enter to open'
       : exists === false
-      ? accountOwner && parsed.owner === accountOwner
-        ? 'Repo not found — you can create it'
-        : 'Repo not found or no access'
+      ? 'Repo not found or no access'
       : 'Type owner/repo to open'
     : 'Type owner/repo or choose a recent';
 
@@ -187,11 +149,6 @@ export function RepoSwitcher({ accountOwner, route, slug, navigate, onClose, onR
             }
           }}
         />
-        {canCreate && (
-          <button className="btn secondary" onClick={() => parsed && createRepo(parsed.owner, parsed.repo)}>
-            Create repo
-          </button>
-        )}
       </div>
       <div className="repo-switcher-status">{statusText}</div>
       <ul className="repo-switcher-list">
@@ -205,7 +162,9 @@ export function RepoSwitcher({ accountOwner, route, slug, navigate, onClose, onR
                 if (o && r) goTo(o, r);
               }}
             >
-              <span className="repo-switcher-slug">{s.owner && s.repo ? `${s.owner}/${s.repo}` : s.slug}</span>
+              <span className="repo-switcher-slug">
+                {s.owner && s.repo ? `${s.owner}/${s.repo}` : s.slug}
+              </span>
               {s.connected ? <span className="repo-switcher-connected">linked</span> : null}
             </button>
           </li>
