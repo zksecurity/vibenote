@@ -96,8 +96,8 @@ app.get('/v1/auth/github/callback', async (req: express.Request, res: express.Re
           const msg = { type: 'vibenote:auth', sessionToken: ${JSON.stringify(
             sessionToken
           )}, user: { id: ${JSON.stringify(u.id)}, login: ${JSON.stringify(u.login)}, name: ${JSON.stringify(
-            u.name
-          )}, avatarUrl: ${JSON.stringify(u.avatarUrl)}, avatarDataUrl: null } };
+      u.name
+    )}, avatarUrl: ${JSON.stringify(u.avatarUrl)}, avatarDataUrl: null } };
           if (window.opener && '${origin}') { window.opener.postMessage(msg, '${origin}'); }
         } catch (e) {}
         setTimeout(function(){ window.close(); }, 50);
@@ -149,11 +149,13 @@ app.get('/v1/repos/:owner/:repo/metadata', async (req: express.Request, res: exp
     let defaultBranch: string | null = null;
     let repoAccessible = false;
     let repositorySelection: 'all' | 'selected' | null = null;
+    let manageUrl: string | null = null;
     const repoInst = await getRepositoryInstallation(appClient, owner, repo);
     let ownerInstRecord = null as Awaited<ReturnType<typeof getOwnerInstallation>> | null;
     if (repoInst) {
       repoAccessible = true;
       repositorySelection = repoInst.repository_selection;
+      manageUrl = buildInstallationManageUrl(repoInst.account, repoInst.id);
       const details = await getRepoDetailsViaInstallation(appClient, repoInst.id, owner, repo);
       if (details) {
         isPrivate = details.isPrivate;
@@ -163,6 +165,7 @@ app.get('/v1/repos/:owner/:repo/metadata', async (req: express.Request, res: exp
       ownerInstRecord = await getOwnerInstallation(appClient, owner);
       if (ownerInstRecord) {
         repositorySelection = ownerInstRecord.repository_selection;
+        manageUrl = buildInstallationManageUrl(ownerInstRecord.account, ownerInstRecord.id);
         if (repositorySelection === 'all') {
           repoAccessible = true;
           const details = await getRepoDetailsViaInstallation(appClient, ownerInstRecord.id, owner, repo);
@@ -183,6 +186,7 @@ app.get('/v1/repos/:owner/:repo/metadata', async (req: express.Request, res: exp
       repoSelected: repoAccessible,
       repositorySelection,
       defaultBranch,
+      manageUrl,
     });
   } catch (error: unknown) {
     res.status(500).json({ error: getErrorMessage(error) });
@@ -504,4 +508,19 @@ function callbackURL(req: express.Request): string {
   const host = req.get('host');
   const proto = req.get('x-forwarded-proto') ?? req.protocol;
   return `${proto}://${host}/v1/auth/github/callback`;
+}
+
+function buildInstallationManageUrl(account: unknown, installationId?: number): string | null {
+  if (!installationId) return null;
+  let type: string | undefined;
+  let login: string | undefined;
+  if (account && typeof account === 'object') {
+    const record = account as Record<string, unknown>;
+    if (typeof record.type === 'string') type = record.type;
+    if (typeof record.login === 'string') login = record.login;
+  }
+  if (type === 'Organization' && login) {
+    return `https://github.com/organizations/${login}/settings/installations/${installationId}`;
+  }
+  return `https://github.com/settings/installations/${installationId}`;
 }

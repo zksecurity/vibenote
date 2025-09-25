@@ -8,6 +8,7 @@ export type RepoMetadata = {
   repositorySelection: 'all' | 'selected' | null;
   defaultBranch: string | null;
   rateLimited?: boolean;
+  manageUrl?: string | null;
 };
 
 function headers(auth: boolean): HeadersInit {

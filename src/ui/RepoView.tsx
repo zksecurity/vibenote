@@ -111,6 +111,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   } | null>(null);
   const [publicRateLimited, setPublicRateLimited] = useState(false);
   const [, setPublicMetaError] = useState<string | null>(null);
+  const manageUrl = repoMeta?.manageUrl ?? null;
   const buildConfigWithMeta = () => {
     const cfg: RemoteConfig = buildRemoteConfig(slug);
     const branch = repoMeta?.defaultBranch ?? publicRepoMeta?.defaultBranch;
@@ -514,6 +515,21 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     } catch (e) {
       console.error(e);
       setSyncMsg('Failed to sign in');
+    }
+  };
+
+  const openAccessSetup = async () => {
+    try {
+      if (manageUrl && repoMeta?.repoSelected === false) {
+        window.open(manageUrl, '_blank', 'noopener');
+        return;
+      }
+      if (route.kind !== 'repo') return;
+      const url = await apiGetInstallUrl(route.owner, route.repo, window.location.href);
+      window.open(url, '_blank', 'noopener');
+    } catch (e) {
+      console.error(e);
+      setSyncMsg('Failed to open GitHub');
     }
   };
 
@@ -1089,24 +1105,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                       , or grant access to all repositories (not recommended).
                     </p>
                     {sessionToken ? (
-                      <button
-                        className="btn primary"
-                        onClick={() => {
-                          (async () => {
-                            try {
-                              const url = await apiGetInstallUrl(
-                                route.owner,
-                                route.repo,
-                                window.location.href
-                              );
-                              window.open(url, '_blank', 'noopener');
-                            } catch (e) {
-                              console.error(e);
-                              setSyncMsg('Failed to open GitHub');
-                            }
-                          })();
-                        }}
-                      >
+                      <button className="btn primary" onClick={openAccessSetup}>
                         Get Read/Write Access
                       </button>
                     ) : (
@@ -1139,25 +1138,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                           You can view, but not edit files in this repository.
                         </span>
                         {sessionToken ? (
-                          <button
-                            className="btn primary"
-                            onClick={() => {
-                              (async () => {
-                                if (route.kind !== 'repo') return;
-                                try {
-                                  const url = await apiGetInstallUrl(
-                                    route.owner,
-                                    route.repo,
-                                    window.location.href
-                                  );
-                                  window.open(url, '_blank', 'noopener');
-                                } catch (e) {
-                                  console.error(e);
-                                  setSyncMsg('Failed to open GitHub');
-                                }
-                              })();
-                            }}
-                          >
+                          <button className="btn primary" onClick={openAccessSetup}>
                             Get Write Access
                           </button>
                         ) : null}
