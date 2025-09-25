@@ -4,11 +4,11 @@ Read both README.md and DESIGN.md for product and architecture context. This doc
 
 Development Setup
 
-- Prereqs: Node 18+, npm
+- Prereqs: Node 22+, npm
 - Install: `npm install`
 - Run dev (UI + API): `npm start` (Vercel dev on `http://localhost:3000`)
-- Env: copy `.env.example` → `.env` and set `GITHUB_CLIENT_ID` (GitHub OAuth App Client ID)
-- Routing: `vercel dev` runs Vite on the same origin and serves `/api/*` via its router. Vite’s `/api` proxy is automatically disabled in this mode (see `vite.config.ts`).
+- Env: copy `.env.example` → `.env` and fill the GitHub App variables (`GITHUB_APP_*`, `SESSION_JWT_SECRET`, `ALLOWED_ORIGINS`, etc.). `GITHUB_CLIENT_ID` is optional legacy support for Device Flow.
+- Routing: `vercel dev` runs Vite on the same origin and serves `/api/*` via the Vercel router. No manual proxy setup is required.
 
 Local dev
 
@@ -16,11 +16,11 @@ Local dev
   - Opens `http://localhost:3000/` for the UI; `/api/*` served by Vercel functions.
 - Node runs TypeScript directly (2025+): use `node path/to/file.ts` for quick scripts; no ts-node/tsx needed.
 
-Local Auth (Device Flow)
+Local Auth (GitHub App)
 
-- Click “Connect GitHub” → DeviceCodeModal shows the code; click “Open GitHub” and paste the code.
-- The client polls `/api/github/device-token` and stores the user token locally on success.
-- Tokens are stored in `localStorage` (MVP). Do not log or persist them elsewhere.
+- “Connect GitHub” opens the GitHub App popup flow (`/v1/auth/github/*`).
+- The backend signs JWT sessions; no GitHub tokens persist in localStorage.
+- Legacy Device Flow endpoints live in `api/_legacy_github/_*.ts` (prefixed with `_` so Vercel ignores them). Only revive them intentionally if you bring back Device Flow.
 
 Deploying to Vercel
 
@@ -51,8 +51,8 @@ UI/UX Conventions
 
 Auth Modes
 
-- Default: OAuth Device Flow via serverless proxy; requests `repo` scope.
-- Planned: GitHub App (selected repos, least‑privilege) — see DESIGN.md.
+- Default: GitHub App popup (per repo/owner install).
+- Legacy: Device Flow (disabled by default; endpoints kept in `_legacy_github`).
 
 Security Notes
 
@@ -103,85 +103,38 @@ Agent Conventions
 
 ## Backend Deployment (GitHub App)
 
-The standalone backend in `server/` (see `OAUTH_REFACTOR.md`) provides the GitHub App authentication endpoints and repo/file/commit API after migrating away from the Device Flow.
+We share the same backend logic (`server/src/api.ts`) across two deployment targets:
 
-Overview
+1. **Serverless API (Vercel `/api`)** — primary deployment. Configure the GitHub App env vars in Vercel. The Hobby plan allows at most **12** functions per deployment; we currently ship 11 active routes. Legacy Device Flow handlers live in `api/_legacy_github/_*.ts` so they don’t count toward the limit.
+2. **Express server (server/src/index.ts)** — the PM2/NGINX VPS setup in `docs/DEPLOYMENT.md`. Keep it as fallback or when we need stateful features later.
 
-- Express server (TypeScript) – entrypoint: `server/src/index.ts`
-- No database; all state is transient (JWT sessions, installation lookups via GitHub API)
-- Installation tokens minted on demand; never expose GitHub tokens directly to the client
-- CORS allow‑list driven by `ALLOWED_ORIGINS`
+Switch between them by changing `VIBENOTE_API_BASE` (and keeping the env variables in sync).
 
-Endpoints (prefix `/v1`)
+See DEPLOYMENT.md for instructions to deploy the backend (mostly automatic with Vercel, based on scripts in this repo on a VPS.)
 
-- Health: `GET /v1/healthz`
-- Auth popup: `GET /v1/auth/github/start`, `GET /v1/auth/github/callback`
-- App install: `GET /v1/app/install-url`, `GET /v1/app/setup`
-- Repo metadata: `GET /v1/repos/:owner/:repo/metadata`
-- Tree listing: `GET /v1/repos/:owner/:repo/tree?ref=<branch>`
-- File fetch: `GET /v1/repos/:owner/:repo/file?path=...&ref=<branch>`
-- Commit (write): `POST /v1/repos/:owner/:repo/commit` (JSON body; session required)
-- Webhooks placeholder: `POST /v1/webhooks/github` (currently no‑op)
+### API surface (common routes)
 
-Environment Variables
-See `.env.example` for reference. Required for production:
+- `GET /v1/healthz`
+- `GET /v1/auth/github/start`
+- `GET /v1/auth/github/callback`
+- `GET /v1/app/install-url`
+- `GET /v1/app/setup`
+- `GET /v1/repos/:owner/:repo/metadata`
+- `GET /v1/repos/:owner/:repo/tree`
+- `GET /v1/repos/:owner/:repo/file`
+- `GET /v1/repos/:owner/:repo/blob/:sha`
+- `POST /v1/repos/:owner/:repo/commit`
+- `POST /v1/webhooks/github` (placeholder)
 
-```
-GITHUB_APP_ID=            # numeric app id
-GITHUB_APP_SLUG=          # app slug
-GITHUB_OAUTH_CLIENT_ID=   # app OAuth client id
-GITHUB_OAUTH_CLIENT_SECRET=
-GITHUB_APP_PRIVATE_KEY_BASE64= # base64 of the PEM (or set GITHUB_APP_PRIVATE_KEY_PATH or GITHUB_APP_PRIVATE_KEY)
-SESSION_JWT_SECRET=       # long random string
-ALLOWED_ORIGINS=https://your-frontend.example
-PORT=8787
-```
+### Environment variables
 
-Optional:
+See `.env.example` for a detailed breakdown.
 
-- `GITHUB_WEBHOOK_SECRET` (future webhook validation)
+### Security & Ops quick notes
 
-Private Key Options
-Provide exactly one of:
+- Never expose the GitHub App private key; keep it on the server / Vercel secrets only.
+- Ensure frontend origins are exactly listed in `ALLOWED_ORIGINS`.
+- 403s on commit typically mean the app isn’t installed for that repo; direct users to the manage URL in metadata.
+- Rotate `SESSION_JWT_SECRET` if compromised (all sessions invalidate).
 
-- `GITHUB_APP_PRIVATE_KEY_BASE64` – base64 of full PEM file
-- `GITHUB_APP_PRIVATE_KEY_PATH` – absolute path to PEM on disk
-- `GITHUB_APP_PRIVATE_KEY` – inline PEM with literal `\n` newlines
-
-Building / Running
-Node 22+ can execute TypeScript directly; we rely on that (no ts-node / tsx).
-
-PM2 (recommended persistent process):
-
-```
-pm2 start ecosystem.config.cjs --env production
-pm2 save
-pm2 status
-```
-
-See `ecosystem.config.cjs` for settings.
-
-```
-
-Security Notes
-- Never expose the private key outside the server VM or container.
-- Keep the server behind a reverse proxy (rate limiting, TLS termination).
-- Rotate `SESSION_JWT_SECRET` if compromised (invalidates sessions).
-- Lock down inbound firewall to only 80/443 (not the internal 8787 port directly) if possible.
-
-Frontend Integration
-- Point the UI to the backend via a runtime config variable (planned: `VIBENOTE_API_BASE`).
-- Ensure the frontend origin (scheme+host+port) is listed verbatim in `ALLOWED_ORIGINS`.
-
-Troubleshooting
-- 400 @ `/v1/auth/github/callback`: GitHub App callback URL mismatch or expired state token.
-- CORS error: Origin not exactly (string‑equal) listed in `ALLOWED_ORIGINS`.
-- 403 commit: App not installed, or repo not selected in a selected‑repos installation.
-- Unknown default branch: App not installed and public metadata fetch failed (private repo) → user must install app.
-
-Future Enhancements (Not Yet Implemented)
-- Webhook signature verification + event handling (installation, push) for caching.
-- Rate limiting / request logging middleware.
-- Optional ETag/If-None-Match caching for tree and file responses.
-
-```
+Future improvements: webhook validation/handling, request logging, smarter caching.

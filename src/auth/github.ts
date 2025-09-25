@@ -1,3 +1,5 @@
+// LEGACY FILE - device token flow is not currently used in the app
+
 /// <reference types="vite/client" />
 // GitHub OAuth device flow helper functions.
 // Calls Vercel serverless functions (api/github/*) to avoid browser CORS issues.
