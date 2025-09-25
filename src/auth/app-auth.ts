@@ -97,9 +97,11 @@ export async function ensureAppUserAvatarCached(): Promise<AppUser | null> {
 function getApiBase(): string {
   // Try Vite-style env, fallback to global, then default
   const env = (import.meta as any).env || {};
-  const fromVite = env.VIBENOTE_API_BASE || env.VITE_VIBENOTE_API_BASE;
-  const fromGlobal = (globalThis as any).VIBENOTE_API_BASE;
-  return String(fromVite || fromGlobal || 'https://api.vibenote.dev').replace(/\/$/, '');
+  const fromVite: string | undefined = env.VITE_VIBENOTE_API_BASE || env.VIBENOTE_API_BASE;
+  const fromGlobal: string | undefined = (globalThis as any).VIBENOTE_API_BASE;
+  let base = fromVite || fromGlobal;
+  if (!base) throw Error('VIBENOTE_API_BASE not set');
+  return String(fromVite || fromGlobal || 'https://api.example.dev').replace(/\/$/, '');
 }
 
 async function fetchAvatarDataUrl(avatarUrl: string): Promise<string | null> {
