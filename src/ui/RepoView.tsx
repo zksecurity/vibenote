@@ -963,16 +963,18 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
               <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
                 <div className="sidebar-header">
                   <div className="sidebar-title">
-                    <span>Notes</span>
-                    <span className="note-count">{noteList.length}</span>
+                    <div className="sidebar-title-main">
+                      <span>Notes</span>
+                      <span className="note-count">{noteList.length}</span>
+                    </div>
+                    <button
+                      className="btn icon only-mobile"
+                      onClick={() => setSidebarOpen(false)}
+                      aria-label="Close notes"
+                    >
+                      <CloseIcon />
+                    </button>
                   </div>
-                  <button
-                    className="btn icon only-mobile"
-                    onClick={() => setSidebarOpen(false)}
-                    aria-label="Close notes"
-                  >
-                    <CloseIcon />
-                  </button>
                 </div>
                 {canEdit && (
                   <div className="sidebar-actions">
