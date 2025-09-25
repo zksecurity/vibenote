@@ -1,4 +1,22 @@
-VibeNote Backend Deployment (NGINX + PM2 + TLS)
+VibeNote Backend Deployment
+
+You can run the GitHub App backend either on Vercel (serverless) or on a self-managed VPS. Both use the same environment variables and code paths. Pick the option that suits your needs, or keep the VPS setup as a fallback.
+
+---
+
+## Option A: Vercel serverless API
+
+1. **Create/Select a Vercel project** pointing at this repository (the project root contains both the frontend and the `/api` backend handlers).
+
+2. **Set environment variables** in Vercel (Preview + Production): See `.env.example`
+
+3. **Deploy** via the Vercel dashboard or CLI. The routes are exposed under `/api/v1/...` and the health check is `/api/v1/healthz`.
+
+4. **Switch the frontend** by updating `VIBENOTE_API_BASE` in Vercel’s project env (and locally, if needed) to point at the serverless API (e.g. `https://<your-app>.vercel.app/api`). No further code changes are needed.
+
+---
+
+## Option B: VPS backend (NGINX + PM2 + TLS)
 
 This guide makes deploying the backend repeatable with npm scripts. It assumes Ubuntu/Debian with NGINX.
 
