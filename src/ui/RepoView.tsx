@@ -520,10 +520,12 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
 
   const openAccessSetup = async () => {
     try {
+      // the app is already installed and we go straight into the right user's settings to manage repos
       if (manageUrl && repoMeta?.repoSelected === false) {
         window.open(manageUrl, '_blank', 'noopener');
         return;
       }
+      // otherwise, we build a link that will first prompt to select the organization/user to install in
       if (route.kind !== 'repo') return;
       const url = await apiGetInstallUrl(route.owner, route.repo, window.location.href);
       window.open(url, '_blank', 'noopener');
