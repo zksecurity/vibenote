@@ -967,7 +967,10 @@ textarea:focus-visible {
 @media (min-width: 960px) {
   .repo-switcher-panel {
     left: calc(320px + 1px + clamp(20px, 6vw, 56px));
-    width: min(560px, calc(100vw - (320px + 1px + clamp(20px, 6vw, 56px)) - clamp(20px, 6vw, 56px)));
+    width: min(
+      560px,
+      calc(100vw - (320px + 1px + clamp(20px, 6vw, 56px)) - clamp(20px, 6vw, 56px))
+    );
   }
 
   .align-workspace {
