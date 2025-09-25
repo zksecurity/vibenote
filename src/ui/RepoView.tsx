@@ -65,8 +65,14 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     return firstId ? store.loadNote(firstId) : null;
   });
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [selection, setSelection] = useState<{ kind: 'folder'; dir: string } | { kind: 'file'; id: string } | null>(null);
-  const [newEntry, setNewEntry] = useState<{ kind: 'file' | 'folder'; parentDir: string; key: number } | null>(null);
+  const [selection, setSelection] = useState<
+    { kind: 'folder'; dir: string } | { kind: 'file'; id: string } | null
+  >(null);
+  const [newEntry, setNewEntry] = useState<{
+    kind: 'file' | 'folder';
+    parentDir: string;
+    key: number;
+  } | null>(null);
   const [token, setToken] = useState<string | null>(getStoredToken());
   const [showConfig, setShowConfig] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -74,22 +80,16 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   const [device, setDevice] = useState<import('../auth/github').DeviceCodeResponse | null>(null);
   const [ownerLogin, setOwnerLogin] = useState<string | null>(null);
   const [linked, setLinked] = useState(() => slug !== 'new' && isRepoLinked(slug));
-  const [user, setUser] = useState<{ login: string; name?: string; avatar_url?: string } | null>(
-    null
-  );
+  const [user, setUser] = useState<{ login: string; name?: string; avatar_url?: string } | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [toast, setToast] = useState<{ text: string; href?: string } | null>(null);
   const [repoModalMode, setRepoModalMode] = useState<'onboard' | 'manage'>('manage');
   const [repoModalError, setRepoModalError] = useState<string | null>(null);
   const [showSwitcher, setShowSwitcher] = useState(false);
-  const [accessState, setAccessState] = useState<'unknown' | 'reachable' | 'unreachable'>(
-    'unknown'
-  );
+  const [accessState, setAccessState] = useState<'unknown' | 'reachable' | 'unreachable'>('unknown');
   const [refreshTick, setRefreshTick] = useState(0);
   const initialPullRef = useState({ done: false })[0];
-  const [autosync, setAutosync] = useState<boolean>(() =>
-    slug !== 'new' ? isAutosyncEnabled(slug) : false
-  );
+  const [autosync, setAutosync] = useState<boolean>(() => (slug !== 'new' ? isAutosyncEnabled(slug) : false));
   const autoSyncTimerRef = useState<{ id: number | null }>({ id: null })[0];
   const autoSyncBusyRef = useState<{ busy: boolean }>({ busy: false })[0];
   const AUTO_SYNC_MIN_INTERVAL_MS = 60_000; // not too often
@@ -332,12 +332,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     }
   };
 
-  const onConfigSubmit = async (cfg: {
-    owner: string;
-    repo: string;
-    branch: string;
-    autosync: boolean;
-  }) => {
+  const onConfigSubmit = async (cfg: { owner: string; repo: string; branch: string; autosync: boolean }) => {
     setSyncMsg(null);
     setRepoModalError(null);
     setSyncing(true);
@@ -365,8 +360,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
       let existed = await repoExists(targetOwner, targetRepo);
       if (!existed) {
         if (!currentLogin || currentLogin !== targetOwner) {
-          const msg =
-            'Repository not found. VibeNote can only auto-create repositories under your username.';
+          const msg = 'Repository not found. VibeNote can only auto-create repositories under your username.';
           setRepoModalError(msg);
           setSyncMsg(msg);
           return;
@@ -527,18 +521,8 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     >
       <path d="M2.5 8a5.5 5.5 0 0 1 9-3.9" strokeWidth="1.4" strokeLinecap="round" />
       <path d="M13.5 8a5.5 5.5 0 0 1-9 3.9" strokeWidth="1.4" strokeLinecap="round" />
-      <path
-        d="M11.5 2.5 13.5 5l-3 .5"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M4.5 13.5 2.5 11l3-.5"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+      <path d="M11.5 2.5 13.5 5l-3 .5" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M4.5 13.5 2.5 11l3-.5" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 
@@ -788,12 +772,12 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                 <h2>Can’t access this repository</h2>
                 <p>
                   You don’t have permission to view{' '}
-                  <strong>{route.kind === 'repo' ? `${route.owner}/${route.repo}` : ''}</strong>{' '}
-                  with the current GitHub device token.
+                  <strong>{route.kind === 'repo' ? `${route.owner}/${route.repo}` : ''}</strong> with the
+                  current GitHub device token.
                 </p>
                 <p>
-                  Sign out and sign in with a token that has access, or switch to a different
-                  repository from the header.
+                  Sign out and sign in with a token that has access, or switch to a different repository from
+                  the header.
                 </p>
               </div>
             </div>
@@ -834,39 +818,46 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                 </div>
               </div>
               <div className="sidebar-body">
-              <FileTree
-                files={notes.map((n) => ({ id: n.id, name: n.title || 'Untitled', path: n.path, dir: (n.dir as string) || '' })) as FileEntry[]}
-                folders={folders}
-                activeId={activeId}
-                onSelectionChange={(sel) => setSelection(sel as any)}
-                onSelectFile={(id) => {
-                  setActiveId(id);
-                  setSidebarOpen(false);
-                }}
-                onRenameFile={onRename}
-                onDeleteFile={onDelete}
-                onCreateFile={(dir, name) => {
-                  let id = store.createNote(name, '', dir);
-                  setNotes(store.listNotes());
-                  setFolders(store.listFolders());
-                  setActiveId(id);
-                  scheduleAutoSync();
-                  return id;
-                }}
-                onCreateFolder={(parentDir, name) => {
-                  try {
-                    store.createFolder(parentDir, name);
-                    setFolders(store.listFolders());
-                  } catch (e) {
-                    console.error(e);
-                    setSyncMsg('Invalid folder name.');
+                <FileTree
+                  files={
+                    notes.map((n) => ({
+                      id: n.id,
+                      name: n.title || 'Untitled',
+                      path: n.path,
+                      dir: (n.dir as string) || '',
+                    })) as FileEntry[]
                   }
-                }}
-                onRenameFolder={onRenameFolder}
-                onDeleteFolder={onDeleteFolder}
-                newEntry={newEntry}
-                onFinishCreate={() => setNewEntry(null)}
-              />
+                  folders={folders}
+                  activeId={activeId}
+                  onSelectionChange={(sel) => setSelection(sel as any)}
+                  onSelectFile={(id) => {
+                    setActiveId(id);
+                    setSidebarOpen(false);
+                  }}
+                  onRenameFile={onRename}
+                  onDeleteFile={onDelete}
+                  onCreateFile={(dir, name) => {
+                    let id = store.createNote(name, '', dir);
+                    setNotes(store.listNotes());
+                    setFolders(store.listFolders());
+                    setActiveId(id);
+                    scheduleAutoSync();
+                    return id;
+                  }}
+                  onCreateFolder={(parentDir, name) => {
+                    try {
+                      store.createFolder(parentDir, name);
+                      setFolders(store.listFolders());
+                    } catch (e) {
+                      console.error(e);
+                      setSyncMsg('Invalid folder name.');
+                    }
+                  }}
+                  onRenameFolder={onRenameFolder}
+                  onDeleteFolder={onDeleteFolder}
+                  newEntry={newEntry}
+                  onFinishCreate={() => setNewEntry(null)}
+                />
               </div>
               {route.kind === 'repo' && linked ? (
                 <div className="repo-autosync-toggle">
@@ -902,8 +893,8 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                     <h2>Welcome to VibeNote</h2>
                     <p>Select a note from the sidebar or create a new one to get started.</p>
                     <p>
-                      To sync with GitHub, connect your account and link a repository. Once
-                      connected, use <strong>Sync now</strong> anytime to pull and push updates.
+                      To sync with GitHub, connect your account and link a repository. Once connected, use{' '}
+                      <strong>Sync now</strong> anytime to pull and push updates.
                     </p>
                     {syncMsg && <p className="empty-state-status">{syncMsg}</p>}
                   </div>
