@@ -27,6 +27,18 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    if (route.kind === 'repo') {
+      document.title = `${route.owner}/${route.repo}`;
+      return;
+    }
+    if (route.kind === 'new') {
+      document.title = 'VibeNote';
+      return;
+    }
+    document.title = 'VibeNote';
+  }, [route]);
+
+  useEffect(() => {
     if (route.kind === 'home') {
       const recentEntries = listRecentRepos();
       if (recentEntries.length === 0) {
