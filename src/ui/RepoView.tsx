@@ -487,10 +487,31 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
       store.renameNote(id, title);
       setNotes(store.listNotes());
       setFolders(store.listFolders());
+      setDoc((prev) => {
+        if (!prev || prev.id !== id) return prev;
+        return store.loadNote(id);
+      });
       scheduleAutoSync();
     } catch (e) {
       console.error(e);
       setSyncMsg('Invalid title. Avoid / and control characters.');
+    }
+  };
+
+  const onMove = (id: string, dir: string) => {
+    if (!canEdit) return;
+    try {
+      store.moveNoteToDir(id, dir);
+      setNotes(store.listNotes());
+      setFolders(store.listFolders());
+      setDoc((prev) => {
+        if (!prev || prev.id !== id) return prev;
+        return store.loadNote(id);
+      });
+      scheduleAutoSync();
+    } catch (e) {
+      console.error(e);
+      setSyncMsg('Unable to move note.');
     }
   };
 
@@ -1041,6 +1062,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                       setSidebarOpen(false);
                     }}
                     onRenameFile={canEdit ? onRename : () => undefined}
+                    onMoveFile={canEdit ? onMove : () => undefined}
                     onDeleteFile={canEdit ? onDelete : () => undefined}
                     onCreateFile={
                       canEdit
