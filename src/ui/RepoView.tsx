@@ -14,6 +14,9 @@ import {
   type NoteMeta,
   type NoteDoc,
   clearAllLocalData,
+  markSynced,
+  updateNoteText,
+  pruneStorageFootprint,
 } from '../storage/local';
 import { clearToken } from '../auth/github';
 import {
@@ -162,6 +165,10 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     setPublicRateLimited(false);
     setPublicMetaError(null);
   }, [slug]);
+
+  useEffect(() => {
+    pruneStorageFootprint({ activeSlug: slug, activeNoteId: activeId });
+  }, [slug, activeId]);
 
   useEffect(() => {
     if (route.kind !== 'repo') return;
@@ -356,6 +363,31 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     if (!canEdit) return;
     setDoc(activeId ? store.loadNote(activeId) : null);
   }, [store, activeId, canEdit]);
+
+  useEffect(() => {
+    if (!canEdit) return;
+    if (!doc || doc.isPruned !== true) return;
+    if (route.kind !== 'repo') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const cfg = buildConfigWithMeta();
+        const remote = await pullNote(cfg, doc.path);
+        if (!remote || cancelled) return;
+        updateNoteText(slug, doc.id, remote.text);
+        markSynced(slug, doc.id, { remoteSha: remote.sha, syncedHash: hashText(remote.text) });
+        if (cancelled) return;
+        setDoc(store.loadNote(doc.id));
+        setNotes(store.listNotes());
+      } catch (err) {
+        console.error(err);
+        if (!cancelled) setSyncMsg((prev) => prev ?? 'Failed to load note from GitHub');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [doc?.id, doc?.isPruned, doc?.path, canEdit, route.kind, slug, store, buildConfigWithMeta]);
 
   // Cross-tab coherence: listen to localStorage changes for this repo slug
   useEffect(() => {

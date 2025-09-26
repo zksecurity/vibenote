@@ -266,7 +266,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
     const lastRemoteSha = doc.lastRemoteSha;
     if (e.sha === lastRemoteSha) {
       // Remote unchanged since base
-      const changedLocally = doc.lastSyncedHash !== hashText(doc.text || '');
+      const changedLocally = doc.isPruned !== true && doc.lastSyncedHash !== hashText(doc.text || '');
       if (changedLocally) {
         const newSha = await putFile(
           config,
@@ -283,7 +283,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       if (!rf) continue;
       const base = lastRemoteSha ? await fetchBlob(config, lastRemoteSha) : '';
       const localText = doc.text || '';
-      if (doc.lastSyncedHash !== hashText(localText)) {
+      if (doc.isPruned !== true && doc.lastSyncedHash !== hashText(localText)) {
         // both changed → merge
         const mergedText = mergeMarkdown(base ?? '', localText, rf.text);
         if (mergedText !== localText) {
@@ -316,7 +316,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       const local = findByPath(storeSlug, meta.path);
       if (!local) continue;
       const { id, doc } = local;
-      const changedLocally = doc.lastSyncedHash !== hashText(doc.text || '');
+      const changedLocally = doc.isPruned !== true && doc.lastSyncedHash !== hashText(doc.text || '');
       if (changedLocally) {
         // Restore to remote
         const newSha = await putFile(config, { path: doc.path, text: doc.text }, 'vibenote: restore note');

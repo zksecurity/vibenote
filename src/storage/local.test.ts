@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'vitest';
-import { LocalStore } from './local';
+import { LocalStore, pruneRepoStorage, hashText, markSynced } from './local';
 
 class MemoryStorage implements Storage {
   private store = new Map<string, string>();
@@ -57,5 +57,42 @@ describe('LocalStore cross-tab resilience', () => {
     // LocalStorage should still be without id1
     const c = new LocalStore(slug, { seedWelcome: false });
     expect(c.listNotes().some((n) => n.id === id1)).toBe(false);
+  });
+});
+
+describe('pruneRepoStorage', () => {
+  beforeEach(() => {
+    globalAny.localStorage = new MemoryStorage();
+  });
+
+  const indexKeyFor = (slug: string) => `vibenote:repo:${encodeURIComponent(slug)}:index`;
+  const noteKeyFor = (slug: string, id: string) => `vibenote:repo:${encodeURIComponent(slug)}:note:${id}`;
+
+  test('prunes stale synced notes and preserves unsynced text', () => {
+    let slug = 'user/repo';
+    let store = new LocalStore(slug, { seedWelcome: false });
+    let syncedId = store.createNote('A', 'alpha content');
+    let unsyncedId = store.createNote('B', 'beta content');
+
+    markSynced(slug, syncedId, { remoteSha: 'sha-alpha', syncedHash: hashText('alpha content') });
+
+    let past = Date.now() - 1000 * 60 * 60 * 24 * 60;
+    let syncedDoc = store.loadNote(syncedId);
+    if (!syncedDoc) throw new Error('synced doc missing');
+    let updatedDoc = { ...syncedDoc, updatedAt: past };
+    globalAny.localStorage?.setItem(noteKeyFor(slug, syncedId), JSON.stringify(updatedDoc));
+    let metas = store.listNotes();
+    let updatedMetas = metas.map((meta) => (meta.id === syncedId ? { ...meta, updatedAt: past } : meta));
+    globalAny.localStorage?.setItem(indexKeyFor(slug), JSON.stringify(updatedMetas));
+
+    pruneRepoStorage(slug, { keepRecent: 0, maxAgeMs: 0, maxChars: 0 });
+
+    let prunedDoc = store.loadNote(syncedId);
+    expect(prunedDoc?.isPruned).toBe(true);
+    expect(prunedDoc?.text).toBe('');
+
+    let retainedDoc = store.loadNote(unsyncedId);
+    expect(retainedDoc?.isPruned).not.toBe(true);
+    expect(retainedDoc?.text).toBe('beta content');
   });
 });

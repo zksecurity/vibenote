@@ -11,6 +11,7 @@ export type NoteDoc = NoteMeta & {
   text: string;
   lastRemoteSha?: string;
   lastSyncedHash?: string;
+  isPruned?: boolean;
 };
 
 export { debugLog };
@@ -26,6 +27,9 @@ const FOLDERS_SUFFIX = 'folders';
 const LEGACY_INDEX_KEY = legacyKey('index');
 const LEGACY_TOMBSTONES_KEY = legacyKey('tombstones');
 const LEGACY_NOTE_PREFIX = legacyKey('note');
+const PRUNE_KEEP_RECENT_DEFAULT = 20;
+const PRUNE_MAX_AGE_MS_DEFAULT = 1000 * 60 * 60 * 24 * 30;
+const PRUNE_MAX_CHARS_DEFAULT = 500_000;
 
 const WELCOME_NOTE = `# 👋 Welcome to VibeNote
 
@@ -57,6 +61,13 @@ type LocalStoreOptions = {
   seedWelcome?: boolean;
   notesDir?: string;
 };
+
+function stripPrunedFlag(doc: NoteDoc): NoteDoc {
+  if (doc.isPruned === undefined) return doc;
+  let next: NoteDoc = { ...doc };
+  delete next.isPruned;
+  return next;
+}
 
 export class LocalStore {
   private slug: string;
@@ -117,7 +128,8 @@ export class LocalStore {
     let doc = this.loadNote(id);
     if (!doc) return;
     let updatedAt = Date.now();
-    let next: NoteDoc = { ...doc, text, updatedAt };
+    let updatedDoc: NoteDoc = { ...doc, text, updatedAt };
+    let next = stripPrunedFlag(updatedDoc);
     localStorage.setItem(this.noteKey(id), JSON.stringify(next));
     debugLog(this.slug, 'saveNote', { id, path: doc.path, updatedAt });
     this.touchIndex(id, { updatedAt });
@@ -561,7 +573,8 @@ export function updateNoteText(slug: string, id: string, text: string) {
     return;
   }
   let updatedAt = Date.now();
-  let next: NoteDoc = { ...doc, text, updatedAt };
+  let updatedDoc: NoteDoc = { ...doc, text, updatedAt };
+  let next = stripPrunedFlag(updatedDoc);
   localStorage.setItem(key, JSON.stringify(next));
   touchIndexUpdatedAt(slug, id, updatedAt);
   debugLog(slug, 'updateNoteText', { id, updatedAt });
@@ -872,6 +885,119 @@ export function clearAllLocalData() {
     if (key.startsWith(`${NS}:`)) remove.push(key);
   }
   for (const key of remove) localStorage.removeItem(key);
+}
+
+type PruneRepoOptions = {
+  keepRecent?: number;
+  maxAgeMs?: number;
+  maxChars?: number;
+  protectIds?: Iterable<string>;
+};
+
+type PruneCandidate = {
+  meta: NoteMeta;
+  key: string;
+  doc: NoteDoc;
+  length: number;
+  localHash: string;
+};
+
+function collectIds(ids?: Iterable<string>): Set<string> {
+  let set = new Set<string>();
+  if (!ids) return set;
+  for (let id of ids) {
+    if (typeof id === 'string' && id !== '') set.add(id);
+  }
+  return set;
+}
+
+function canPrune(candidate: PruneCandidate): boolean {
+  if (candidate.doc.isPruned === true) return false;
+  if (!candidate.doc.lastRemoteSha) return false;
+  if (candidate.doc.lastSyncedHash === undefined) return false;
+  return candidate.doc.lastSyncedHash === candidate.localHash;
+}
+
+function pruneCandidate(item: PruneCandidate) {
+  let trimmed: NoteDoc = { ...item.doc, text: '', isPruned: true };
+  localStorage.setItem(item.key, JSON.stringify(trimmed));
+  item.doc = trimmed;
+  item.length = 0;
+  item.localHash = hashText('');
+}
+
+export function pruneRepoStorage(slug: string, options: PruneRepoOptions = {}) {
+  if (!slug || slug === 'new') return;
+  let index = loadIndexForSlug(slug);
+  if (index.length === 0) return;
+  let keepRecent = options.keepRecent ?? PRUNE_KEEP_RECENT_DEFAULT;
+  let maxAgeMs = options.maxAgeMs ?? PRUNE_MAX_AGE_MS_DEFAULT;
+  let maxChars = options.maxChars ?? PRUNE_MAX_CHARS_DEFAULT;
+  let protect = collectIds(options.protectIds);
+  let sorted = index.slice().sort((a, b) => b.updatedAt - a.updatedAt);
+  let keep = new Set<string>();
+  for (let i = 0; i < sorted.length && i < keepRecent; i++) {
+    let meta = sorted[i];
+    if (!meta) continue;
+    keep.add(meta.id);
+  }
+  for (let id of protect) keep.add(id);
+
+  let candidates: PruneCandidate[] = [];
+  for (let meta of sorted) {
+    let key = `${repoKey(slug, 'note')}:${meta.id}`;
+    let raw = localStorage.getItem(key);
+    if (!raw) continue;
+    let doc: NoteDoc;
+    try {
+      doc = JSON.parse(raw) as NoteDoc;
+    } catch {
+      continue;
+    }
+    let length = doc.text ? doc.text.length : 0;
+    let localHash = hashText(doc.text || '');
+    candidates.push({ meta, key, doc, length, localHash });
+  }
+
+  let now = Date.now();
+  for (let item of candidates) {
+    if (keep.has(item.meta.id)) continue;
+    if (now - item.meta.updatedAt <= maxAgeMs) continue;
+    if (!canPrune(item)) continue;
+    pruneCandidate(item);
+  }
+
+  let total = 0;
+  for (let item of candidates) {
+    if (item.doc.isPruned === true) continue;
+    total += item.length;
+  }
+
+  if (total <= maxChars) return;
+
+  for (let i = candidates.length - 1; i >= 0 && total > maxChars; i--) {
+    let item = candidates[i];
+    if (!item) continue;
+    if (keep.has(item.meta.id)) continue;
+    if (!canPrune(item)) continue;
+    let removed = item.length;
+    pruneCandidate(item);
+    total -= removed;
+  }
+}
+
+export function pruneStorageFootprint(options: { activeSlug?: string; activeNoteId?: string | null } = {}) {
+  let slugs = listKnownRepoSlugs();
+  let activeSlug = options.activeSlug;
+  if (activeSlug && !slugs.includes(activeSlug)) slugs.push(activeSlug);
+  for (let slug of slugs) {
+    if (!slug || slug === 'new') continue;
+    let protect: string[] = [];
+    if (activeSlug && slug === activeSlug && options.activeNoteId) {
+      protect.push(options.activeNoteId);
+    }
+    pruneRepoStorage(slug, { protectIds: protect });
+  }
 }
 
 // --- Per-repository preferences ---
