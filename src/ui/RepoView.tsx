@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import { FileTree, type FileEntry } from './FileTree';
 import { Editor } from './Editor';
 import {
@@ -14,6 +14,10 @@ import {
   type NoteMeta,
   type NoteDoc,
   clearAllLocalData,
+  getLastActiveNoteId,
+  setLastActiveNoteId,
+  getExpandedFolders,
+  setExpandedFolders,
 } from '../storage/local';
 import { clearToken } from '../auth/github';
 import {
@@ -67,13 +71,16 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   const [notes, setNotes] = useState<NoteMeta[]>(() => store.listNotes());
   const [folders, setFolders] = useState<string[]>(() => store.listFolders());
   const [activeId, setActiveId] = useState<string | null>(() => {
-    let initialNotes = store.listNotes();
-    return initialNotes[0]?.id ?? null;
+    if (slug === 'new') return null;
+    const stored = getLastActiveNoteId(slug);
+    if (!stored) return null;
+    const available = store.listNotes();
+    return available.some((note) => note.id === stored) ? stored : null;
   });
-  const [doc, setDoc] = useState<NoteDoc | null>(() => {
-    let initialNotes = store.listNotes();
-    let firstId = initialNotes[0]?.id ?? null;
-    return firstId ? store.loadNote(firstId) : null;
+  const [doc, setDoc] = useState<NoteDoc | null>(null);
+  const [collapsedFolders, setCollapsedFoldersState] = useState<Record<string, boolean>>(() => {
+    let expanded = slug === 'new' ? [] : getExpandedFolders(slug);
+    return buildCollapsedMap(expanded, store.listFolders());
   });
   type ReadOnlyNote = { id: string; path: string; title: string; dir: string; sha?: string };
   const [readOnlyNotes, setReadOnlyNotes] = useState<ReadOnlyNote[]>([]);
@@ -134,6 +141,21 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   const autoSyncBusyRef = useState<{ busy: boolean }>({ busy: false })[0];
   const AUTO_SYNC_MIN_INTERVAL_MS = 60_000; // not too often
   const AUTO_SYNC_DEBOUNCE_MS = 10_000;
+  const previousSlugRef = useRef<string | null>(slug);
+
+  useEffect(() => {
+    if (slug === 'new') return;
+    if (activeId) return;
+    let stored = getLastActiveNoteId(slug);
+    if (!stored) return;
+    let exists = store.listNotes().some((n) => n.id === stored);
+    if (exists) setActiveId(stored);
+  }, [slug, store, activeId]);
+
+  useEffect(() => {
+    if (slug === 'new') return;
+    setLastActiveNoteId(slug, activeId ?? null);
+  }, [activeId, slug]);
 
   useEffect(() => {
     setLinked(slug !== 'new' && isRepoLinked(slug));
@@ -164,6 +186,38 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   }, [slug]);
 
   useEffect(() => {
+    if (previousSlugRef.current !== null && previousSlugRef.current !== slug) {
+      setActiveId(null);
+    }
+    previousSlugRef.current = slug;
+  }, [slug]);
+
+  useEffect(() => {
+    let expanded = slug === 'new' ? [] : getExpandedFolders(slug);
+    let next = buildCollapsedMap(expanded, store.listFolders());
+    setCollapsedFoldersState((prev) => (collapsedMapsEqual(prev, next) ? prev : next));
+  }, [slug, store]);
+
+  useEffect(() => {
+    setCollapsedFoldersState((prev) => {
+      let next = syncCollapsedWithFolders(prev, folders);
+      return collapsedMapsEqual(prev, next) ? prev : next;
+    });
+  }, [folders]);
+
+  useEffect(() => {
+    if (slug !== 'new') {
+      let expanded: string[] = [];
+      for (let dir in collapsedFolders) {
+        if (!Object.prototype.hasOwnProperty.call(collapsedFolders, dir)) continue;
+        if (dir === '') continue;
+        if (collapsedFolders[dir] === false) expanded.push(dir);
+      }
+      setExpandedFolders(slug, expanded);
+    }
+  }, [collapsedFolders, slug]);
+
+  useEffect(() => {
     if (route.kind !== 'repo') return;
     if (accessState !== 'reachable') return; // only record reachable repos
     onRecordRecent({
@@ -191,8 +245,16 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
           if (rf) files.push({ path: rf.path, text: rf.text, sha: rf.sha });
         }
         store.replaceWithRemote(files);
-        setNotes(store.listNotes());
-        setActiveId((prev) => prev ?? store.listNotes()[0]?.id ?? null);
+        let synced = store.listNotes();
+        setNotes(synced);
+        setActiveId((prev) => {
+          if (prev) return prev;
+          if (slug !== 'new') {
+            let stored = getLastActiveNoteId(slug);
+            if (stored && synced.some((n) => n.id === stored)) return stored;
+          }
+          return null;
+        });
         markRepoLinked(slug);
         setLinked(true);
         setSyncMsg('Loaded repository');
@@ -348,7 +410,8 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
     setFolders(nextFolders);
     setActiveId((prev) => {
       if (prev && nextNotes.some((n) => n.id === prev)) return prev;
-      return nextNotes[0]?.id ?? null;
+      if (prev) return nextNotes[0]?.id ?? null;
+      return prev;
     });
   }, [store, canEdit]);
 
@@ -374,7 +437,8 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
         setFolders(nextFolders);
         setActiveId((prev) => {
           if (prev && nextNotes.some((n) => n.id === prev)) return prev;
-          return nextNotes[0]?.id ?? null;
+          if (prev) return nextNotes[0]?.id ?? null;
+          return prev;
         });
         // Nudge dependent effects
         setRefreshTick((t) => t + 1);
@@ -1009,6 +1073,12 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
                     }
                     folders={folderList}
                     activeId={activeId}
+                    collapsed={collapsedFolders}
+                    onCollapsedChange={(next) =>
+                      setCollapsedFoldersState((prev) =>
+                        collapsedMapsEqual(prev, next) ? prev : syncCollapsedWithFolders(next, folders)
+                      )
+                    }
                     onSelectionChange={(sel) => setSelection(sel as any)}
                     onSelectFile={(id) => {
                       if (!canEdit) {
@@ -1254,4 +1324,40 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
       )}
     </div>
   );
+}
+
+function buildCollapsedMap(expanded: string[], folders: string[]): Record<string, boolean> {
+  let expandedSet = new Set(expanded.filter((dir) => typeof dir === 'string' && dir !== ''));
+  let map: Record<string, boolean> = { '': false };
+  for (let dir of folders) {
+    if (dir === '') continue;
+    map[dir] = expandedSet.has(dir) ? false : true;
+  }
+  for (let dir of expandedSet) {
+    if (!(dir in map)) map[dir] = false;
+  }
+  return map;
+}
+
+function syncCollapsedWithFolders(
+  current: Record<string, boolean>,
+  folders: string[]
+): Record<string, boolean> {
+  let expanded: string[] = [];
+  for (let dir in current) {
+    if (!Object.prototype.hasOwnProperty.call(current, dir)) continue;
+    if (dir === '') continue;
+    if (current[dir] === false) expanded.push(dir);
+  }
+  return buildCollapsedMap(expanded, folders);
+}
+
+function collapsedMapsEqual(a: Record<string, boolean>, b: Record<string, boolean>): boolean {
+  let keysA = Object.keys(a);
+  let keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+  for (let key of keysA) {
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
 }

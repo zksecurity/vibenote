@@ -15,8 +15,8 @@ type FileTreeProps = {
   files: FileEntry[];
   folders: string[];
   activeId: string | null;
-  collapsed?: Record<string, boolean>;
-  onCollapsedChange?: (next: Record<string, boolean>) => void;
+  collapsed: Record<string, boolean>;
+  onCollapsedChange: (next: Record<string, boolean>) => void;
   onSelectionChange?: (sel: Selection) => void;
   onSelectFile: (id: string) => void;
   onRenameFile: (id: string, newName: string) => void;
@@ -39,7 +39,6 @@ type FileNode = { kind: 'file'; id: string; name: string; dir: string; path: str
 
 export function FileTree(props: FileTreeProps) {
   let tree = useMemo(() => buildTree(props.files, props.folders), [props.files, props.folders]);
-  let [collapsed, setCollapsed] = useState<Record<string, boolean>>(props.collapsed ?? {});
   let [selected, setSelected] = useState<Selection>(null);
   let [editing, setEditing] = useState<Selection>(null);
   let [editText, setEditText] = useState('');
@@ -56,7 +55,7 @@ export function FileTree(props: FileTreeProps) {
         // root folder entry is not clickable label; still include for navigation to root folder
         list.push({ kind: 'folder', dir: node.dir, depth });
       }
-      const isCollapsed = collapsed[node.dir] === true;
+      const isCollapsed = node.dir !== '' && props.collapsed[node.dir] !== false;
       if (isCollapsed) return;
       for (const c of node.children) {
         if (c.kind === 'folder') walk(c, depth + 1);
@@ -65,7 +64,7 @@ export function FileTree(props: FileTreeProps) {
     };
     walk(tree, 0);
     return list;
-  }, [tree, collapsed]);
+  }, [tree, props.collapsed]);
 
   // Sync selection to active file
   useEffect(() => {
@@ -80,8 +79,14 @@ export function FileTree(props: FileTreeProps) {
     setEditing({ kind: props.newEntry.kind === 'file' ? 'file' : 'folder', id: '' } as any);
     setEditText('');
     // Expand parent folder
-    if (props.newEntry.parentDir) setCollapsed((m) => ({ ...m, [props.newEntry!.parentDir]: false }));
-  }, [props.newEntry?.key]);
+    if (props.newEntry.parentDir) {
+      let dir = props.newEntry.parentDir;
+      if (dir !== '') {
+        let next = ensureDirOpen(props.collapsed, dir);
+        if (next) props.onCollapsedChange(next);
+      }
+    }
+  }, [props.newEntry?.key, props.collapsed, props.onCollapsedChange, props.newEntry?.parentDir]);
 
   // Keyboard bindings
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -146,13 +151,40 @@ export function FileTree(props: FileTreeProps) {
     props.onSelectionChange?.(selected);
   }, [selected]);
 
-  useEffect(() => {
-    props.onCollapsedChange?.(collapsed);
-  }, [collapsed]);
+  const collapse = (dir: string) => {
+    if (dir === '') return;
+    let next = setCollapsedValue(props.collapsed, dir, true);
+    if (next) props.onCollapsedChange(next);
+  };
+  const expand = (dir: string) => {
+    if (dir === '') return;
+    let next = setCollapsedValue(props.collapsed, dir, false);
+    if (next) props.onCollapsedChange(next);
+  };
+  const toggleCollapse = (dir: string) => {
+    if (dir === '') return;
+    let current = props.collapsed[dir] !== false;
+    let next = setCollapsedValue(props.collapsed, dir, !current);
+    if (next) props.onCollapsedChange(next);
+  };
 
-  const collapse = (dir: string) => setCollapsed((m) => ({ ...m, [dir]: true }));
-  const expand = (dir: string) => setCollapsed((m) => ({ ...m, [dir]: false }));
-  const toggleCollapse = (dir: string) => setCollapsed((m) => ({ ...m, [dir]: !m[dir] }));
+  useEffect(() => {
+    if (!props.activeId) return;
+    let file = props.files.find((f) => f.id === props.activeId);
+    if (!file) return;
+    let dirs = ancestorsOf(file.dir);
+    if (dirs.length === 0) return;
+    let next = props.collapsed;
+    let changed = false;
+    for (let dir of dirs) {
+      if (dir === '') continue;
+      if (next[dir] === true) {
+        next = { ...next, [dir]: false };
+        changed = true;
+      }
+    }
+    if (changed) props.onCollapsedChange(next);
+  }, [props.activeId, props.files, props.collapsed, props.onCollapsedChange]);
 
   const submitEdit = (
     context: { kind: 'file'; id?: string; dir?: string } | { kind: 'folder'; dir?: string }
@@ -248,7 +280,7 @@ export function FileTree(props: FileTreeProps) {
           key={n.kind === 'folder' ? 'd:' + n.dir : 'f:' + n.id}
           node={n}
           depth={0}
-          collapsed={collapsed}
+          collapsed={props.collapsed}
           activeId={props.activeId}
           selected={selected}
           menuSel={menuSel}
@@ -348,7 +380,7 @@ function Row(props: {
     );
   };
   if (node.kind === 'folder') {
-    const isCollapsed = props.collapsed[node.dir] === true;
+    const isCollapsed = node.dir !== '' && props.collapsed[node.dir] !== false;
     const isActive = props.selected?.kind === 'folder' && props.selected.dir === node.dir;
     const isEditing = props.editing?.kind === 'folder' && props.editing.dir === node.dir;
     return (
@@ -567,6 +599,33 @@ function Icon({
   return (
     <span className={`tree-icon ${isFolder ? (open ? 'folder-open' : 'folder') : 'file'}`} aria-hidden />
   );
+}
+
+function setCollapsedValue(map: Record<string, boolean>, dir: string, value: boolean): Record<string, boolean> | null {
+  if (dir === '') return null;
+  if (map[dir] === value) return null;
+  let next: Record<string, boolean> = { ...map };
+  next[dir] = value;
+  return next;
+}
+
+function ensureDirOpen(map: Record<string, boolean>, dir: string): Record<string, boolean> | null {
+  if (dir === '') return null;
+  if (map[dir] === false) return null;
+  let next: Record<string, boolean> = { ...map };
+  next[dir] = false;
+  return next;
+}
+
+function ancestorsOf(dir: string): string[] {
+  let list: string[] = [];
+  let current = normalizeDir(dir);
+  while (current !== '') {
+    list.push(current);
+    let idx = current.lastIndexOf('/');
+    current = idx >= 0 ? current.slice(0, idx) : '';
+  }
+  return list;
 }
 
 function buildTree(files: FileEntry[], folders: string[]): FolderNode {

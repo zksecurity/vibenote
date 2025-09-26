@@ -878,6 +878,8 @@ export function clearAllLocalData() {
 export type RepoPrefs = {
   autosync?: boolean;
   lastAutoSyncAt?: number;
+  lastActiveNoteId?: string;
+  expandedFolders?: string[];
 };
 
 function prefsKey(slug: string): string {
@@ -918,6 +920,27 @@ export function getLastAutoSyncAt(slug: string): number | undefined {
 
 export function recordAutoSyncRun(slug: string, at: number = Date.now()) {
   setRepoPrefs(slug, { lastAutoSyncAt: at });
+}
+
+export function getLastActiveNoteId(slug: string): string | undefined {
+  let prefs = getRepoPrefs(slug);
+  return typeof prefs.lastActiveNoteId === 'string' ? prefs.lastActiveNoteId : undefined;
+}
+
+export function setLastActiveNoteId(slug: string, id: string | null) {
+  setRepoPrefs(slug, { lastActiveNoteId: id ?? undefined });
+}
+
+export function getExpandedFolders(slug: string): string[] {
+  let prefs = getRepoPrefs(slug);
+  let list = Array.isArray(prefs.expandedFolders) ? prefs.expandedFolders : [];
+  return list.filter((dir) => typeof dir === 'string');
+}
+
+export function setExpandedFolders(slug: string, dirs: string[]) {
+  let unique = Array.from(new Set(dirs.filter((dir) => typeof dir === 'string' && dir !== '')));
+  unique.sort();
+  setRepoPrefs(slug, { expandedFolders: unique });
 }
 
 export function hashText(text: string): string {
