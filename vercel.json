@@ -7,7 +7,6 @@
     { "src": "/api/(.*)", "dest": "/api/$1" },
     { "src": "/assets/(.*)", "dest": "/assets/$1" },
     { "src": "/sw.js", "dest": "/sw.js" },
-    { "src": "/og-image.png", "dest": "/og-image.png" },
     { "src": "/(.*)", "dest": "/index.html" }
   ]
 }
