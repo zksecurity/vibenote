@@ -7,12 +7,12 @@ const ASSET_CACHE = 'vibenote-asset-v1';
 const APP_SHELL_URLS = [
   '/',
   '/index.html',
-  '/manifest.webmanifest',
-  '/favicon.svg',
-  '/favicon-32x32.png',
-  '/apple-touch-icon.png',
-  '/icon-192.png',
-  '/icon-512.png',
+  '/assets/manifest.webmanifest',
+  '/assets/favicon.svg',
+  '/assets/favicon-32x32.png',
+  '/assets/apple-touch-icon.png',
+  '/assets/icon-192.png',
+  '/assets/icon-512.png',
 ];
 
 self.addEventListener('install', (event) => {

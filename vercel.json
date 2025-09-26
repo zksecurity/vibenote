@@ -6,12 +6,6 @@
   "routes": [
     { "src": "/api/(.*)", "dest": "/api/$1" },
     { "src": "/assets/(.*)", "dest": "/assets/$1" },
-    { "src": "/favicon.svg", "dest": "/favicon.svg" },
-    { "src": "/favicon-32x32.png", "dest": "/favicon-32x32.png" },
-    { "src": "/apple-touch-icon.png", "dest": "/apple-touch-icon.png" },
-    { "src": "/manifest.webmanifest", "dest": "/manifest.webmanifest" },
-    { "src": "/icon-192.png", "dest": "/icon-192.png" },
-    { "src": "/icon-512.png", "dest": "/icon-512.png" },
     { "src": "/sw.js", "dest": "/sw.js" },
     { "src": "/og-image.png", "dest": "/og-image.png" },
     { "src": "/(.*)", "dest": "/index.html" }
