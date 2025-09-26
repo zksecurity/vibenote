@@ -1,14 +1,126 @@
 // Minimal SW used to flush pending note edits during tab close.
+// It now also precaches core assets so VibeNote can be installed as a PWA.
 // It does not read IndexedDB or localStorage; the page passes payloads via postMessage.
 
-self.addEventListener('install', () => {
+const APP_SHELL_CACHE = 'vibenote-app-shell-v1';
+const ASSET_CACHE = 'vibenote-asset-v1';
+const APP_SHELL_URLS = [
+  '/',
+  '/index.html',
+  '/manifest.webmanifest',
+  '/favicon.svg',
+  '/favicon-32x32.png',
+  '/apple-touch-icon.png',
+  '/icon-192.png',
+  '/icon-512.png',
+];
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    (async () => {
+      try {
+        let cache = await caches.open(APP_SHELL_CACHE);
+        await cache.addAll(APP_SHELL_URLS);
+      } catch {
+        // Ignore failures; we will populate the cache lazily later.
+      }
+    })()
+  );
   // Activate immediately so a controller is available on first load
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    (async () => {
+      let cacheNames = await caches.keys();
+      await Promise.all(
+        cacheNames
+          .filter((name) => name !== APP_SHELL_CACHE && name !== ASSET_CACHE)
+          .map((name) => caches.delete(name))
+      );
+      await self.clients.claim();
+    })()
+  );
 });
+
+self.addEventListener('fetch', (event) => {
+  let request = event.request;
+  if (request.method !== 'GET') return;
+
+  let url;
+  try {
+    url = new URL(request.url);
+  } catch {
+    return;
+  }
+
+  if (url.origin !== self.location.origin) return;
+
+  if (request.mode === 'navigate') {
+    event.respondWith(handleNavigationRequest(request));
+    return;
+  }
+
+  if (!shouldHandleAsAsset(request, url)) return;
+
+  event.respondWith(
+    (async () => {
+      let cache = await caches.open(ASSET_CACHE);
+      let cached = await cache.match(request);
+      if (cached) {
+        event.waitUntil(updateAssetCache(cache, request));
+        return cached;
+      }
+      let response = await updateAssetCache(cache, request);
+      if (response) return response;
+      if (cached) return cached;
+      return fetch(request);
+    })()
+  );
+});
+
+async function handleNavigationRequest(request) {
+  let cache = await caches.open(APP_SHELL_CACHE);
+  let pathname = '/';
+  try {
+    pathname = new URL(request.url).pathname || '/';
+  } catch {}
+  try {
+    let response = await fetch(request);
+    if (response && response.ok) {
+      await cache.put(request, response.clone());
+      if (pathname === '/') {
+        await cache.put('/', response.clone());
+      }
+    }
+    return response;
+  } catch (error) {
+    let cached = (await cache.match(request)) || (await cache.match('/'));
+    if (cached) return cached;
+    throw error;
+  }
+}
+
+function shouldHandleAsAsset(request, url) {
+  if (url.pathname === '/sw.js') return false;
+  if (url.pathname.startsWith('/assets/')) return true;
+  if (url.pathname.endsWith('.webmanifest')) return true;
+  let destinations = ['style', 'script', 'worker', 'font', 'image'];
+  return destinations.includes(request.destination);
+}
+
+async function updateAssetCache(cache, request) {
+  try {
+    let response = await fetch(request);
+    if (response && response.ok) {
+      await cache.put(request, response.clone());
+    }
+    return response;
+  } catch {
+    return undefined;
+  }
+}
 
 async function putFile(config, file, token) {
   const url = `https://api.github.com/repos/${encodeURIComponent(config.owner)}/${encodeURIComponent(
