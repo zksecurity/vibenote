@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { marked } from 'marked';
+import type { TokenizerAndRendererExtension } from 'marked';
 import DOMPurify from 'dompurify';
+import katex from 'katex';
+import 'katex/dist/katex.min.css';
 import type { NoteDoc } from '../storage/local';
 
 type Props = {
@@ -33,6 +36,7 @@ export function Editor({ doc, onChange, readOnly = false }: Props) {
 
   const html = useMemo(() => {
     configureDomPurifyOnce();
+    configureMarkedOnce();
     const out = marked.parse(text, { async: false });
     const raw = typeof out === 'string' ? out : '';
     // Sanitize to prevent XSS; hooks enforce URL policy and link hygiene
@@ -55,6 +59,7 @@ export function Editor({ doc, onChange, readOnly = false }: Props) {
 
 // Configure DOMPurify hooks once per module to enforce URL policy
 let domPurifyConfigured = false;
+let markedConfigured = false;
 
 function configureDomPurifyOnce() {
   if (domPurifyConfigured) return;
@@ -93,4 +98,87 @@ function configureDomPurifyOnce() {
     }
   });
   domPurifyConfigured = true;
+}
+
+function configureMarkedOnce() {
+  if (markedConfigured) return;
+
+  const blockMathExtension: TokenizerAndRendererExtension = {
+    name: 'blockMath',
+    level: 'block',
+    start(src) {
+      const match = src.match(/\$\$/);
+      return match ? match.index : undefined;
+    },
+    tokenizer(src) {
+      const match = /^\$\$([\s\S]+?)\$\$(?:\n+|$)/.exec(src);
+      if (!match) return undefined;
+      const text = (match[1] ?? '').trim();
+      return {
+        type: 'blockMath',
+        raw: match[0],
+        text,
+        displayMode: true,
+      };
+    },
+    renderer(token) {
+      try {
+        return katex.renderToString(token.text || '', {
+          displayMode: true,
+          throwOnError: false,
+        });
+      } catch {
+        return token.text || '';
+      }
+    },
+  };
+
+  const inlineMathExtension: TokenizerAndRendererExtension = {
+    name: 'inlineMath',
+    level: 'inline',
+    start(src) {
+      const index = src.indexOf('$');
+      return index === -1 ? undefined : index;
+    },
+    tokenizer(src) {
+      if (src[0] !== '$' || src[1] === '$') return undefined;
+      let index = 1;
+      let closing = -1;
+      while (index < src.length) {
+        const char = src[index];
+        if (char === '\\') {
+          index += 2;
+          continue;
+        }
+        if (char === '$') {
+          closing = index;
+          break;
+        }
+        if (char === '\n') return undefined;
+        index += 1;
+      }
+      if (closing === -1) return undefined;
+      const raw = src.slice(0, closing + 1);
+      const text = raw.slice(1, -1);
+      return {
+        type: 'inlineMath',
+        raw,
+        text,
+        displayMode: false,
+      };
+    },
+    renderer(token) {
+      try {
+        return katex.renderToString(token.text || '', {
+          displayMode: false,
+          throwOnError: false,
+        });
+      } catch {
+        return token.text || '';
+      }
+    },
+  };
+
+  marked.use({ extensions: [blockMathExtension, inlineMathExtension] });
+  markedConfigured = true;
 }
