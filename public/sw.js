@@ -6,6 +6,7 @@ const APP_SHELL_CACHE = 'vibenote-app-shell-v1';
 const ASSET_CACHE = 'vibenote-asset-v1';
 const APP_SHELL_URLS = [
   '/',
+  '/start',
   '/index.html',
   '/assets/manifest.webmanifest',
   '/assets/favicon.svg',

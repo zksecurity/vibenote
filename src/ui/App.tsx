@@ -31,12 +31,21 @@ export function App() {
       document.title = `${route.owner}/${route.repo}`;
       return;
     }
-    if (route.kind === 'new') {
-      document.title = 'VibeNote';
-      return;
-    }
     document.title = 'VibeNote';
   }, [route]);
+
+  useEffect(() => {
+    if (route.kind === 'start') {
+      let candidate = recents.find((entry) => entry.owner !== undefined && entry.repo !== undefined);
+
+      if (candidate !== undefined) {
+        navigate({ kind: 'repo', owner: candidate.owner!, repo: candidate.repo! }, { replace: true });
+        return;
+      }
+
+      navigate({ kind: 'home' }, { replace: true });
+    }
+  }, [route, recents, navigate]);
 
   useEffect(() => {
     if (route.kind === 'home') {
@@ -52,6 +61,11 @@ export function App() {
 
   if (route.kind === 'home') {
     return <HomeView recents={recents} navigate={navigate} />;
+  }
+
+  if (route.kind === 'start') {
+    // will redirect
+    return null;
   }
 
   if (route.kind === 'new') {

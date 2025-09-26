@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 
-export type Route = { kind: 'home' } | { kind: 'new' } | { kind: 'repo'; owner: string; repo: string };
+export type Route =
+  | { kind: 'home' }
+  | { kind: 'new' }
+  | { kind: 'start' }
+  | { kind: 'repo'; owner: string; repo: string };
 
 type NavigateOptions = {
   replace?: boolean;
@@ -8,6 +12,7 @@ type NavigateOptions = {
 
 const HOME_ROUTE: Route = { kind: 'home' };
 const NEW_ROUTE: Route = { kind: 'new' };
+const START_ROUTE: Route = { kind: 'start' };
 
 function stripTrailingSlash(path: string): string {
   if (path.length <= 1) return '/';
@@ -17,6 +22,7 @@ function stripTrailingSlash(path: string): string {
 export function parseRoute(pathname: string): Route {
   let clean = stripTrailingSlash(pathname.split('?')[0]?.split('#')[0] ?? '/');
   if (clean === '/' || clean === '') return HOME_ROUTE;
+  if (clean === '/start') return START_ROUTE;
   if (clean === '/new') return NEW_ROUTE;
   let segments = clean.replace(/^\//, '').split('/');
   if (segments.length >= 2) {
@@ -32,6 +38,7 @@ export function parseRoute(pathname: string): Route {
 export function routeToPath(route: Route): string {
   if (route.kind === 'home') return '/';
   if (route.kind === 'new') return '/new';
+  if (route.kind === 'start') return '/start';
   return `/${encodeURIComponent(route.owner)}/${encodeURIComponent(route.repo)}`;
 }
 

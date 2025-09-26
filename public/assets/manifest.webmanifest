@@ -2,7 +2,7 @@
   "name": "VibeNote",
   "short_name": "VibeNote",
   "description": "VibeNote is a mobile-friendly, offline-first Markdown editor that keeps notes synced with your Git repository.",
-  "start_url": "/",
+  "start_url": "/start",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",
