@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useRef } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { FileTree, type FileEntry } from './FileTree';
 import { Editor } from './Editor';
 import {
@@ -61,7 +61,11 @@ type RepoViewProps = {
   }) => void;
 };
 
-export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProps) {
+export function RepoView(props: RepoViewProps) {
+  return <RepoViewInner key={props.slug} {...props} />;
+}
+
+function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps) {
   const store = useMemo(() => {
     if (route.kind === 'repo') {
       return new LocalStore(slug, { seedWelcome: false });
@@ -142,8 +146,6 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   const autoSyncBusyRef = useState<{ busy: boolean }>({ busy: false })[0];
   const AUTO_SYNC_MIN_INTERVAL_MS = 60_000; // not too often
   const AUTO_SYNC_DEBOUNCE_MS = 10_000;
-  // Track the previous slug to decide when a navigation really switched repositories.
-  const previousSlugRef = useRef<string | null>(slug);
 
   useEffect(() => {
     if (slug === 'new') return;
@@ -160,11 +162,6 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   }, [activeId, slug]);
 
   useEffect(() => {
-    setLinked(slug !== 'new' && isRepoLinked(slug));
-    setAutosync(slug !== 'new' && isAutosyncEnabled(slug));
-  }, [slug]);
-
-  useEffect(() => {
     let cancelled = false;
     if (!user || user.avatarDataUrl || !user.avatarUrl) return;
     (async () => {
@@ -177,23 +174,6 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
       cancelled = true;
     };
   }, [user?.avatarDataUrl, user?.avatarUrl, ensureAppUserAvatarCached]);
-
-  useEffect(() => {
-    setSidebarOpen(false);
-    setSyncMsg(null);
-    setAccessState('unknown');
-    setPublicRepoMeta(null);
-    setPublicRateLimited(false);
-    setPublicMetaError(null);
-  }, [slug]);
-
-  useEffect(() => {
-    if (previousSlugRef.current !== null && previousSlugRef.current !== slug) {
-      // Navigated to a different repo; drop the note selection so we fall back to stored prefs or default.
-      setActiveId(null);
-    }
-    previousSlugRef.current = slug;
-  }, [slug]);
 
   useEffect(() => {
     let expanded = slug === 'new' ? [] : getExpandedFolders(slug);
