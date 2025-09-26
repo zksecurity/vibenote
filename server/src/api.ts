@@ -270,21 +270,32 @@ export async function commitToRepo(
     throw new Error('branch and changes required');
   }
 
-  const { data: refData } = await kit.request('GET /repos/{owner}/{repo}/git/ref/{ref}', {
-    owner,
-    repo,
-    ref: `heads/${branch}`,
-  });
-  if (!refData.object || typeof refData.object !== 'object' || refData.object.type !== 'commit') {
-    throw new Error('unexpected ref target');
+  let headSha: string | null = null;
+  let baseTreeSha: string | null = null;
+  let isInitialCommit = false;
+  try {
+    const { data: refData } = await kit.request('GET /repos/{owner}/{repo}/git/ref/{ref}', {
+      owner,
+      repo,
+      ref: `heads/${branch}`,
+    });
+    if (!refData.object || typeof refData.object !== 'object' || refData.object.type !== 'commit') {
+      throw new Error('unexpected ref target');
+    }
+    headSha = refData.object.sha;
+    const { data: headCommit } = await kit.request('GET /repos/{owner}/{repo}/git/commits/{commit_sha}', {
+      owner,
+      repo,
+      commit_sha: headSha,
+    });
+    baseTreeSha = headCommit.tree.sha;
+  } catch (error: unknown) {
+    if (error && typeof error === 'object' && (error as any).status === 404) {
+      isInitialCommit = true;
+    } else {
+      throw error;
+    }
   }
-  const headSha = refData.object.sha;
-  const { data: headCommit } = await kit.request('GET /repos/{owner}/{repo}/git/commits/{commit_sha}', {
-    owner,
-    repo,
-    commit_sha: headSha,
-  });
-  const baseTreeSha = headCommit.tree.sha;
 
   const treeItems: Array<{
     path?: string;
@@ -321,12 +332,18 @@ export async function commitToRepo(
     }
   }
 
-  const { data: newTree } = await kit.request('POST /repos/{owner}/{repo}/git/trees', {
+  const treePayload: {
+    owner: string;
+    repo: string;
+    tree: typeof treeItems;
+    base_tree?: string;
+  } = {
     owner,
     repo,
-    base_tree: baseTreeSha,
     tree: treeItems,
-  });
+  };
+  if (baseTreeSha) treePayload.base_tree = baseTreeSha;
+  const { data: newTree } = await kit.request('POST /repos/{owner}/{repo}/git/trees', treePayload);
   const blobByPath: Record<string, string> = {};
   if (Array.isArray(newTree.tree)) {
     for (const entry of newTree.tree) {
@@ -335,20 +352,30 @@ export async function commitToRepo(
       if (trackedPaths.has(entry.path)) blobByPath[entry.path] = entry.sha;
     }
   }
+  const parents = isInitialCommit || !headSha ? [] : [headSha];
   const { data: newCommit } = await kit.request('POST /repos/{owner}/{repo}/git/commits', {
     owner,
     repo,
     message: finalMessage,
     tree: newTree.sha,
-    parents: [headSha],
+    parents,
   });
-  await kit.request('PATCH /repos/{owner}/{repo}/git/refs/{ref}', {
-    owner,
-    repo,
-    ref: `heads/${branch}`,
-    sha: newCommit.sha,
-    force: false,
-  });
+  if (isInitialCommit || !headSha) {
+    await kit.request('POST /repos/{owner}/{repo}/git/refs', {
+      owner,
+      repo,
+      ref: `refs/heads/${branch}`,
+      sha: newCommit.sha,
+    });
+  } else {
+    await kit.request('PATCH /repos/{owner}/{repo}/git/refs/{ref}', {
+      owner,
+      repo,
+      ref: `heads/${branch}`,
+      sha: newCommit.sha,
+      force: false,
+    });
+  }
   return { commitSha: newCommit.sha, blobShas: blobByPath };
 }
 

@@ -4,7 +4,6 @@ import { Editor } from './Editor';
 import {
   LocalStore,
   clearAllTombstones,
-  clearRepoLink,
   isRepoLinked,
   markRepoLinked,
   isAutosyncEnabled,
@@ -19,7 +18,6 @@ import {
   getExpandedFolders,
   setExpandedFolders,
 } from '../storage/local';
-import { clearToken } from '../auth/github';
 import {
   signInWithGitHubApp,
   getSessionToken as getAppSessionToken,
@@ -39,12 +37,12 @@ import {
   pullNote,
   repoExists,
   listNoteFiles,
+  commitBatch,
   syncBidirectional,
   type RemoteConfig,
 } from '../sync/git-sync';
 import { hashText } from '../storage/local';
 import { RepoSwitcher } from './RepoSwitcher';
-import { RepoConfigModal } from './RepoConfigModal';
 import { Toggle } from './Toggle';
 import type { Route } from './routing';
 
@@ -61,6 +59,26 @@ type RepoViewProps = {
   }) => void;
 };
 
+type NotesRepoStatus = {
+  loading: boolean;
+  exists: boolean;
+  accessible: boolean;
+  defaultBranch: string | null;
+  manageUrl: string | null;
+  error: string | null;
+};
+
+function makeNotesRepoStatus(): NotesRepoStatus {
+  return {
+    loading: false,
+    exists: false,
+    accessible: false,
+    defaultBranch: null,
+    manageUrl: null,
+    error: null,
+  };
+}
+
 export function RepoView(props: RepoViewProps) {
   return <RepoViewInner key={props.slug} {...props} />;
 }
@@ -72,11 +90,12 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     }
     return new LocalStore(slug);
   }, [slug, route.kind]);
+  const isScratchpad = slug === 'new';
   const [notes, setNotes] = useState<NoteMeta[]>(() => store.listNotes());
   const [folders, setFolders] = useState<string[]>(() => store.listFolders());
   // Restore the previously active note as early as possible so the editor does not flicker to empty state.
   const [activeId, setActiveId] = useState<string | null>(() => {
-    if (slug === 'new') return null;
+    if (isScratchpad) return null;
     const stored = getLastActiveNoteId(slug);
     if (!stored) return null;
     const available = store.listNotes();
@@ -100,9 +119,11 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     key: number;
   } | null>(null);
   const [sessionToken, setSessionToken] = useState<string | null>(getAppSessionToken());
-  const [showConfig, setShowConfig] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const [notesRepoStatus, setNotesRepoStatus] = useState<NotesRepoStatus>(() => makeNotesRepoStatus());
+  const [notesRepoRefresh, setNotesRepoRefresh] = useState(0);
+  const [seedingNotesRepo, setSeedingNotesRepo] = useState(false);
   const initialAppUser = useMemo(() => getAppSessionUser(), []);
   const [ownerLogin, setOwnerLogin] = useState<string | null>(initialAppUser?.login ?? null);
   const [linked, setLinked] = useState(() => slug !== 'new' && isRepoLinked(slug));
@@ -110,8 +131,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
   const userAvatarSrc = user?.avatarDataUrl ?? user?.avatarUrl ?? undefined;
   const [menuOpen, setMenuOpen] = useState(false);
   const [toast, setToast] = useState<{ text: string; href?: string } | null>(null);
-  const [repoModalMode, setRepoModalMode] = useState<'onboard' | 'manage'>('manage');
-  const [repoModalError, setRepoModalError] = useState<string | null>(null);
   const [showSwitcher, setShowSwitcher] = useState(false);
   const [accessState, setAccessState] = useState<'unknown' | 'reachable' | 'unreachable'>('unknown');
   const [repoMeta, setRepoMeta] = useState<RepoMetadata | null>(null);
@@ -124,6 +143,10 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
   const [publicRateLimited, setPublicRateLimited] = useState(false);
   const [, setPublicMetaError] = useState<string | null>(null);
   const manageUrl = repoMeta?.manageUrl ?? null;
+  const recommendedRepoSlug = ownerLogin ? `${ownerLogin}/notes` : null;
+  const recommendedRepoParts = recommendedRepoSlug ? recommendedRepoSlug.split('/', 2) : [];
+  const recommendedRepoOwner = recommendedRepoParts[0] ?? null;
+  const recommendedRepoName = recommendedRepoParts[1] ?? null;
   const buildConfigWithMeta = () => {
     const cfg: RemoteConfig = buildRemoteConfig(slug);
     const branch = repoMeta?.defaultBranch ?? publicRepoMeta?.defaultBranch;
@@ -132,7 +155,8 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
   };
   const metadataAllowsEdit = !!repoMeta?.repoSelected;
   const canEdit =
-    !!sessionToken && (metadataAllowsEdit || ((!hasMetadataResolved || !!metadataError) && linked));
+    isScratchpad ||
+    (!!sessionToken && (metadataAllowsEdit || ((!hasMetadataResolved || !!metadataError) && linked)));
   const repoIsPublic =
     repoMeta?.isPrivate === false || (!repoMeta?.repoSelected && publicRepoMeta?.isPrivate === false);
   const repoIsPrivate = repoMeta?.isPrivate === true || publicRepoMeta?.isPrivate === true;
@@ -187,6 +211,57 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
       return collapsedMapsEqual(prev, next) ? prev : next;
     });
   }, [folders]);
+
+  useEffect(() => {
+    if (!isScratchpad) return;
+    if (!sessionToken || !ownerLogin) {
+      setNotesRepoStatus(makeNotesRepoStatus());
+      return;
+    }
+    let cancelled = false;
+    setNotesRepoStatus((prev) => ({ ...prev, loading: true, error: null }));
+    (async () => {
+      try {
+        const meta = await apiGetRepoMetadata(ownerLogin, 'notes');
+        let accessible = Boolean(meta.repoSelected);
+        if (!accessible && meta.repositorySelection === 'all') accessible = true;
+        let exists = accessible;
+        if (!exists) {
+          if (typeof meta.isPrivate === 'boolean') exists = true;
+          if (meta.defaultBranch) exists = true;
+        }
+        if (!exists) {
+          try {
+            exists = await repoExists(ownerLogin, 'notes');
+          } catch {
+            // ignore secondary check errors
+          }
+        }
+        if (cancelled) return;
+        setNotesRepoStatus({
+          loading: false,
+          exists,
+          accessible,
+          defaultBranch: meta.defaultBranch ?? null,
+          manageUrl: meta.manageUrl ?? null,
+          error: null,
+        });
+      } catch (error) {
+        if (cancelled) return;
+        setNotesRepoStatus({
+          loading: false,
+          exists: false,
+          accessible: false,
+          defaultBranch: null,
+          manageUrl: null,
+          error: error instanceof Error ? error.message : 'unknown-error',
+        });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isScratchpad, sessionToken, ownerLogin, notesRepoRefresh]);
 
   useEffect(() => {
     if (slug !== 'new') {
@@ -393,8 +468,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     setFolders(nextFolders);
     setActiveId((prev) => {
       if (prev && nextNotes.some((n) => n.id === prev)) return prev;
-      if (prev) return nextNotes[0]?.id ?? null;
-      return prev;
+      return nextNotes[0]?.id ?? null;
     });
   }, [store, canEdit]);
 
@@ -582,68 +656,58 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     }
   };
 
-  const onConfigSubmit = async (cfg: { owner: string; repo: string; branch: string; autosync: boolean }) => {
+  const onSeedNotesRepo = async () => {
+    if (!recommendedRepoSlug || !sessionToken) {
+      setSyncMsg('Connect GitHub first');
+      return;
+    }
+    const [owner, repo] = recommendedRepoSlug.split('/', 2);
+    if (!owner || !repo) {
+      setSyncMsg('Missing repository information');
+      return;
+    }
     setSyncMsg(null);
-    setRepoModalError(null);
-    setSyncing(true);
+    setSeedingNotesRepo(true);
+    setNotesRepoStatus((prev) => ({ ...prev, loading: true, error: null }));
     try {
-      let targetOwner = cfg.owner.trim();
-      let targetRepo = cfg.repo.trim();
-      if (!targetOwner || !targetRepo) {
-        setRepoModalError('Enter an owner and repository name.');
-        return;
+      const config = buildRemoteConfig(recommendedRepoSlug);
+      const docs = store
+        .listNotes()
+        .map((meta) => store.loadNote(meta.id))
+        .filter((doc): doc is NoteDoc => !!doc);
+      const filesMap = new Map<string, { path: string; text: string }>();
+      for (const doc of docs) {
+        filesMap.set(doc.path, { path: doc.path, text: doc.text || '' });
       }
-
-      let targetSlug = `${targetOwner}/${targetRepo}`;
-      let matchesCurrent = targetSlug === slug;
-      let targetStore = matchesCurrent ? store : new LocalStore(targetSlug, { seedWelcome: false });
-      let hadRemoteBefore = matchesCurrent && linked;
-      let targetConfig: RemoteConfig = buildRemoteConfig(targetSlug);
-
-      // No in-app repo creation with GitHub App model; we simply link and guide via install CTAs
-
-      markRepoLinked(targetSlug);
-      setAutosyncEnabled(targetSlug, cfg.autosync === true);
-      onRecordRecent({ slug: targetSlug, owner: targetOwner, repo: targetRepo, connected: true });
-      if (matchesCurrent) {
-        setLinked(true);
-        setAutosync(cfg.autosync === true);
+      const readmePath = 'README.md';
+      if (!filesMap.has(readmePath)) {
+        const readme = `# Notes\n\nThis repository is synced with [VibeNote](https://github.com/mitschabaude/vibenote).\n\n- Your notes are plain Markdown files.\n- Use VibeNote to edit locally and sync changes back to GitHub.\n\nHappy writing!\n`;
+        filesMap.set(readmePath, { path: readmePath, text: readme });
       }
-
-      // With the GitHub App model, initialization happens once access is granted.
-
-      const entries = await listNoteFiles(targetConfig);
+      const files = Array.from(filesMap.values());
+      await commitBatch(config, files, 'vibenote: seed notes repository');
+      markRepoLinked(recommendedRepoSlug);
+      setAutosyncEnabled(recommendedRepoSlug, true);
+      onRecordRecent({ slug: recommendedRepoSlug, owner, repo, connected: true });
+      const entries = await listNoteFiles(config);
       const remoteFiles: { path: string; text: string; sha?: string }[] = [];
-      for (let entry of entries) {
-        const remoteFile = await pullNote(targetConfig, entry.path);
-        if (remoteFile)
+      for (const entry of entries) {
+        const remoteFile = await pullNote(config, entry.path);
+        if (remoteFile) {
           remoteFiles.push({ path: remoteFile.path, text: remoteFile.text, sha: remoteFile.sha });
+        }
       }
+      const targetStore = new LocalStore(recommendedRepoSlug, { seedWelcome: false });
       targetStore.replaceWithRemote(remoteFiles);
-
-      let statusMsg = 'Connected to repository';
-      if (matchesCurrent) {
-        let syncedNotes = targetStore.listNotes();
-        setNotes(syncedNotes);
-        setActiveId(syncedNotes[0]?.id ?? null);
-        setSyncMsg(statusMsg);
-        if (cfg.autosync === true) scheduleAutoSync(0); // run on page load/connect
-      } else {
-        setSyncMsg(statusMsg);
-      }
-
-      setRepoModalError(null);
-      setShowConfig(false);
-      if (!matchesCurrent) {
-        navigate({ kind: 'repo', owner: targetOwner, repo: targetRepo });
-      }
-    } catch (e) {
-      console.error(e);
-      const msg = 'Failed to configure repository';
-      setRepoModalError(msg);
-      setSyncMsg(msg);
+      setNotesRepoRefresh((tick) => tick + 1);
+      navigate({ kind: 'repo', owner, repo });
+    } catch (error) {
+      console.error(error);
+      setSyncMsg('Failed to seed repository');
+      const message = error instanceof Error ? error.message : 'Could not seed repository';
+      setNotesRepoStatus((prev) => ({ ...prev, loading: false, error: message }));
     } finally {
-      setSyncing(false);
+      setSeedingNotesRepo(false);
     }
   };
 
@@ -832,6 +896,8 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     setDoc(null);
     setRepoMeta(null);
     setAccessState('unknown');
+    setNotesRepoStatus(makeNotesRepoStatus());
+    setNotesRepoRefresh((tick) => tick + 1);
     initialPullRef.done = false;
     setSyncMsg('Signed out');
   };
@@ -866,7 +932,8 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
 
   const isRepoUnreachable =
     route.kind === 'repo' && accessState === 'unreachable' && !isPublicReadonly && !needsInstallForPrivate;
-  const showSidebar = (notes.length > 0 && linked) || (isPublicReadonly && readOnlyNotes.length > 0);
+  const showSidebar =
+    isScratchpad || (notes.length > 0 && linked) || (isPublicReadonly && readOnlyNotes.length > 0);
   const layoutClass = showSidebar ? (isRepoUnreachable ? 'single' : '') : 'single';
   const noteList = isPublicReadonly ? readOnlyNotes : notes;
   const folderList = useMemo(() => {
@@ -879,6 +946,15 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     }
     return folders;
   }, [folders, isPublicReadonly, readOnlyNotes]);
+  const onboardingConnectDone = !!sessionToken;
+  const onboardingRepoLoading = notesRepoStatus.loading;
+  const onboardingRepoAccessible = onboardingConnectDone && notesRepoStatus.accessible;
+  const onboardingRepoExists = onboardingConnectDone && notesRepoStatus.exists;
+  const onboardingRepoSeeded = onboardingRepoAccessible && !!notesRepoStatus.defaultBranch;
+  const repoStatusError = !onboardingRepoAccessible && notesRepoStatus.error ? notesRepoStatus.error : null;
+  const seedError =
+    onboardingRepoAccessible && !onboardingRepoSeeded && notesRepoStatus.error ? notesRepoStatus.error : null;
+  const createRepoUrl = 'https://github.com/new?name=notes&visibility=private';
 
   return (
     <div className="app-shell">
@@ -928,17 +1004,19 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
             <button
               type="button"
               className="btn ghost repo-btn align-workspace repo-btn-empty"
-              onClick={() => {
-                setRepoModalMode('manage');
-                setRepoModalError(null);
-                setShowConfig(true);
-              }}
-              disabled={syncing}
+              onClick={() => ensureOwnerAndOpen()}
               title="Choose repository"
             >
               <GitHubIcon />
               <span className="repo-label">
-                <span>Choose repository</span>
+                {recommendedRepoOwner && recommendedRepoName ? (
+                  <>
+                    <span className="repo-owner">{recommendedRepoOwner}/</span>
+                    <span>{recommendedRepoName}</span>
+                  </>
+                ) : (
+                  <span>Choose repository</span>
+                )}
               </span>
             </button>
           ) : null}
@@ -1171,6 +1249,101 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                   </div>
                 ) : (
                   <>
+                    {isScratchpad ? (
+                      <div className="onboarding-banner">
+                        <div className="onboarding-header">
+                          <h3>Get your notes repo ready</h3>
+                          <p>
+                            Complete the checklist to move your local notes into GitHub and start syncing with
+                            VibeNote.
+                          </p>
+                        </div>
+                        <ol className="onboarding-steps">
+                          <li className={`onboarding-step ${onboardingConnectDone ? 'done' : ''}`}>
+                            <div className="onboarding-step-main">
+                              <div className="onboarding-step-title">Connect GitHub</div>
+                              <p className="onboarding-step-desc">
+                                Sign in with your GitHub account so VibeNote can link your repository.
+                              </p>
+                            </div>
+                            {onboardingConnectDone ? (
+                              <span className="onboarding-step-status">
+                                Connected as @{user?.login ?? ownerLogin ?? 'you'}
+                              </span>
+                            ) : (
+                              <button className="btn primary" onClick={onConnect}>
+                                Connect GitHub
+                              </button>
+                            )}
+                          </li>
+                          <li className={`onboarding-step ${onboardingRepoAccessible ? 'done' : ''}`}>
+                            <div className="onboarding-step-main">
+                              <div className="onboarding-step-title">Create your notes repository</div>
+                              <p className="onboarding-step-desc">
+                                We recommend a private repository named <code>{recommendedRepoName ?? 'notes'}</code>.
+                              </p>
+                            </div>
+                            <div className="onboarding-step-actions">
+                              {!onboardingConnectDone ? (
+                                <p className="onboarding-step-hint">Connect GitHub to create your repository.</p>
+                              ) : onboardingRepoLoading ? (
+                                <p className="onboarding-step-hint">Checking repository…</p>
+                              ) : onboardingRepoAccessible ? (
+                                <span className="onboarding-step-status">
+                                  Ready: {recommendedRepoSlug ?? 'notes'}
+                                </span>
+                              ) : onboardingRepoExists ? (
+                                notesRepoStatus.manageUrl ? (
+                                  <a
+                                    className="btn secondary"
+                                    href={notesRepoStatus.manageUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                  >
+                                    Grant access on GitHub
+                                  </a>
+                                ) : (
+                                  <p className="onboarding-step-hint">
+                                    Open GitHub to allow the VibeNote app to access {recommendedRepoSlug ?? 'your repo'}.
+                                  </p>
+                                )
+                              ) : (
+                                <a className="btn secondary" href={createRepoUrl} target="_blank" rel="noreferrer">
+                                  Create on GitHub
+                                </a>
+                              )}
+                              {repoStatusError ? (
+                                <p className="onboarding-step-error">{repoStatusError}</p>
+                              ) : null}
+                            </div>
+                          </li>
+                          <li className={`onboarding-step ${onboardingRepoSeeded ? 'done' : ''}`}>
+                            <div className="onboarding-step-main">
+                              <div className="onboarding-step-title">Make the first commit</div>
+                              <p className="onboarding-step-desc">
+                                Seed the repository with your current local notes and a README.
+                              </p>
+                            </div>
+                            <div className="onboarding-step-actions">
+                              {!onboardingRepoAccessible ? (
+                                <p className="onboarding-step-hint">Finish the steps above to enable syncing.</p>
+                              ) : onboardingRepoSeeded ? (
+                                <span className="onboarding-step-status">Repository seeded</span>
+                              ) : (
+                                <button
+                                  className="btn primary"
+                                  onClick={onSeedNotesRepo}
+                                  disabled={seedingNotesRepo || onboardingRepoLoading}
+                                >
+                                  {seedingNotesRepo ? 'Seeding…' : 'Make first commit'}
+                                </button>
+                              )}
+                              {seedError ? <p className="onboarding-step-error">{seedError}</p> : null}
+                            </div>
+                          </li>
+                        </ol>
+                      </div>
+                    ) : null}
                     {metadataError && (
                       <div className="alert warning">
                         <span className="badge">Offline</span>
@@ -1285,24 +1458,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
           navigate={navigate}
           onRecordRecent={onRecordRecent}
           onClose={() => setShowSwitcher(false)}
-        />
-      )}
-      {showConfig && (
-        <RepoConfigModal
-          mode={repoModalMode}
-          ownerLogin={ownerLogin}
-          syncing={syncing}
-          error={repoModalError}
-          onSubmit={onConfigSubmit}
-          onClose={() => {
-            setShowConfig(false);
-            setRepoModalError(null);
-          }}
-          onLinkExisting={() => {
-            setShowConfig(false);
-            setRepoModalError(null);
-            void ensureOwnerAndOpen();
-          }}
         />
       )}
     </div>

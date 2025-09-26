@@ -890,6 +890,88 @@ textarea:focus-visible {
   color: var(--accent);
 }
 
+.onboarding-banner {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px clamp(20px, 6vw, 36px);
+  box-shadow: var(--shadow);
+  margin: 0 0 28px;
+}
+
+.onboarding-header h3 {
+  margin: 0 0 6px;
+  font-size: 1.3rem;
+}
+
+.onboarding-header p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.onboarding-steps {
+  list-style: none;
+  margin: 20px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 14px;
+}
+
+.onboarding-step {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-subtle);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.onboarding-step.done {
+  border-color: var(--success-border);
+  background: rgba(31, 136, 61, 0.08);
+}
+
+.onboarding-step-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.onboarding-step-title {
+  font-weight: 600;
+  font-size: 1.05rem;
+}
+
+.onboarding-step-desc {
+  margin: 0;
+  color: var(--muted);
+}
+
+.onboarding-step-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.onboarding-step-status {
+  font-weight: 600;
+  color: var(--success);
+}
+
+.onboarding-step-hint {
+  margin: 0;
+  color: var(--muted);
+}
+
+.onboarding-step-error {
+  margin: 0;
+  color: #d1242f;
+  font-weight: 500;
+}
+
 .status-banner {
   margin: 0 clamp(20px, 6vw, 56px) 32px;
   display: flex;
