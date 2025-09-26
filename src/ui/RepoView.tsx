@@ -70,6 +70,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   }, [slug, route.kind]);
   const [notes, setNotes] = useState<NoteMeta[]>(() => store.listNotes());
   const [folders, setFolders] = useState<string[]>(() => store.listFolders());
+  // Restore the previously active note as early as possible so the editor does not flicker to empty state.
   const [activeId, setActiveId] = useState<string | null>(() => {
     if (slug === 'new') return null;
     const stored = getLastActiveNoteId(slug);
@@ -141,6 +142,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
   const autoSyncBusyRef = useState<{ busy: boolean }>({ busy: false })[0];
   const AUTO_SYNC_MIN_INTERVAL_MS = 60_000; // not too often
   const AUTO_SYNC_DEBOUNCE_MS = 10_000;
+  // Track the previous slug to decide when a navigation really switched repositories.
   const previousSlugRef = useRef<string | null>(slug);
 
   useEffect(() => {
@@ -187,6 +189,7 @@ export function RepoView({ slug, route, navigate, onRecordRecent }: RepoViewProp
 
   useEffect(() => {
     if (previousSlugRef.current !== null && previousSlugRef.current !== slug) {
+      // Navigated to a different repo; drop the note selection so we fall back to stored prefs or default.
       setActiveId(null);
     }
     previousSlugRef.current = slug;
