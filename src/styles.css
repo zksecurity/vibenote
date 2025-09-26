@@ -579,7 +579,12 @@ textarea:focus-visible {
   flex-direction: column;
   gap: 16px;
   min-height: 0;
-  overflow-y: auto;
+  position: sticky;
+  top: var(--topbar-height);
+  align-self: start;
+  height: calc(100vh - var(--topbar-height));
+  max-height: calc(100vh - var(--topbar-height));
+  overflow: hidden;
   transform: translateX(0);
   transition: transform 0.25s ease;
 }
