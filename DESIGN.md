@@ -52,33 +52,35 @@ Goal: least‑privilege access limited to user‑selected repositories, cleaner 
   - Metadata: Read
   - Avoid Administration (repo creation) to keep consent light; ask users to create a repo manually when needed.
 
-- Backend responsibilities (tiny service or Vercel Functions):
+- Backend responsibilities (tiny service):
 
-  - Sign an app JWT using the app’s private key.
-  - Exchange for an installation access token for a given installation (and optional repo).
-  - Optionally proxy GitHub Contents API (read/write) using the installation token to avoid exposing it to the client.
+  - Exchange GitHub App OAuth codes for user-to-server access + refresh tokens.
+  - Encrypt and persist refresh tokens (JSON file on disk for <100 sessions/min scope).
+  - Refresh access tokens on demand and return them to the authenticated browser session.
+  - Provide install/setup redirects; optional webhook receiver stays stubbed.
 
 - Client flow (GitHub App mode):
 
   1. User installs the GitHub App and selects one or more repos.
-  2. Client stores minimal identifiers (installation id, owner/repo) — no long‑lived user tokens.
-  3. For sync, client calls backend: `POST /api/app/token { installationId, owner, repo }` or directly `POST /api/contents` with the desired operation; backend uses short‑lived installation token.
+  2. Backend posts a signed session JWT + short-lived access token back to the popup opener.
+  3. Client stores the session token and access-token expiry metadata; all repo reads/writes hit GitHub REST directly from the browser.
+  4. Before calling GitHub (or on 401), the client asks `/v1/auth/github/refresh` to rotate the short-lived access token.
 
 - Migration strategy:
 
   - Keep OAuth Device Flow as “Quick start”.
   - Add an “Advanced: GitHub App” option in repo settings.
-  - If App mode is selected, disable user tokens and route all sync via backend using installation tokens.
-  - Document that private repos remain the default for personal notes; App mode still supports private repos with least privilege.
+  - When App mode is enabled, drop legacy device tokens and rely purely on user-to-server OAuth tokens.
+  - Document that the backend does not proxy Git data; everything runs from the browser using the user’s permissions.
 
 - Webhooks (optional):
 
   - Subscribe to push events for selected repos to signal the client that new commits exist, enabling smarter pull/merge prompts.
 
 - Security notes:
-  - Installation tokens are short‑lived; backend should not persist them beyond request handling.
-  - The app’s private key stays on the server; clients never see it.
-  - Rate limits: prefer per‑installation tokens and batch writes where possible.
+  - Refresh tokens are encrypted at rest; wipe `sessions.json` (or rotate `SESSION_ENCRYPTION_KEY`) to revoke every session.
+  - No GitHub App private key is stored; compromising the backend without refresh tokens gives no repo access.
+  - Rate limits: minimise GitHub requests, reuse tree/blob data when possible, and handle 403 “abuse detection” gracefully.
 
 ## Merge with Y.js
 
@@ -111,13 +113,14 @@ Notes:
 
 ## Git Operations
 
-`src/sync/git-sync.ts` now implements the GitHub Contents API end-to-end:
+`src/sync/git-sync.ts` now talks to the GitHub Git Data API directly from the browser:
 
 - `configureRemote` persists `{ owner, repo, branch, notesDir }` in `localStorage`.
-- `pullNote`, `listNoteFiles`, `commitBatch`, and `deleteFiles` wrap REST calls and convert Base64 content.
+- `pullNote`, `listNoteFiles`, and `fetchBlob` fetch via REST using the short-lived user token (with public fallbacks).
+- `commitBatch`, `putFile`, and `deleteFiles` build trees/commits client-side and update refs with the same token.
 - `syncBidirectional` mediates merges, handles local tombstones, restores remote deletions when needed, and records per-note sync hashes.
 
-Future options still include moving to GraphQL/tree APIs for scale or pushing Git logic to a backend proxy when GitHub App mode lands.
+Future options still include moving to GraphQL/tree APIs for scale or introducing a proxy for organisations that disallow browser-side tokens.
 
 ## Local Storage Format (MVP)
 

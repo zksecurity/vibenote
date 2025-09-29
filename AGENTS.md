@@ -119,12 +119,11 @@ See DEPLOYMENT.md for instructions to deploy the backend (mostly automatic with 
 - `GET /v1/auth/github/callback`
 - `GET /v1/app/install-url`
 - `GET /v1/app/setup`
-- `GET /v1/repos/:owner/:repo/metadata`
-- `GET /v1/repos/:owner/:repo/tree`
-- `GET /v1/repos/:owner/:repo/file`
-- `GET /v1/repos/:owner/:repo/blob/:sha`
-- `POST /v1/repos/:owner/:repo/commit`
+- `POST /v1/auth/github/refresh`
+- `POST /v1/auth/github/logout`
 - `POST /v1/webhooks/github` (placeholder)
+
+All repository reads and writes now happen directly from the client using the user-scoped GitHub App OAuth token. The backend no longer proxies Git operations.
 
 ### Environment variables
 
@@ -132,9 +131,9 @@ See `.env.example` for a detailed breakdown.
 
 ### Security & Ops quick notes
 
-- Never expose the GitHub App private key; keep it on the server / Vercel secrets only.
+- The backend no longer stores a GitHub App private key. Only the OAuth client id/secret and the encrypted session store live on the server.
 - Ensure frontend origins are exactly listed in `ALLOWED_ORIGINS`.
-- 403s on commit typically mean the app isn’t installed for that repo; direct users to the manage URL in metadata.
+- Session refresh tokens are encrypted at rest inside `SESSION_STORE_FILE`. Rotate `SESSION_ENCRYPTION_KEY` if compromised (this invalidates all stored refresh tokens).
 - Rotate `SESSION_JWT_SECRET` if compromised (all sessions invalidate).
 
 Future improvements: webhook validation/handling, request logging, smarter caching.

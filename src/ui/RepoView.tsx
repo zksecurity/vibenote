@@ -19,13 +19,12 @@ import {
   getExpandedFolders,
   setExpandedFolders,
 } from '../storage/local';
-import { clearToken } from '../auth/github';
 import {
   signInWithGitHubApp,
   getSessionToken as getAppSessionToken,
   getSessionUser as getAppSessionUser,
   ensureAppUserAvatarCached,
-  clearSession as clearAppSession,
+  signOutFromGitHubApp,
   type AppUser,
 } from '../auth/app-auth';
 import {
@@ -810,8 +809,12 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     };
   }, [autosync, linked, slug, store]);
 
-  const onSignOut = () => {
-    clearAppSession();
+  const onSignOut = async () => {
+    try {
+      await signOutFromGitHubApp();
+    } catch (err) {
+      console.warn('vibenote: failed to sign out cleanly', err);
+    }
     clearAllLocalData();
     store.replaceWithRemote([]);
     setSessionToken(null);

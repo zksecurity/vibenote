@@ -1,15 +1,8 @@
 // Git sync helpers backed by GitHub's REST v3 API.
-// Uses a stored OAuth token to read and write note files in a repository.
+// Uses the GitHub REST v3 API directly with user-scoped access tokens.
 
-import { getStoredToken } from '../auth/github';
-import {
-  getRepoMetadata as backendGetRepoMetadata,
-  getTree as backendGetTree,
-  getFile as backendGetFile,
-  getBlob as backendGetBlob,
-  commit as backendCommit,
-  type CommitResponse,
-} from '../lib/backend';
+import { ensureFreshAccessToken } from '../auth/app-auth';
+import { getRepoMetadata } from '../lib/backend';
 import {
   fetchPublicFile,
   fetchPublicTree,
@@ -41,6 +34,10 @@ export interface RemoteFile {
   sha: string; // blob sha at HEAD
 }
 
+type CommitResponse = { commitSha: string; blobShas: Record<string, string> };
+
+const GITHUB_API_BASE = 'https://api.github.com';
+
 export function buildRemoteConfig(slug: string): RemoteConfig {
   const [owner, repo] = slug.split('/', 2);
   if (!owner || !repo) throw new Error('Invalid repository slug');
@@ -49,9 +46,8 @@ export function buildRemoteConfig(slug: string): RemoteConfig {
 
 export async function repoExists(owner: string, repo: string): Promise<boolean> {
   try {
-    const meta = await backendGetRepoMetadata(owner, repo);
-    if (meta.installed && (meta.repoSelected || meta.repositorySelection === 'all')) return true;
-    // public repo without install is still viewable (read-only)
+    let meta = await getRepoMetadata(owner, repo);
+    if (meta.installed) return true;
     if (meta.isPrivate === false) return true;
     if (meta.isPrivate === true) return false;
   } catch {
@@ -65,33 +61,33 @@ export async function repoExists(owner: string, repo: string): Promise<boolean> 
   }
 }
 
-function authHeaders() {
-  const token = getStoredToken();
-  return {
-    Authorization: `Bearer ${token}`,
-    Accept: 'application/vnd.github+json',
-  };
-}
-
 export async function pullNote(config: RemoteConfig, path: string): Promise<RemoteFile | null> {
-  try {
-    const f = await backendGetFile(config.owner, config.repo, path, config.branch);
-    const content = fromBase64((f.contentBase64 || '').replace(/\n/g, ''));
-    return { path, text: content, sha: f.sha };
-  } catch (e: any) {
-    const status = typeof e === 'object' && e && 'status' in e ? Number((e as any).status) : null;
-    if (status === 403 || status === 404) {
-      const ref = config.branch || 'main';
-      try {
-        const publicFile = await fetchPublicFile(config.owner, config.repo, path, ref);
-        const content = fromBase64((publicFile.contentBase64 || '').replace(/\n/g, ''));
-        return { path, text: content, sha: publicFile.sha };
-      } catch (pubErr: unknown) {
-        if (pubErr instanceof PublicFetchError && pubErr.status === 404) return null;
-        throw pubErr;
-      }
+  let branch = config.branch || 'main';
+  let token = await ensureFreshAccessToken();
+  if (token) {
+    let resourcePath = `/repos/${encodeURIComponent(config.owner)}/${encodeURIComponent(
+      config.repo
+    )}/contents/${encodePath(path)}`;
+    if (branch) {
+      resourcePath = `${resourcePath}?ref=${encodeURIComponent(branch)}`;
     }
-    throw e;
+    let res = await githubRequest(token, 'GET', resourcePath);
+    if (res.ok) {
+      let json = (await res.json()) as any;
+      let content = fromBase64(String(json.content || '').replace(/\n/g, ''));
+      return { path, text: content, sha: String(json.sha || '') };
+    }
+    if (res.status !== 403 && res.status !== 404) {
+      await throwGitHubError(res, resourcePath);
+    }
+  }
+  try {
+    let publicFile = await fetchPublicFile(config.owner, config.repo, path, branch);
+    let content = fromBase64((publicFile.contentBase64 || '').replace(/\n/g, ''));
+    return { path, text: content, sha: publicFile.sha };
+  } catch (pubErr: unknown) {
+    if (pubErr instanceof PublicFetchError && pubErr.status === 404) return null;
+    throw pubErr;
   }
 }
 
@@ -109,12 +105,9 @@ export async function putFile(
   file: { path: string; text: string; baseSha?: string },
   message: string
 ): Promise<string> {
-  const res = await backendCommit(config.owner, config.repo, {
-    branch: config.branch,
-    message,
-    baseSha: file.baseSha,
-    changes: [{ path: file.path, contentBase64: toBase64(file.text) }],
-  });
+  let res = await commitChanges(config, message, [
+    { path: file.path, contentBase64: toBase64(file.text) },
+  ]);
   return extractBlobSha(res, file.path) ?? res.commitSha;
 }
 
@@ -124,12 +117,11 @@ export async function commitBatch(
   message: string
 ): Promise<string | null> {
   if (files.length === 0) return null;
-  const res = await backendCommit(config.owner, config.repo, {
-    branch: config.branch,
+  let res = await commitChanges(
+    config,
     message,
-    changes: files.map((f) => ({ path: f.path, contentBase64: toBase64(f.text) })),
-    baseSha: files[0]?.baseSha,
-  });
+    files.map((f) => ({ path: f.path, contentBase64: toBase64(f.text) }))
+  );
   // Return the first blob sha if available to align with caller expectations
   const firstPath = files[0]?.path;
   return firstPath ? extractBlobSha(res, firstPath) ?? res.commitSha : res.commitSha;
@@ -154,18 +146,24 @@ export async function listNoteFiles(config: RemoteConfig): Promise<{ path: strin
     return results;
   };
 
-  try {
-    const entries = await backendGetTree(config.owner, config.repo, config.branch);
-    return filterEntries(entries);
-  } catch (e: any) {
-    const status = typeof e === 'object' && e && 'status' in e ? Number((e as any).status) : null;
-    if (status === 403 || status === 404) {
-      const ref = config.branch || 'main';
-      const entries = await fetchPublicTree(config.owner, config.repo, ref);
-      return filterEntries(entries.map((entry) => ({ path: entry.path, sha: entry.sha, type: 'blob' })));
+  let branch = config.branch || 'main';
+  let token = await ensureFreshAccessToken();
+  if (token) {
+    let treePath = `/repos/${encodeURIComponent(config.owner)}/${encodeURIComponent(
+      config.repo
+    )}/git/trees/${encodeURIComponent(branch)}?recursive=1`;
+    let res = await githubRequest(token, 'GET', treePath);
+    if (res.ok) {
+      let json = (await res.json()) as any;
+      let entries = Array.isArray(json?.tree) ? (json.tree as Array<any>) : [];
+      return filterEntries(entries);
     }
-    throw e;
+    if (res.status !== 403 && res.status !== 404) {
+      await throwGitHubError(res, treePath);
+    }
   }
+  let entries = await fetchPublicTree(config.owner, config.repo, branch);
+  return filterEntries(entries.map((entry) => ({ path: entry.path, sha: entry.sha, type: 'blob' })));
 }
 
 // --- base64 helpers that safely handle UTF-8 ---
@@ -183,11 +181,11 @@ export async function deleteFiles(
   message: string
 ): Promise<string | null> {
   if (files.length === 0) return null;
-  const res = await backendCommit(config.owner, config.repo, {
-    branch: config.branch,
+  let res = await commitChanges(
+    config,
     message,
-    changes: files.map((f) => ({ path: f.path, delete: true })),
-  });
+    files.map((f) => ({ path: f.path, delete: true }))
+  );
   return res.commitSha || null;
 }
 
@@ -202,12 +200,17 @@ function fromBase64(b64: string): string {
 
 // Fetch raw blob content by SHA using backend (requires installation for the repo)
 export async function fetchBlob(config: RemoteConfig, sha: string): Promise<string | null> {
-  try {
-    const b = await backendGetBlob(config.owner, config.repo, sha);
-    return fromBase64((b.contentBase64 || '').replace(/\n/g, ''));
-  } catch {
+  let token = await ensureFreshAccessToken();
+  if (!token) return '';
+  let blobPath = `/repos/${encodeURIComponent(config.owner)}/${encodeURIComponent(
+    config.repo
+  )}/git/blobs/${encodeURIComponent(sha)}`;
+  let res = await githubRequest(token, 'GET', blobPath);
+  if (!res.ok) {
     return '';
   }
+  let json = (await res.json()) as any;
+  return fromBase64(String(json.content || '').replace(/\n/g, ''));
 }
 
 function extractBlobSha(res: CommitResponse, path: string): string | undefined {
@@ -218,6 +221,190 @@ function extractBlobSha(res: CommitResponse, path: string): string | undefined {
   const alt = path.replace(/^\.\//, '');
   if (alt in map) return map[alt];
   return undefined;
+}
+
+async function commitChanges(
+  config: RemoteConfig,
+  message: string,
+  changes: Array<{ path: string; contentBase64?: string; delete?: boolean }>
+): Promise<CommitResponse> {
+  let token = await requireAccessToken();
+  if (changes.length === 0) {
+    return { commitSha: '', blobShas: {} };
+  }
+  let ownerEncoded = encodeURIComponent(config.owner);
+  let repoEncoded = encodeURIComponent(config.repo);
+  let branch = config.branch ? config.branch.trim() : '';
+  if (!branch) branch = 'main';
+  let refPath = `/repos/${ownerEncoded}/${repoEncoded}/git/ref/heads/${encodeURIComponent(branch)}`;
+
+  let headSha: string | null = null;
+  let baseTreeSha: string | null = null;
+  let isInitialCommit = false;
+
+  let refRes = await githubRequest(token, 'GET', refPath);
+  if (refRes.ok) {
+    let refJson = (await refRes.json()) as any;
+    let refObject = refJson && typeof refJson.object === 'object' ? refJson.object : null;
+    if (!refObject || typeof refObject.sha !== 'string') {
+      throw new Error('Unexpected ref payload from GitHub');
+    }
+    headSha = String(refObject.sha);
+    let commitRes = await githubRequest(
+      token,
+      'GET',
+      `/repos/${ownerEncoded}/${repoEncoded}/git/commits/${encodeURIComponent(headSha)}`
+    );
+    if (!commitRes.ok) {
+      await throwGitHubError(commitRes, `/repos/${config.owner}/${config.repo}/git/commits/${headSha}`);
+    }
+    let commitJson = (await commitRes.json()) as any;
+    baseTreeSha = commitJson && commitJson.tree && typeof commitJson.tree.sha === 'string'
+      ? String(commitJson.tree.sha)
+      : null;
+  } else if (refRes.status === 404) {
+    isInitialCommit = true;
+  } else {
+    await throwGitHubError(refRes, refPath);
+  }
+
+  let treeItems: Array<{
+    path?: string;
+    mode?: '100644' | '100755' | '040000' | '160000' | '120000';
+    type?: 'blob' | 'tree' | 'commit';
+    sha?: string | null;
+    content?: string;
+    encoding?: 'utf-8';
+  }> = [];
+  let trackedPaths = new Set<string>();
+  for (let change of changes) {
+    if (change.delete) {
+      treeItems.push({ path: change.path, mode: '100644', type: 'blob', sha: null });
+      continue;
+    }
+    let contentBase64 = change.contentBase64 ?? '';
+    let normalized = contentBase64.replace(/\n/g, '');
+    let decoded = '';
+    try {
+      decoded = fromBase64(normalized);
+    } catch (err) {
+      console.warn('vibenote: failed to decode base64 content for', change.path, err);
+    }
+    treeItems.push({ path: change.path, mode: '100644', type: 'blob', content: decoded, encoding: 'utf-8' });
+    trackedPaths.add(change.path);
+  }
+
+  let treePayload: {
+    base_tree?: string;
+    tree: typeof treeItems;
+  } = {
+    tree: treeItems,
+  };
+  if (baseTreeSha) treePayload.base_tree = baseTreeSha;
+
+  let treePath = `/repos/${ownerEncoded}/${repoEncoded}/git/trees`;
+  let treeRes = await githubRequest(token, 'POST', treePath, treePayload);
+  if (!treeRes.ok) {
+    await throwGitHubError(treeRes, treePath);
+  }
+  let treeJson = (await treeRes.json()) as any;
+  let blobShas: Record<string, string> = {};
+  if (Array.isArray(treeJson?.tree)) {
+    for (let entry of treeJson.tree as Array<any>) {
+      if (!entry || entry.type !== 'blob') continue;
+      if (!entry.path || !entry.sha) continue;
+      if (trackedPaths.has(String(entry.path))) {
+        blobShas[String(entry.path)] = String(entry.sha);
+      }
+    }
+  }
+
+  let finalMessage = message && message.trim().length > 0 ? message.trim() : 'Update from VibeNote';
+  let parents = isInitialCommit || !headSha ? [] : [headSha];
+  let commitPayload = {
+    message: finalMessage,
+    tree: String(treeJson.sha || ''),
+    parents,
+  };
+  let commitPath = `/repos/${ownerEncoded}/${repoEncoded}/git/commits`;
+  let commitRes = await githubRequest(token, 'POST', commitPath, commitPayload);
+  if (!commitRes.ok) {
+    await throwGitHubError(commitRes, commitPath);
+  }
+  let commitJson = (await commitRes.json()) as any;
+  let newCommitSha = String(commitJson.sha || '');
+
+  if (isInitialCommit || !headSha) {
+    let createRefPath = `/repos/${ownerEncoded}/${repoEncoded}/git/refs`;
+    let createRes = await githubRequest(token, 'POST', createRefPath, {
+      ref: `refs/heads/${branch}`,
+      sha: newCommitSha,
+    });
+    if (!createRes.ok && createRes.status !== 422) {
+      await throwGitHubError(createRes, createRefPath);
+    }
+  } else {
+    let updateRefPath = `/repos/${ownerEncoded}/${repoEncoded}/git/refs/heads/${encodeURIComponent(branch)}`;
+    let updateRes = await githubRequest(token, 'PATCH', updateRefPath, {
+      sha: newCommitSha,
+      force: false,
+    });
+    if (!updateRes.ok) {
+      await throwGitHubError(updateRes, updateRefPath);
+    }
+  }
+
+  return { commitSha: newCommitSha, blobShas };
+}
+
+async function requireAccessToken(): Promise<string> {
+  let token = await ensureFreshAccessToken();
+  if (!token) {
+    throw new Error('GitHub authentication required');
+  }
+  return token;
+}
+
+async function githubRequest(
+  token: string | null,
+  method: string,
+  path: string,
+  body?: unknown
+): Promise<Response> {
+  let headers: Record<string, string> = { Accept: 'application/vnd.github+json' };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  let init: RequestInit = {
+    method,
+    headers,
+  };
+  if (body !== undefined) {
+    init.body = JSON.stringify(body);
+  }
+  return await fetch(`${GITHUB_API_BASE}${path}`, init);
+}
+
+async function throwGitHubError(res: Response, path: string): Promise<never> {
+  let error: any = new Error(`GitHub request failed (${res.status})`);
+  error.status = res.status;
+  error.path = path;
+  try {
+    error.body = await res.json();
+  } catch {
+    try {
+      error.text = await res.text();
+    } catch {
+      error.text = null;
+    }
+  }
+  throw error;
+}
+
+function encodePath(input: string): string {
+  return input
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
 }
 
 function hashText(text: string): string {

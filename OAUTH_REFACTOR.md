@@ -12,25 +12,24 @@ Phases
 - Webhook URL: https://api.vibenote.dev/v1/webhooks/github (secret set)
 - Permissions: Repository Contents (Read & write), Repository Metadata (Read-only)
 - OAuth scopes: read:user, user:email (optional)
-- Save: App ID, App slug, Private key (PEM), OAuth client ID/secret, Webhook secret
+- Save: App slug, OAuth client ID/secret, Webhook secret
 
 2. Backend MVP (this change)
 
 - Node + TypeScript server running on a VPS (single stable base URL)
 - Endpoints (prefix /v1):
   - Auth: /auth/github/start, /auth/github/callback (popup login → session JWT)
+  - Token lifecycle: /auth/github/refresh, /auth/github/logout (rotate user-to-server tokens)
   - Install flow: /app/install-url, /app/setup (round-trip state → return user to repo)
-  - Repo: /repos/:owner/:repo/metadata (installed? selected? default branch)
-  - Data: /repos/:owner/:repo/tree, /repos/:owner/:repo/file (installed token or public unauth)
-  - Write: /repos/:owner/:repo/commit (installation token; batches changes into one commit)
-- Security: CORS allow-list, HMAC/JWT state, no secrets to client, no DB
+  - Webhooks: /webhooks/github (stub for future)
+- Security: CORS allow-list, signed state tokens, encrypted session store on disk
 
 3. Frontend Integration
 
 - Auth popup to backend, store only VibeNote session JWT locally
-- RepoView calls /metadata to decide UI state
-- Public read (not installed) is client-first direct to GitHub with backend fallback
-- Editor/FileTree swap to backend for tree/file/commit
+- RepoView calls GitHub directly with the short-lived user token; backend only refreshes tokens
+- Public read remains client-first direct to GitHub (unauthenticated)
+- Editor/FileTree perform GitHub REST calls from the browser with the user token
 - CTAs: Public → “Get Write Access”, Private → “Get Read/Write Access”
 
 4. Install Flow Polish
@@ -50,16 +49,17 @@ Phases
 
 Environment (backend)
 
-- GITHUB_APP_ID, GITHUB_APP_SLUG
+- GITHUB_APP_SLUG
 - GITHUB_OAUTH_CLIENT_ID, GITHUB_OAUTH_CLIENT_SECRET
-- GITHUB_APP_PRIVATE_KEY_BASE64 (base64 of PEM) or GITHUB_APP_PRIVATE_KEY_PATH
 - GITHUB_WEBHOOK_SECRET
 - SESSION_JWT_SECRET (JWT signing key)
+- SESSION_ENCRYPTION_KEY (32-byte key for encrypted refresh tokens)
+- SESSION_STORE_FILE (path to JSON session file)
 - ALLOWED_ORIGINS (comma-separated)
 - PORT (default 8787)
 
 Operational Notes
 
-- Backend mints installation tokens on-demand with the app’s private key
-- Client never receives GitHub tokens
-- Public repos without installation are read-only; private requires installation (or repo selection) to view/edit
+- Backend never mints installation tokens; it only exchanges OAuth codes and refreshes user tokens
+- Client receives short-lived GitHub App user-to-server access tokens and stores them ephemerally (refresh handled via backend)
+- Public repos remain readable without install; private repos require the app to be installed and the user to have access

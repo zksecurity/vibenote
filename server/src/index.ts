@@ -6,15 +6,12 @@ import {
   handleAuthCallback,
   buildInstallUrl,
   buildSetupRedirect,
-  fetchRepoMetadata,
-  fetchRepoTree,
-  fetchRepoFile,
-  fetchRepoBlob,
-  commitToRepo,
-  parseCommitRequestBody,
+  refreshAccessToken,
+  logoutSession,
   verifyBearerSession,
   type SessionClaims,
 } from './api.ts';
+import { createSessionStore } from './session-store.ts';
 
 declare module 'express-serve-static-core' {
   interface Request {
@@ -23,6 +20,12 @@ declare module 'express-serve-static-core' {
 }
 
 const env = getEnv();
+const sessionStore = createSessionStore({
+  filePath: env.SESSION_STORE_FILE,
+  encryptionKey: env.SESSION_ENCRYPTION_KEY,
+});
+await sessionStore.init();
+
 const app = express();
 app.use(express.json({ limit: '2mb' }));
 app.use(
@@ -39,37 +42,70 @@ app.use(
 app.get('/v1/healthz', (_req, res) => res.json({ ok: true }));
 
 app.get('/v1/auth/github/start', async (req, res) => {
-  const returnTo = String(req.query.returnTo ?? '');
-  const redirect = await createAuthStartRedirect(env, returnTo, callbackURL(req));
+  let returnTo = String(req.query.returnTo ?? '');
+  let redirect = await createAuthStartRedirect(env, returnTo, callbackURL(req));
   res.redirect(redirect);
 });
 
 app.get('/v1/auth/github/callback', async (req, res) => {
   try {
-    const code = String(req.query.code ?? '');
-    const stateToken = String(req.query.state ?? '');
-    const { html } = await handleAuthCallback(env, code, stateToken, callbackURL(req), requestOrigin(req));
+    let code = String(req.query.code ?? '');
+    let stateToken = String(req.query.state ?? '');
+    let { html } = await handleAuthCallback(
+      env,
+      sessionStore,
+      code,
+      stateToken,
+      callbackURL(req),
+      requestOrigin(req)
+    );
     res.status(200).type('html').send(html);
   } catch (error: unknown) {
     res.status(400).json({ error: getErrorMessage(error) });
   }
 });
 
+app.post('/v1/auth/github/refresh', requireSession, async (req, res) => {
+  try {
+    let claims = req.sessionUser;
+    if (!claims) {
+      return res.status(401).json({ error: 'missing session' });
+    }
+    let tokens = await refreshAccessToken(env, sessionStore, claims.sessionId);
+    res.json({ accessToken: tokens.accessToken, accessTokenExpiresAt: tokens.accessTokenExpiresAt });
+  } catch (error: unknown) {
+    res.status(401).json({ error: getErrorMessage(error) });
+  }
+});
+
+app.post('/v1/auth/github/logout', requireSession, async (req, res) => {
+  try {
+    let claims = req.sessionUser;
+    if (!claims) {
+      return res.status(401).json({ error: 'missing session' });
+    }
+    await logoutSession(sessionStore, claims.sessionId);
+    res.status(204).end();
+  } catch (error: unknown) {
+    res.status(400).json({ error: getErrorMessage(error) });
+  }
+});
+
 app.get('/v1/app/install-url', async (req, res) => {
-  const owner = String(req.query.owner ?? '');
-  const repo = String(req.query.repo ?? '');
-  const returnTo = String(req.query.returnTo ?? '');
-  const url = await buildInstallUrl(env, owner, repo, returnTo);
+  let owner = String(req.query.owner ?? '');
+  let repo = String(req.query.repo ?? '');
+  let returnTo = String(req.query.returnTo ?? '');
+  let url = await buildInstallUrl(env, owner, repo, returnTo);
   res.json({ url });
 });
 
 app.get('/v1/app/setup', async (req, res) => {
   try {
-    const installationId = req.query.installation_id ? String(req.query.installation_id) : null;
-    const setupAction = req.query.setup_action ? String(req.query.setup_action) : null;
-    const stateToken = String(req.query.state ?? '');
-    const returnTo = String(req.query.returnTo ?? '');
-    const target = await buildSetupRedirect(
+    let installationId = req.query.installation_id ? String(req.query.installation_id) : null;
+    let setupAction = req.query.setup_action ? String(req.query.setup_action) : null;
+    let stateToken = String(req.query.state ?? '');
+    let returnTo = String(req.query.returnTo ?? '');
+    let target = await buildSetupRedirect(
       env,
       stateToken,
       returnTo,
@@ -83,102 +119,6 @@ app.get('/v1/app/setup', async (req, res) => {
   }
 });
 
-app.get('/v1/repos/:owner/:repo/metadata', async (req, res) => {
-  try {
-    const data = await fetchRepoMetadata(env, String(req.params.owner), String(req.params.repo));
-    res.json(data);
-  } catch (error: unknown) {
-    res.status(500).json({ error: getErrorMessage(error) });
-  }
-});
-
-app.get('/v1/repos/:owner/:repo/tree', async (req, res) => {
-  try {
-    const data = await fetchRepoTree(
-      env,
-      String(req.params.owner),
-      String(req.params.repo),
-      req.query.ref ? String(req.query.ref) : null
-    );
-    res.json(data);
-  } catch (error: unknown) {
-    if (isInstallationMissingError(error)) {
-      return res.status(403).json({ error: 'app not installed for this repo' });
-    }
-    if (error instanceof Error && error.message === 'ref missing') {
-      return res.status(400).json({ error: error.message });
-    }
-    res.status(500).json({ error: getErrorMessage(error) });
-  }
-});
-
-app.get('/v1/repos/:owner/:repo/file', async (req, res) => {
-  const path = String(req.query.path ?? '');
-  if (!path) return res.status(400).json({ error: 'path required' });
-  try {
-    const data = await fetchRepoFile(
-      env,
-      String(req.params.owner),
-      String(req.params.repo),
-      path,
-      req.query.ref ? String(req.query.ref) : undefined
-    );
-    res.json(data);
-  } catch (error: unknown) {
-    if (isInstallationMissingError(error)) {
-      return res.status(403).json({ error: 'app not installed for this repo' });
-    }
-    if (error instanceof Error && error.message) {
-      if (error.message === 'path refers to a directory' || error.message === 'unsupported content type') {
-        return res.status(400).json({ error: error.message });
-      }
-    }
-    res.status(500).json({ error: getErrorMessage(error) });
-  }
-});
-
-app.get('/v1/repos/:owner/:repo/blob/:sha', async (req, res) => {
-  try {
-    const data = await fetchRepoBlob(
-      env,
-      String(req.params.owner),
-      String(req.params.repo),
-      String(req.params.sha)
-    );
-    res.json(data);
-  } catch (error: unknown) {
-    if (isInstallationMissingError(error)) {
-      return res.status(403).json({ error: 'app not installed for this repo' });
-    }
-    res.status(500).json({ error: getErrorMessage(error) });
-  }
-});
-
-app.post('/v1/repos/:owner/:repo/commit', requireSession, async (req, res) => {
-  try {
-    const payload = parseCommitRequestBody(req.body);
-    const result = await commitToRepo(
-      env,
-      String(req.params.owner),
-      String(req.params.repo),
-      payload,
-      req.sessionUser
-    );
-    res.json(result);
-  } catch (error: unknown) {
-    if (isInstallationMissingError(error)) {
-      return res.status(403).json({ error: 'app not installed for this repo' });
-    }
-    if (error instanceof Error && /^(branch|changes) required/.test(error.message)) {
-      return res.status(400).json({ error: error.message });
-    }
-    if (error instanceof Error && error.message.startsWith('invalid ')) {
-      return res.status(400).json({ error: error.message });
-    }
-    res.status(500).json({ error: getErrorMessage(error) });
-  }
-});
-
 app.post('/v1/webhooks/github', (_req, res) => {
   res.status(204).end();
 });
@@ -187,7 +127,7 @@ const server = app.listen(env.PORT, () => {
   console.log(`[vibenote] api listening on :${env.PORT}`);
 });
 
-for (const sig of ['SIGINT', 'SIGTERM']) {
+for (let sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
     console.log(`[vibenote] received ${sig}, shutting down...`);
     server.close(() => {
@@ -200,6 +140,14 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
     }, 8000).unref();
   });
 }
+
+setInterval(() => {
+  try {
+    sessionStore.pruneExpired();
+  } catch (error) {
+    console.error('[vibenote] session prune failed', error);
+  }
+}, 60 * 60 * 1000).unref();
 
 function callbackURL(req: express.Request): string {
   return `${getProtocol(req)}://${getHost(req)}/v1/auth/github/callback`;
@@ -222,16 +170,12 @@ function getErrorMessage(error: unknown): string {
   return String(error);
 }
 
-function isInstallationMissingError(error: unknown): boolean {
-  return error instanceof Error && error.message === 'app not installed for this repo';
-}
-
 function requireSession(req: express.Request, res: express.Response, next: express.NextFunction) {
-  const header = req.header('authorization') || req.header('Authorization');
+  let header = req.header('authorization') || req.header('Authorization');
   if (!header || !header.toLowerCase().startsWith('bearer ')) {
     return res.status(401).json({ error: 'missing auth' });
   }
-  const token = header.slice(7).trim();
+  let token = header.slice(7).trim();
   verifyBearerSession(token, env)
     .then((claims) => {
       req.sessionUser = claims;
