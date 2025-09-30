@@ -111,7 +111,7 @@ All repository reads and writes now happen directly from the client using the us
 
 ### Environment variables
 
-See `.env.example` for a detailed breakdown.
+See `.env.example` and `docs/AUTH.md` for a detailed breakdown of variables and the auth flow.
 
 ### Security & Ops quick notes
 
