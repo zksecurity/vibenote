@@ -6,28 +6,21 @@ Development Setup
 
 - Prereqs: Node 22+, npm
 - Install: `npm install`
-- Run dev (UI + API): `npm start` (Vercel dev on `http://localhost:3000`)
-- Env: copy `.env.example` → `.env` and fill the GitHub App variables (`GITHUB_APP_*`, `SESSION_JWT_SECRET`, `ALLOWED_ORIGINS`, etc.). `GITHUB_CLIENT_ID` is optional legacy support for Device Flow.
-- Routing: `vercel dev` runs Vite on the same origin and serves `/api/*` via the Vercel router. No manual proxy setup is required.
+- Run the frontend: `npm start` (Vite on `http://localhost:3000`)
+- (Typically not needed) Run the backend: `npm run server:start` (Express on `http://localhost:8787` by default)
+- Env: Human developer manually copies `.env.example` → `.env` and fills the GitHub App variables (`GITHUB_APP_SLUG`, `GITHUB_OAUTH_*`, `SESSION_JWT_SECRET`, `SESSION_ENCRYPTION_KEY`, `ALLOWED_ORIGINS`, etc.)
+  - coding agents MUST NEVER read or write `.env`, actual secrets may be stored there, even in development
 
 Local dev
 
-- Single command: `npm start`
-  - Opens `http://localhost:3000/` for the UI; `/api/*` served by Vercel functions.
+- Single command: `npm start`, starts the Vite dev server.
+- We usually set `VITE_VIBENOTE_API_BASE` to the _production backend_ when developing the frontend, so you don't have to start the backend. Only after backend changes, make sure that the backend is restarted.
 - Node runs TypeScript directly (2025+): use `node path/to/file.ts` for quick scripts; no ts-node/tsx needed.
 
 Local Auth (GitHub App)
 
 - “Connect GitHub” opens the GitHub App popup flow (`/v1/auth/github/*`).
-- The backend signs JWT sessions; no GitHub tokens persist in localStorage.
-- Legacy Device Flow endpoints live in `api/_legacy_github/_*.ts` (prefixed with `_` so Vercel ignores them). Only revive them intentionally if you bring back Device Flow.
-
-Deploying to Vercel
-
-- Framework: Vite (build to `dist/`). `vercel.json` is provided.
-- Project env var: `GITHUB_CLIENT_ID` for both Preview and Production.
-- Auto previews: When linked to GitHub, Vercel builds a Preview for each PR.
-- First deploy: import repo → confirm build (`npm run build`) and output (`dist`) → add env var → deploy.
+- The backend mints session JWTs and stores encrypted refresh tokens on disk; no GitHub tokens persist in localStorage beyond the short-lived access token.
 
 Commit & PR Conventions
 
@@ -49,15 +42,13 @@ UI/UX Conventions
 - Mobile-first: modals full-screen on small screens; convenient tap targets.
 - Visual direction: light GitHub-inspired shell. Use soft gray backgrounds, white surfaces, GitHub green for primary actions, and muted blue accents. Top bar mirrors GitHub repo view with circular sync icon, repo chip, and avatar. On small screens, repo name becomes the "title" (owner hidden <520px) and header stays within one row.
 
-Auth Modes
+Auth Mode
 
-- Default: GitHub App popup (per repo/owner install).
-- Legacy: Device Flow (disabled by default; endpoints kept in `_legacy_github`).
+- GitHub App popup (per repo/owner install) issuing user-scoped OAuth tokens.
 
 Security Notes
 
 - Treat access tokens as secrets; never log them or send to third‑party services.
-- Device Flow tokens are bearer tokens; store only client‑side and clear on sign‑out.
 
 Coding Guidelines
 
@@ -103,14 +94,7 @@ Agent Conventions
 
 ## Backend Deployment (GitHub App)
 
-We share the same backend logic (`server/src/api.ts`) across two deployment targets:
-
-1. **Serverless API (Vercel `/api`)** — primary deployment. Configure the GitHub App env vars in Vercel. The Hobby plan allows at most **12** functions per deployment; we currently ship 11 active routes. Legacy Device Flow handlers live in `api/_legacy_github/_*.ts` so they don’t count toward the limit.
-2. **Express server (server/src/index.ts)** — the PM2/NGINX VPS setup in `docs/DEPLOYMENT.md`. Keep it as fallback or when we need stateful features later.
-
-Switch between them by changing `VIBENOTE_API_BASE` (and keeping the env variables in sync).
-
-See DEPLOYMENT.md for instructions to deploy the backend (mostly automatic with Vercel, based on scripts in this repo on a VPS.)
+The Express backend lives in `server/src/index.ts`. Deploy it on a VPS (PM2 + NGINX) as described in `docs/DEPLOYMENT.md`. The frontend talks to it via `VIBENOTE_API_BASE` / `VITE_VIBENOTE_API_BASE`.
 
 ### API surface (common routes)
 

@@ -2,7 +2,7 @@
 
 VibeNote is a lightweight, mobile‑friendly, offline‑first note editor that treats a Git repository as its database. It lets you browse repos like a notebook and edit Markdown notes. Notes are stored as regular Markdown files in Git, so they remain portable and reviewable.
 
-- Frontend only (no persistent server required)
+- Lightweight Express backend issues GitHub App tokens and stores encrypted session refresh tokens
 - Offline‑first via in‑browser storage + optimistic UI
 - Periodic background sync commits to GitHub (or any Git host API)
 - Y.js‑backed merge for conflict resolution during sync (no live collaboration)
@@ -11,64 +11,24 @@ See DESIGN.md for a detailed architecture and sync/merge logic.
 
 ## Development
 
-See `AGENTS.md` for local setup, environment variables, and serverless API instructions.
+See `AGENTS.md` for local setup, environment variables, and backend instructions.
 
 ## Project layout
 
 - `src/ui/` React UI, modals, and the app shell
-- `src/auth/` GitHub Device Flow helpers used by the client
+- `src/auth/` GitHub App auth helpers (popup flow, access-token refresh)
 - `src/storage/` local offline storage (localStorage for MVP, plus tombstones, folder index)
 - `src/merge/` Y.js‑backed merge helpers for Markdown
 - `src/sync/` GitHub REST integration for pull/push/delete and bidirectional sync
-- `api/` Vercel serverless endpoints that proxy GitHub's device code/token APIs
-- `DESIGN.md` Deep dive into syncing, CRDT merge, file layout, and future serverless options
+- `DESIGN.md` Deep dive into syncing, CRDT merge, file layout, and backend architecture
 
 ## Deploying
 
-Vercel deployment instructions and preview setup are documented in `AGENTS.md`.
+Backend deployment instructions (PM2/NGINX) are documented in `AGENTS.md`.
 
 ## GitHub App Backend
 
-A lightweight optional backend (in `server/`) supports the upcoming GitHub App auth + write flow. Most users can ignore it while the app still supports the OAuth Device Flow. If you intend to self‑host the GitHub App backend, see the detailed deployment guide in `AGENTS.md` (section: "Backend Deployment (GitHub App)").
-
-## GitHub OAuth (Device Flow)
-
-This app uses GitHub’s Device Authorization Flow via serverless proxy endpoints (no CORS issues in the browser).
-
-Steps:
-
-- Create a new GitHub OAuth App at https://github.com/settings/developers → New OAuth App.
-  - Homepage URL: your Vercel production URL (or `http://localhost:3000` for dev)
-  - Authorization callback URL: can be any valid URL (not used by device flow), e.g. your homepage URL
-- Copy the Client ID and set it as `GITHUB_CLIENT_ID` (server env var on Vercel; `.env` for `vercel dev`).
-- In the app, click “Connect GitHub” and follow the instructions; enter the user code in the opened GitHub page.
-
-Endpoints provided by the app (Vercel functions):
-
-- `POST /api/github/device-code` → calls GitHub device code API
-- `POST /api/github/device-token` → polls for access token
-
-For local development of these endpoints, see `AGENTS.md` (using `vercel dev`).
-
-## Auth Modes
-
-**OAuth Device Flow**
-
-- Permissions: `repo` (public + private) per user; broad OAuth scope.
-- Tokens: User access token, long‑lived bearer stored locally (MVP).
-- Backend: Minimal (serverless proxy to avoid CORS only).
-- Repo selection: Any repo user can access; no per‑repo install.
-- Private repos: Supported.
-- Best for: Fast setup, personal use, minimal backend.
-
-**GitHub App (Planned)**
-
-- Permissions: Fine‑grained (Repository contents: Read & write; Metadata: Read).
-- Tokens: Short‑lived installation tokens scoped to selected repos.
-- Backend: Required (sign JWT, mint installation tokens; optional API proxy).
-- Repo selection: User selects specific repos at install.
-- Private repos: Supported; least‑privilege consent screen.
-- Best for: Production, org usage, tighter permissions.
+VibeNote authenticates via a GitHub App that issues user-to-server OAuth tokens. The Express backend (in `server/`) performs the OAuth exchange, stores encrypted refresh tokens on disk, and exposes `/v1/auth/github/*` endpoints for login, refresh, logout, and install redirects. All repository reads and writes run directly in the browser with the short-lived access token; the backend never touches repo content.
 
 ## Manual Sync (MVP)
 
