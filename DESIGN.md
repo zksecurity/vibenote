@@ -32,53 +32,21 @@ This document captures the core architecture, sync logic, and decisions so anoth
 
 ## Identity & Auth
 
-- MVP: GitHub Device Authorization Flow. The UI requests a device code via serverless proxy (`api/github/device-code`), polls `api/github/device-token` for the access token, and stores it in `localStorage` under `vibenote:gh-token`.
-- Serverless functions (deployed on Vercel) keep the OAuth Client ID secret and avoid browser CORS issues.
-- Future: GitHub App mode for least-privilege access (see below) or a refined OAuth flow that avoids storing long-lived tokens client-side.
-
-## GitHub App (Future Option)
-
-Goal: least‑privilege access limited to user‑selected repositories, cleaner consent for private notes, and short‑lived tokens.
-
-- Why a GitHub App:
-
-  - Users select specific repositories at install time (or “all repos”).
-  - Permissions are fine‑grained (e.g., Repository contents: Read & write, Metadata: Read).
-  - Installation access tokens are short‑lived and scoped to the selected repos only.
-
-- Proposed permissions (initial):
-
-  - Repository contents: Read & write
-  - Metadata: Read
-  - Avoid Administration (repo creation) to keep consent light; ask users to create a repo manually when needed.
-
-- Backend responsibilities (tiny service or Vercel Functions):
-
-  - Sign an app JWT using the app’s private key.
-  - Exchange for an installation access token for a given installation (and optional repo).
-  - Optionally proxy GitHub Contents API (read/write) using the installation token to avoid exposing it to the client.
-
-- Client flow (GitHub App mode):
-
-  1. User installs the GitHub App and selects one or more repos.
-  2. Client stores minimal identifiers (installation id, owner/repo) — no long‑lived user tokens.
-  3. For sync, client calls backend: `POST /api/app/token { installationId, owner, repo }` or directly `POST /api/contents` with the desired operation; backend uses short‑lived installation token.
-
-- Migration strategy:
-
-  - Keep OAuth Device Flow as “Quick start”.
-  - Add an “Advanced: GitHub App” option in repo settings.
-  - If App mode is selected, disable user tokens and route all sync via backend using installation tokens.
-  - Document that private repos remain the default for personal notes; App mode still supports private repos with least privilege.
-
-- Webhooks (optional):
-
-  - Subscribe to push events for selected repos to signal the client that new commits exist, enabling smarter pull/merge prompts.
-
+- GitHub App user-to-server OAuth provides least-privilege access limited to repos the installer selects.
+- Backend responsibilities:
+  - Exchange OAuth authorization codes for access + refresh tokens.
+  - Store refresh tokens encrypted on disk (`SESSION_ENCRYPTION_KEY`), rotate them on every refresh, and return the new short-lived access token to the browser.
+  - Serve `/v1/auth/github/*` endpoints for login, refresh, logout, install/setup redirects, and basic health checks.
+  - Never touch repository contents; all GitHub REST calls originate from the browser with the user token.
+- Client flow:
+  1. User installs the GitHub App (selecting repos or “all repos”).
+  2. Popup returns a signed session JWT plus short-lived access token via `postMessage`.
+  3. The SPA stores the session token + access-token expiry metadata and issues GitHub REST requests directly.
+  4. When the access token is near expiry or GitHub returns 401, the SPA calls `/v1/auth/github/refresh` to obtain a fresh token.
 - Security notes:
-  - Installation tokens are short‑lived; backend should not persist them beyond request handling.
-  - The app’s private key stays on the server; clients never see it.
-  - Rate limits: prefer per‑installation tokens and batch writes where possible.
+  - Refresh tokens are encrypted at rest; delete `sessions.json` (or rotate `SESSION_ENCRYPTION_KEY`) to revoke all sessions.
+  - No GitHub App private key is stored server-side; compromising the backend without refresh tokens grants no repo access.
+  - Rate limits: minimise redundant GitHub calls, cache read responses, and treat 403 “abuse detection” responses as soft-failures with retry backoff.
 
 ## Merge with Y.js
 
@@ -92,7 +60,7 @@ Goal: least‑privilege access limited to user‑selected repositories, cleaner 
 
 1. On app load:
    - Instantiate `LocalStore`, which seeds a welcome note if none exist and materialises the local index from `localStorage`.
-   - Load any existing GitHub token (`vibenote:gh-token`) and remote config (`vibenote:config`).
+   - Load the saved session token and access-token metadata (`vibenote:sessionToken`, `vibenote:app-access-token`) plus remote config (`vibenote:config`).
 2. Editing a note:
    - Apply the edit to the plain text and immediately persist the new Markdown to `localStorage`.
    - `LocalStore` updates `updatedAt` and leaves tombstones when notes are deleted or renamed.
@@ -111,13 +79,14 @@ Notes:
 
 ## Git Operations
 
-`src/sync/git-sync.ts` now implements the GitHub Contents API end-to-end:
+`src/sync/git-sync.ts` now talks to the GitHub Git Data API directly from the browser:
 
 - `configureRemote` persists `{ owner, repo, branch, notesDir }` in `localStorage`.
-- `pullNote`, `listNoteFiles`, `commitBatch`, and `deleteFiles` wrap REST calls and convert Base64 content.
+- `pullNote`, `listNoteFiles`, and `fetchBlob` fetch via REST using the short-lived user token (with public fallbacks).
+- `commitBatch`, `putFile`, and `deleteFiles` build trees/commits client-side and update refs with the same token.
 - `syncBidirectional` mediates merges, handles local tombstones, restores remote deletions when needed, and records per-note sync hashes.
 
-Future options still include moving to GraphQL/tree APIs for scale or pushing Git logic to a backend proxy when GitHub App mode lands.
+Future options still include moving to GraphQL/tree APIs for scale or introducing a proxy for organisations that disallow browser-side tokens.
 
 ## Local Storage Format (MVP)
 

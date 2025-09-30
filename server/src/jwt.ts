@@ -1,6 +1,7 @@
 import { SignJWT, jwtVerify } from 'jose';
 
 type SessionClaims = {
+  sessionId: string;
   sub: string; // user id
   login: string;
   avatarUrl: string | null;
@@ -16,7 +17,12 @@ export async function signSession(
 ): Promise<string> {
   const key = new TextEncoder().encode(secret);
   const now = Math.floor(Date.now() / 1000);
-  return await new SignJWT({ login: claims.login, avatarUrl: claims.avatarUrl, name: claims.name })
+  return await new SignJWT({
+    login: claims.login,
+    avatarUrl: claims.avatarUrl,
+    name: claims.name,
+    sessionId: claims.sessionId,
+  })
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject(claims.sub)
     .setIssuedAt(now)
@@ -30,7 +36,11 @@ export async function verifySession(token: string, secret: string): Promise<Sess
   if (!payload.sub || typeof payload.sub !== 'string') {
     throw new Error('invalid session token (sub)');
   }
+  if (!payload.sessionId || typeof payload.sessionId !== 'string') {
+    throw new Error('invalid session token (sessionId)');
+  }
   return {
+    sessionId: payload.sessionId,
     sub: payload.sub,
     login: String(payload.login ?? ''),
     avatarUrl: (payload.avatarUrl as string | null) ?? null,
