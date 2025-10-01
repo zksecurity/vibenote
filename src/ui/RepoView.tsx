@@ -103,43 +103,49 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     return new LocalStore(slug);
   }, [slug, route.kind]);
   const { notes, folders, notifyStoreListeners } = useRepoStore(store);
-  // Restore the previously active note as early as possible so the editor does not flicker to empty state.
-  const [activeId, setActiveId] = useState<string | null>(() => {
-    if (slug === 'new') return null;
-    const stored = getLastActiveNoteId(slug);
-    if (!stored) return null;
-    const available = store.listNotes();
-    return available.some((note) => note.id === stored) ? stored : null;
-  });
+  const { collapsed: collapsedFolders, setCollapsedMap } = useCollapsedFolders({ slug, folders });
+  // Hold the currently loaded read-only note so the editor can render remote content.
   const [readOnlyDoc, setReadOnlyDoc] = useState<NoteDoc | null>(null);
-  const [collapsedFolders, setCollapsedFoldersState] = useState<Record<string, boolean>>(() => {
-    let expanded = slug === 'new' ? [] : getExpandedFolders(slug);
-    return buildCollapsedMap(expanded, store.listFolders());
-  });
   type ReadOnlyNote = { id: string; path: string; title: string; dir: string; sha?: string };
+  // Cache read-only note metadata fetched straight from GitHub when in view-only mode.
   const [readOnlyNotes, setReadOnlyNotes] = useState<ReadOnlyNote[]>([]);
+  // Indicate when remote read-only data is being fetched to show loading states.
   const [readOnlyLoading, setReadOnlyLoading] = useState(false);
+  // Track sidebar visibility, especially for mobile drawer toggles.
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Persist current tree selection so actions like create/rename know their context.
   const [selection, setSelection] = useState<
     { kind: 'folder'; dir: string } | { kind: 'file'; id: string } | null
   >(null);
+  // Drive inline creation rows in the FileTree with a stable descriptor.
   const [newEntry, setNewEntry] = useState<{
     kind: 'file' | 'folder';
     parentDir: string;
     key: number;
   } | null>(null);
+  // Store the current GitHub App session token to toggle authenticated features instantly.
   const [sessionToken, setSessionToken] = useState<string | null>(getAppSessionToken());
+  // Toggle the repository configuration modal visibility.
   const [showConfig, setShowConfig] = useState(false);
+  // Carry the latest sync status message shown across the workspace.
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const initialAppUser = useMemo(() => getAppSessionUser(), []);
+  // Cache the GitHub login to seed repo switcher defaults.
   const [ownerLogin, setOwnerLogin] = useState<string | null>(initialAppUser?.login ?? null);
+  // Track whether this repo slug has already been linked to GitHub sync.
   const [linked, setLinked] = useState(() => slug !== 'new' && isRepoLinked(slug));
+  // Keep the signed-in GitHub App user details for header UI.
   const [user, setUser] = useState<AppUser | null>(initialAppUser);
   const userAvatarSrc = user?.avatarDataUrl ?? user?.avatarUrl ?? undefined;
+  // Track whether the account dropdown menu is currently expanded.
   const [menuOpen, setMenuOpen] = useState(false);
+  // Manage the ephemeral toast message shown at the bottom of the app.
   const [toast, setToast] = useState<{ text: string; href?: string } | null>(null);
+  // Remember which mode the repo modal should present (onboarding vs manage).
   const [repoModalMode, setRepoModalMode] = useState<'onboard' | 'manage'>('manage');
+  // Carry validation or network errors specific to the repo modal.
   const [repoModalError, setRepoModalError] = useState<string | null>(null);
+  // Toggle the repo switcher overlay.
   const [showSwitcher, setShowSwitcher] = useState(false);
   const repoAccess = useRepoAccess({ route, sessionToken, linked });
   const manageUrl = repoAccess.manageUrl;
@@ -160,23 +166,8 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     canEdit,
     notifyStoreListeners,
   });
+  const { activeId, setActiveId } = useActiveNote({ slug, store, notes, canEdit });
   const initialPullRef = useRef({ done: false });
-
-  // Restore the last focused note so the editor never flashes empty on reload.
-  useEffect(() => {
-    if (slug === 'new') return;
-    if (activeId) return;
-    let stored = getLastActiveNoteId(slug);
-    if (!stored) return;
-    let exists = store.listNotes().some((n) => n.id === stored);
-    if (exists) setActiveId(stored);
-  }, [slug, store, activeId]);
-
-  // Persist the chosen note so the next visit can resume at the same place.
-  useEffect(() => {
-    if (slug === 'new') return;
-    setLastActiveNoteId(slug, activeId ?? null);
-  }, [activeId, slug]);
 
   // Backfill the cached avatar once so we can render without depending on remote URLs.
   useEffect(() => {
@@ -192,34 +183,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
       cancelled = true;
     };
   }, [user?.avatarDataUrl, user?.avatarUrl, ensureAppUserAvatarCached]);
-
-  // Reconcile folder collapse state with what we saved for this repo slug.
-  useEffect(() => {
-    let expanded = slug === 'new' ? [] : getExpandedFolders(slug);
-    let next = buildCollapsedMap(expanded, store.listFolders());
-    setCollapsedFoldersState((prev) => (collapsedMapsEqual(prev, next) ? prev : next));
-  }, [slug, store]);
-
-  // Keep the collapse map in sync when the folder list mutates.
-  useEffect(() => {
-    setCollapsedFoldersState((prev) => {
-      let next = syncCollapsedWithFolders(prev, folders);
-      return collapsedMapsEqual(prev, next) ? prev : next;
-    });
-  }, [folders]);
-
-  // Persist expanded folders so a reload keeps the same tree view.
-  useEffect(() => {
-    if (slug !== 'new') {
-      let expanded: string[] = [];
-      for (let dir in collapsedFolders) {
-        if (!Object.prototype.hasOwnProperty.call(collapsedFolders, dir)) continue;
-        if (dir === '') continue;
-        if (collapsedFolders[dir] === false) expanded.push(dir);
-      }
-      setExpandedFolders(slug, expanded);
-    }
-  }, [collapsedFolders, slug]);
 
   // Remember recently opened repos once we know the current repo is reachable.
   useEffect(() => {
@@ -332,16 +295,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
       setReadOnlyLoading(false);
     };
   }, [isPublicReadonly, slug, repoAccess.defaultBranch]);
-
-  // Ensure the active note still exists when the note index changes.
-  useEffect(() => {
-    if (!canEdit) return;
-    setActiveId((prev) => {
-      if (prev && notes.some((n) => n.id === prev)) return prev;
-      if (prev) return notes[0]?.id ?? null;
-      return prev;
-    });
-  }, [canEdit, notes]);
 
   const onCreate = () => {
     if (!canEdit) return;
@@ -887,11 +840,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                 folders={folderList}
                 activeId={activeId}
                 collapsed={collapsedFolders}
-                onCollapsedChange={(next) =>
-                  setCollapsedFoldersState((prev) =>
-                    collapsedMapsEqual(prev, next) ? prev : syncCollapsedWithFolders(next, folders)
-                  )
-                }
+                onCollapsedChange={setCollapsedMap}
                 onSelectionChange={(sel) => setSelection(sel as any)}
                 onSelectFile={(id) => {
                   if (!canEdit) {
@@ -1149,6 +1098,7 @@ type AccessDeriveInput = {
 function useRepoAccess({ route, sessionToken, linked }: RepoAccessParams): RepoAccessState {
   const owner = route.kind === 'repo' ? route.owner : null;
   const repo = route.kind === 'repo' ? route.repo : null;
+  // Track the evolving access status/metadata for the active repository target.
   const [state, setState] = useState<RepoAccessState>({ ...initialAccessState, status: 'checking' });
 
   // Query GitHub (and the public fallback) whenever the targeted repo changes.
@@ -1313,9 +1263,11 @@ type PerformSyncOptions = {
 
 function useAutosync(params: AutosyncParams) {
   const { slug, route, store, sessionToken, linked, canEdit, notifyStoreListeners } = params;
+  // Remember the user's autosync preference per repo slug.
   const [autosync, setAutosyncState] = useState<boolean>(() =>
     slug !== 'new' ? isAutosyncEnabled(slug) : false
   );
+  // Indicate when a sync operation is currently running.
   const [syncing, setSyncing] = useState(false);
   const timerRef = useRef<number | null>(null);
   const inFlightRef = useRef(false);
@@ -1420,6 +1372,96 @@ function useAutosync(params: AutosyncParams) {
   } as const;
 }
 
+type ActiveNoteParams = {
+  slug: string;
+  store: LocalStore;
+  notes: NoteMeta[];
+  canEdit: boolean;
+};
+
+function useActiveNote({ slug, store, notes, canEdit }: ActiveNoteParams) {
+  // Track the currently focused note id for the editor and file tree.
+  const [activeId, setActiveId] = useState<string | null>(() => {
+    if (slug === 'new') return null;
+    const stored = getLastActiveNoteId(slug);
+    if (!stored) return null;
+    const available = store.listNotes();
+    return available.some((note) => note.id === stored) ? stored : null;
+  });
+
+  // Restore the last active note from storage when loading an existing repo.
+  useEffect(() => {
+    if (slug === 'new') return;
+    if (activeId) return;
+    const stored = getLastActiveNoteId(slug);
+    if (!stored) return;
+    if (notes.some((note) => note.id === stored)) setActiveId(stored);
+  }, [slug, activeId, notes]);
+
+  // Persist the active note id so future visits resume on the same file.
+  useEffect(() => {
+    if (slug === 'new') return;
+    setLastActiveNoteId(slug, activeId ?? null);
+  }, [activeId, slug]);
+
+  // Nudge the active note to a valid entry whenever the editable list changes.
+  useEffect(() => {
+    if (!canEdit) return;
+    setActiveId((prev) => {
+      if (prev && notes.some((note) => note.id === prev)) return prev;
+      if (prev) return notes[0]?.id ?? null;
+      return prev;
+    });
+  }, [canEdit, notes]);
+
+  return { activeId, setActiveId } as const;
+}
+
+type CollapsedFoldersParams = {
+  slug: string;
+  folders: string[];
+};
+
+function useCollapsedFolders({ slug, folders }: CollapsedFoldersParams) {
+  // Remember which folders are expanded so the tree view stays consistent per repo.
+  const [expandedState, setExpandedState] = useState<string[]>(() =>
+    slug === 'new' ? [] : sanitizeExpandedDirs(folders, getExpandedFolders(slug))
+  );
+
+  // Refresh expanded state when the slug changes to honor stored preferences.
+  useEffect(() => {
+    const stored = slug === 'new' ? [] : getExpandedFolders(slug);
+    const next = sanitizeExpandedDirs(folders, stored);
+    setExpandedState((prev) => (foldersEqual(prev, next) ? prev : next));
+  }, [slug, folders]);
+
+  // Drop any folders that no longer exist from the expanded list.
+  useEffect(() => {
+    setExpandedState((prev) => sanitizeExpandedDirs(folders, prev));
+  }, [folders]);
+
+  // Persist expanded folders back to storage for future visits.
+  useEffect(() => {
+    if (slug === 'new') return;
+    setExpandedFolders(slug, expandedState);
+  }, [slug, expandedState]);
+
+  const collapsed = useMemo(
+    () => buildCollapsedMap(expandedState, folders),
+    [expandedState, folders]
+  );
+
+  const setCollapsedMap = (next: Record<string, boolean>) => {
+    const expanded = expandedDirsFromCollapsed(next);
+    setExpandedState((prev) => {
+      const nextExpanded = sanitizeExpandedDirs(folders, expanded);
+      return foldersEqual(prev, nextExpanded) ? prev : nextExpanded;
+    });
+  };
+
+  return { collapsed, setCollapsedMap } as const;
+}
+
 function areAccessStatesEqual(a: RepoAccessState, b: RepoAccessState): boolean {
   return (
     a.level === b.level &&
@@ -1453,27 +1495,30 @@ function buildCollapsedMap(expanded: string[], folders: string[]): Record<string
   return map;
 }
 
-function syncCollapsedWithFolders(
-  current: Record<string, boolean>,
-  folders: string[]
-): Record<string, boolean> {
-  let expanded: string[] = [];
-  for (let dir in current) {
-    if (!Object.prototype.hasOwnProperty.call(current, dir)) continue;
-    if (dir === '') continue;
-    if (current[dir] === false) expanded.push(dir);
+function sanitizeExpandedDirs(folders: string[], dirs: string[]): string[] {
+  if (dirs.length === 0) return [];
+  const valid = new Set(folders);
+  valid.delete('');
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const dir of dirs) {
+    if (!dir) continue;
+    if (!valid.has(dir)) continue;
+    if (seen.has(dir)) continue;
+    seen.add(dir);
+    result.push(dir);
   }
-  return buildCollapsedMap(expanded, folders);
+  return result;
 }
 
-function collapsedMapsEqual(a: Record<string, boolean>, b: Record<string, boolean>): boolean {
-  let keysA = Object.keys(a);
-  let keysB = Object.keys(b);
-  if (keysA.length !== keysB.length) return false;
-  for (let key of keysA) {
-    if (a[key] !== b[key]) return false;
+function expandedDirsFromCollapsed(map: Record<string, boolean>): string[] {
+  const expanded: string[] = [];
+  for (const key in map) {
+    if (!Object.prototype.hasOwnProperty.call(map, key)) continue;
+    if (key === '') continue;
+    if (map[key] === false) expanded.push(key);
   }
-  return true;
+  return expanded;
 }
 
 function readRepoSnapshot(store: LocalStore): RepoStoreSnapshot {
