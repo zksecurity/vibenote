@@ -34,6 +34,7 @@ export async function getRepoMetadata(owner: string, repo: string): Promise<Repo
   let repositorySelection: 'all' | 'selected' | null = null;
   let rateLimited = false;
   let userHasPush = false;
+  let fetchedWithToken = false;
 
   if (token) {
     try {
@@ -44,6 +45,7 @@ export async function getRepoMetadata(owner: string, repo: string): Promise<Repo
         defaultBranch = json && typeof json.default_branch === 'string' ? String(json.default_branch) : null;
         let permissions = json && typeof json.permissions === 'object' ? json.permissions : null;
         userHasPush = Boolean(permissions && permissions.push === true);
+        fetchedWithToken = true;
       } else {
         if (res.status === 403) {
           let body = await safeJson(res);
@@ -71,16 +73,19 @@ export async function getRepoMetadata(owner: string, repo: string): Promise<Repo
     }
   }
 
-  let publicInfo = await fetchPublicRepoInfo(owner, repo);
-  if (publicInfo.ok) {
-    isPrivate = publicInfo.isPrivate ?? null;
-    defaultBranch = publicInfo.defaultBranch ?? null;
-  } else {
-    if (publicInfo.isPrivate === true) isPrivate = true;
-    if (publicInfo.notFound) {
-      isPrivate = isPrivate ?? null;
+  let shouldFetchPublic = !fetchedWithToken || isPrivate === null || defaultBranch === null;
+  if (shouldFetchPublic) {
+    let publicInfo = await fetchPublicRepoInfo(owner, repo);
+    if (publicInfo.ok) {
+      isPrivate = publicInfo.isPrivate ?? null;
+      defaultBranch = publicInfo.defaultBranch ?? null;
+    } else {
+      if (publicInfo.isPrivate === true) isPrivate = true;
+      if (publicInfo.notFound) {
+        isPrivate = isPrivate ?? null;
+      }
+      if (publicInfo.rateLimited) rateLimited = true;
     }
-    if (publicInfo.rateLimited) rateLimited = true;
   }
 
   return {
