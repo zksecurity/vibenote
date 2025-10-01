@@ -469,6 +469,13 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       if (!rf) continue;
       const base = lastRemoteSha ? await fetchBlob(config, lastRemoteSha) : '';
       const localText = doc.text || '';
+      const localHash = hashText(localText);
+      const remoteHash = hashText(rf.text || '');
+      if (remoteHash === localHash) {
+        markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: localHash });
+        debugLog(slug, 'sync:remote-equal-local', { path: doc.path });
+        continue;
+      }
       if (doc.lastSyncedHash !== hashText(localText)) {
         // both changed → merge
         const mergedText = mergeMarkdown(base ?? '', localText, rf.text);
