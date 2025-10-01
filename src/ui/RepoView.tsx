@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef, useSyncExternalStore, useCallback } from 'react';
 import { FileTree, type FileEntry } from './FileTree';
 import { Editor } from './Editor';
 import {
@@ -40,6 +40,7 @@ import {
   listNoteFiles,
   syncBidirectional,
   type RemoteConfig,
+  type SyncSummary,
 } from '../sync/git-sync';
 import { hashText } from '../storage/local';
 import { RepoSwitcher } from './RepoSwitcher';
@@ -60,6 +61,35 @@ type RepoViewProps = {
   }) => void;
 };
 
+type RepoAccessLevel = 'none' | 'read' | 'write';
+type RepoAccessStatus = 'idle' | 'checking' | 'ready' | 'rate-limited' | 'error';
+type RepoAccessState = {
+  level: RepoAccessLevel;
+  status: RepoAccessStatus;
+  metadata: RepoMetadata | null;
+  defaultBranch: string | null;
+  error: string | null;
+  rateLimited: boolean;
+  needsInstall: boolean;
+  manageUrl: string | null;
+  isPrivate: boolean | null;
+};
+
+const initialAccessState: RepoAccessState = {
+  level: 'none',
+  status: 'idle',
+  metadata: null,
+  defaultBranch: null,
+  error: null,
+  rateLimited: false,
+  needsInstall: false,
+  manageUrl: null,
+  isPrivate: null,
+};
+
+const AUTO_SYNC_MIN_INTERVAL_MS = 60_000;
+const AUTO_SYNC_DEBOUNCE_MS = 10_000;
+
 export function RepoView(props: RepoViewProps) {
   return <RepoViewInner key={props.slug} {...props} />;
 }
@@ -71,8 +101,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     }
     return new LocalStore(slug);
   }, [slug, route.kind]);
-  const [notes, setNotes] = useState<NoteMeta[]>(() => store.listNotes());
-  const [folders, setFolders] = useState<string[]>(() => store.listFolders());
+  const { notes, folders, notifyStoreListeners } = useRepoStore(store, slug);
   // Restore the previously active note as early as possible so the editor does not flicker to empty state.
   const [activeId, setActiveId] = useState<string | null>(() => {
     if (slug === 'new') return null;
@@ -81,7 +110,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     const available = store.listNotes();
     return available.some((note) => note.id === stored) ? stored : null;
   });
-  const [doc, setDoc] = useState<NoteDoc | null>(null);
+  const [readOnlyDoc, setReadOnlyDoc] = useState<NoteDoc | null>(null);
   const [collapsedFolders, setCollapsedFoldersState] = useState<Record<string, boolean>>(() => {
     let expanded = slug === 'new' ? [] : getExpandedFolders(slug);
     return buildCollapsedMap(expanded, store.listFolders());
@@ -100,7 +129,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
   } | null>(null);
   const [sessionToken, setSessionToken] = useState<string | null>(getAppSessionToken());
   const [showConfig, setShowConfig] = useState(false);
-  const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const initialAppUser = useMemo(() => getAppSessionUser(), []);
   const [ownerLogin, setOwnerLogin] = useState<string | null>(initialAppUser?.login ?? null);
@@ -112,39 +140,25 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
   const [repoModalMode, setRepoModalMode] = useState<'onboard' | 'manage'>('manage');
   const [repoModalError, setRepoModalError] = useState<string | null>(null);
   const [showSwitcher, setShowSwitcher] = useState(false);
-  const [accessState, setAccessState] = useState<'unknown' | 'reachable' | 'unreachable'>('unknown');
-  const [repoMeta, setRepoMeta] = useState<RepoMetadata | null>(null);
-  const [hasMetadataResolved, setHasMetadataResolved] = useState(false);
-  const [metadataError, setMetadataError] = useState<string | null>(null);
-  const [publicRepoMeta, setPublicRepoMeta] = useState<{
-    isPrivate: boolean;
-    defaultBranch: string | null;
-  } | null>(null);
-  const [publicRateLimited, setPublicRateLimited] = useState(false);
-  const [, setPublicMetaError] = useState<string | null>(null);
-  const manageUrl = repoMeta?.manageUrl ?? null;
-  const buildConfigWithMeta = () => {
-    const cfg: RemoteConfig = buildRemoteConfig(slug);
-    const branch = repoMeta?.defaultBranch ?? publicRepoMeta?.defaultBranch;
-    if (branch) cfg.branch = branch;
-    return cfg;
-  };
-  const metadataAllowsEdit = !!repoMeta?.repoSelected;
+  const repoAccess = useRepoAccess({ route, sessionToken, linked });
+  const manageUrl = repoAccess.manageUrl;
+  const accessStatusReady = repoAccess.status === 'ready' || repoAccess.status === 'rate-limited';
+  const metadataError = repoAccess.status === 'error' ? repoAccess.error : null;
   const canEdit =
-    !!sessionToken && (metadataAllowsEdit || ((!hasMetadataResolved || !!metadataError) && linked));
-  const repoIsPublic =
-    repoMeta?.isPrivate === false || (!repoMeta?.repoSelected && publicRepoMeta?.isPrivate === false);
-  const repoIsPrivate = repoMeta?.isPrivate === true || publicRepoMeta?.isPrivate === true;
-  const isPublicReadonly = repoIsPublic && !canEdit;
-  const needsInstallForPrivate = repoIsPrivate && !canEdit;
-  const isRateLimited = !metadataError && (publicRateLimited || repoMeta?.rateLimited === true);
-  const [refreshTick, setRefreshTick] = useState(0);
-  const initialPullRef = useState({ done: false })[0];
-  const [autosync, setAutosync] = useState<boolean>(() => (slug !== 'new' ? isAutosyncEnabled(slug) : false));
-  const autoSyncTimerRef = useState<{ id: number | null }>({ id: null })[0];
-  const autoSyncBusyRef = useState<{ busy: boolean }>({ busy: false })[0];
-  const AUTO_SYNC_MIN_INTERVAL_MS = 60_000; // not too often
-  const AUTO_SYNC_DEBOUNCE_MS = 10_000;
+    !!sessionToken && (repoAccess.level === 'write' || (!accessStatusReady && linked) || (!!metadataError && linked));
+  const isPublicReadonly = repoAccess.level === 'read' && repoAccess.isPrivate === false;
+  const needsInstallForPrivate = repoAccess.needsInstall;
+  const isRateLimited = repoAccess.status === 'rate-limited';
+  const { autosync, setAutosync, scheduleAutoSync, performSync, syncing, setSyncing } = useAutosync({
+    slug,
+    route,
+    store,
+    sessionToken,
+    linked,
+    canEdit,
+    notifyStoreListeners,
+  });
+  const initialPullRef = useRef({ done: false });
 
   useEffect(() => {
     if (slug === 'new') return;
@@ -201,25 +215,25 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
 
   useEffect(() => {
     if (route.kind !== 'repo') return;
-    if (accessState !== 'reachable') return; // only record reachable repos
+    if (repoAccess.level === 'none') return;
     onRecordRecent({
       slug,
       owner: route.owner,
       repo: route.repo,
-      connected: canEdit && linked,
+      connected: repoAccess.level === 'write' && linked,
     });
-  }, [slug, route, linked, onRecordRecent, accessState, canEdit]);
+  }, [slug, route, linked, onRecordRecent, repoAccess.level]);
 
   // When we navigate to a reachable repo we haven't linked locally yet, auto-load its notes
   useEffect(() => {
     (async () => {
       if (route.kind !== 'repo') return;
-      if (accessState !== 'reachable') return;
+      if (repoAccess.level !== 'write') return;
       if (!canEdit) return;
       if (linked) return;
-      if (initialPullRef.done) return;
+      if (initialPullRef.current.done) return;
       try {
-        const cfg: RemoteConfig = buildConfigWithMeta();
+        const cfg: RemoteConfig = remoteConfigForSlug(slug, repoAccess.defaultBranch);
         const entries = await listNoteFiles(cfg);
         const files: { path: string; text: string; sha?: string }[] = [];
         for (const e of entries) {
@@ -227,8 +241,8 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
           if (rf) files.push({ path: rf.path, text: rf.text, sha: rf.sha });
         }
         store.replaceWithRemote(files);
-        let synced = store.listNotes();
-        setNotes(synced);
+        notifyStoreListeners();
+        const synced = store.listNotes();
         setActiveId((prev) => {
           if (prev) return prev;
           if (slug !== 'new') {
@@ -243,101 +257,26 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
       } catch (e) {
         console.error(e);
       } finally {
-        initialPullRef.done = true;
+        initialPullRef.current.done = true;
       }
     })();
-  }, [route, accessState, linked, slug, store, initialPullRef, canEdit]);
+  }, [route, repoAccess.level, linked, slug, store, canEdit, repoAccess.defaultBranch]);
 
-  // Determine repository access via backend metadata
-  useEffect(() => {
-    let cancelled = false;
-    if (route.kind !== 'repo') {
-      setAccessState('unknown');
-      return;
-    }
-    setHasMetadataResolved(false);
-    setMetadataError(null);
-    (async () => {
-      try {
-        const meta = await apiGetRepoMetadata(route.owner, route.repo);
-        if (!cancelled) {
-          setRepoMeta(meta);
-          if (meta.repoSelected) {
-            setAccessState('reachable');
-            setPublicRepoMeta(null);
-            setPublicRateLimited(false);
-            setPublicMetaError(null);
-          } else if (meta.isPrivate === false) {
-            setAccessState('reachable');
-          } else if (meta.isPrivate === true) {
-            setAccessState('unreachable');
-          } else {
-            setAccessState('unknown');
-          }
-        }
-        setHasMetadataResolved(true);
-      } catch (err) {
-        if (!cancelled) setAccessState('unknown');
-        setMetadataError(err instanceof Error ? err.message : 'unknown-error');
-        setHasMetadataResolved(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [route]);
 
   useEffect(() => {
-    if (route.kind !== 'repo') return;
-    if (repoMeta?.repoSelected) return;
-    if (repoMeta?.isPrivate === true) return;
-    if (publicRepoMeta || publicRateLimited) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        setPublicMetaError(null);
-        const info = await fetchPublicRepoInfo(route.owner, route.repo);
-        if (cancelled) return;
-        if (info.ok && typeof info.isPrivate === 'boolean') {
-          setPublicRepoMeta({
-            isPrivate: info.isPrivate,
-            defaultBranch: info.defaultBranch ?? null,
-          });
-          setPublicRateLimited(false);
-          setPublicMetaError(null);
-          setAccessState(info.isPrivate ? 'unreachable' : 'reachable');
-        } else if (info.rateLimited) {
-          setPublicRateLimited(true);
-        } else if (info.notFound) {
-          setPublicRepoMeta({ isPrivate: true, defaultBranch: null });
-          setAccessState('unreachable');
-        } else {
-          setPublicMetaError(info.message ?? 'unknown-error');
-          console.warn('vibenote: public repo metadata fetch failed', info);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setPublicMetaError(err instanceof Error ? err.message : 'unknown-error');
-          console.warn('vibenote: public repo metadata fetch error', err);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [route, repoMeta?.installed, repoMeta?.isPrivate, publicRepoMeta, publicRateLimited]);
+    if (isPublicReadonly) return;
+    setReadOnlyNotes((prev) => (prev.length === 0 ? prev : []));
+    setReadOnlyDoc((prev) => (prev === null ? prev : null));
+    setReadOnlyLoading(false);
+  }, [isPublicReadonly]);
 
   useEffect(() => {
-    if (!isPublicReadonly) {
-      setReadOnlyNotes([]);
-      setReadOnlyLoading(false);
-      return;
-    }
+    if (!isPublicReadonly) return;
     let cancelled = false;
     setReadOnlyLoading(true);
     (async () => {
       try {
-        const cfg = buildConfigWithMeta();
+        const cfg = remoteConfigForSlug(slug, repoAccess.defaultBranch);
         const entries = await listNoteFiles(cfg);
         const toTitle = (path: string) => {
           const base = path.slice(path.lastIndexOf('/') + 1);
@@ -358,7 +297,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
           setActiveId(first.id);
           const remote = await pullNote(cfg, first.path);
           if (!remote || cancelled) return;
-          setDoc({
+          setReadOnlyDoc({
             id: first.id,
             path: first.path,
             title: first.title,
@@ -369,7 +308,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
             lastSyncedHash: hashText(remote.text),
           });
         } else {
-          setDoc(null);
+          setReadOnlyDoc(null);
           setActiveId(null);
         }
         if (!cancelled) setReadOnlyLoading(false);
@@ -382,100 +321,16 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
       cancelled = true;
       setReadOnlyLoading(false);
     };
-  }, [isPublicReadonly, slug, repoMeta?.defaultBranch, publicRepoMeta?.defaultBranch]);
+  }, [isPublicReadonly, slug, repoAccess.defaultBranch]);
 
   useEffect(() => {
     if (!canEdit) return;
-    const nextNotes = store.listNotes();
-    const nextFolders = store.listFolders();
-    setNotes(nextNotes);
-    setFolders(nextFolders);
     setActiveId((prev) => {
-      if (prev && nextNotes.some((n) => n.id === prev)) return prev;
-      if (prev) return nextNotes[0]?.id ?? null;
+      if (prev && notes.some((n) => n.id === prev)) return prev;
+      if (prev) return notes[0]?.id ?? null;
       return prev;
     });
-  }, [store, canEdit]);
-
-  useEffect(() => {
-    if (!canEdit) return;
-    setDoc(activeId ? store.loadNote(activeId) : null);
-  }, [store, activeId, canEdit]);
-
-  // Cross-tab coherence: listen to localStorage changes for this repo slug
-  useEffect(() => {
-    if (!canEdit) return;
-    const encodedSlug = encodeURIComponent(slug);
-    const prefix = `vibenote:repo:${encodedSlug}:`;
-    let timer: number | null = null;
-    const scheduleRefresh = () => {
-      if (timer !== null) return;
-      timer = window.setTimeout(() => {
-        timer = null;
-        // Re-read index and doc to reflect changes
-        const nextNotes = store.listNotes();
-        const nextFolders = store.listFolders();
-        setNotes(nextNotes);
-        setFolders(nextFolders);
-        setActiveId((prev) => {
-          if (prev && nextNotes.some((n) => n.id === prev)) return prev;
-          if (prev) return nextNotes[0]?.id ?? null;
-          return prev;
-        });
-        // Nudge dependent effects
-        setRefreshTick((t) => t + 1);
-      }, 150);
-    };
-    const onStorage = (e: StorageEvent) => {
-      if (e.storageArea !== window.localStorage) return;
-      if (!e.key) return; // some browsers
-      if (!e.key.startsWith(prefix)) return;
-      scheduleRefresh();
-    };
-    window.addEventListener('storage', onStorage);
-    return () => {
-      window.removeEventListener('storage', onStorage);
-      if (timer !== null) window.clearTimeout(timer);
-    };
-  }, [slug, store, canEdit]);
-
-  const scheduleAutoSync = (debounceMs: number = AUTO_SYNC_DEBOUNCE_MS) => {
-    if (!autosync) return;
-    if (route.kind !== 'repo') return;
-    if (!sessionToken || !linked || slug === 'new' || !canEdit) return;
-    // Respect min interval across tabs
-    let last = getLastAutoSyncAt(slug) ?? 0;
-    let now = Date.now();
-    let dueIn = Math.max(0, AUTO_SYNC_MIN_INTERVAL_MS - (now - last));
-    let delay = Math.max(debounceMs, dueIn);
-    if (autoSyncTimerRef.id !== null) window.clearTimeout(autoSyncTimerRef.id);
-    autoSyncTimerRef.id = window.setTimeout(() => {
-      autoSyncTimerRef.id = null;
-      void runAutoSync();
-    }, delay);
-  };
-
-  const runAutoSync = async () => {
-    if (autoSyncBusyRef.busy) return;
-    autoSyncBusyRef.busy = true;
-    setSyncing(true);
-    try {
-      if (!sessionToken || !linked || slug === 'new' || !canEdit) return;
-      let summary = await syncBidirectional(store, slug);
-      recordAutoSyncRun(slug);
-      setNotes(store.listNotes());
-      setDoc((prev) => (prev ? store.loadNote(prev.id) : null));
-      // Keep status banner quiet for background runs
-      // Optionally, we could set a subtle message only when changes were synced.
-      void summary;
-    } catch (err) {
-      // Quietly ignore background errors to avoid noise; console for developers
-      console.error(err);
-    } finally {
-      autoSyncBusyRef.busy = false;
-      setSyncing(false);
-    }
-  };
+  }, [canEdit, notes]);
 
   const onCreate = () => {
     if (!canEdit) return;
@@ -497,8 +352,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     if (!canEdit) return;
     try {
       store.renameFolder(dir, newName);
-      setNotes(store.listNotes());
-      setFolders(store.listFolders());
+      notifyStoreListeners();
       scheduleAutoSync();
     } catch (e) {
       console.error(e);
@@ -520,9 +374,8 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
       if (!window.confirm('Delete folder and all contained notes?')) return;
     }
     store.deleteFolder(dir);
+    notifyStoreListeners();
     const list = store.listNotes();
-    setNotes(list);
-    setFolders(store.listFolders());
     if (activeId && !list.some((n) => n.id === activeId)) setActiveId(list[0]?.id ?? null);
     scheduleAutoSync();
   };
@@ -531,8 +384,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     if (!canEdit) return;
     try {
       store.renameNote(id, title);
-      setNotes(store.listNotes());
-      setFolders(store.listFolders());
+      notifyStoreListeners();
       scheduleAutoSync();
     } catch (e) {
       console.error(e);
@@ -543,9 +395,8 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
   const onDelete = (id: string) => {
     if (!canEdit) return;
     store.deleteNote(id);
+    notifyStoreListeners();
     const list = store.listNotes();
-    setNotes(list);
-    setFolders(store.listFolders());
     if (activeId === id) setActiveId(list[0]?.id ?? null);
     scheduleAutoSync();
   };
@@ -567,7 +418,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
   const openAccessSetup = async () => {
     try {
       // the app is already installed and we go straight into the right user's settings to manage repos
-      if (manageUrl && repoMeta?.repoSelected === false) {
+      if (manageUrl && repoAccess.metadata?.repoSelected === false) {
         window.open(manageUrl, '_blank', 'noopener');
         return;
       }
@@ -622,8 +473,8 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
 
       let statusMsg = 'Connected to repository';
       if (matchesCurrent) {
-        let syncedNotes = targetStore.listNotes();
-        setNotes(syncedNotes);
+        const syncedNotes = targetStore.listNotes();
+        notifyStoreListeners();
         setActiveId(syncedNotes[0]?.id ?? null);
         setSyncMsg(statusMsg);
         if (cfg.autosync === true) scheduleAutoSync(0); // run on page load/connect
@@ -749,24 +600,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
 
   // Session-based user is restored from localStorage on init (see getAppSessionUser())
 
-  // Kick off an autosync on load/connect when enabled
-  useEffect(() => {
-    if (route.kind !== 'repo') return;
-    if (!autosync) return;
-    if (!sessionToken || !linked || slug === 'new' || !canEdit) return;
-    scheduleAutoSync(0);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [route.kind, autosync, sessionToken, linked, slug, canEdit]);
-
-  // Periodic background autosync to pick up remote-only changes
-  useEffect(() => {
-    if (route.kind !== 'repo') return;
-    if (!autosync || !sessionToken || !linked || slug === 'new' || !canEdit) return;
-    let id = window.setInterval(() => scheduleAutoSync(0), 180_000); // every 3 minutes
-    return () => window.clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [route.kind, autosync, sessionToken, linked, slug, canEdit]);
-
   // Attempt a final background push via Service Worker when the page is closing.
   useEffect(() => {
     const shouldFlush = () => false; // SW flush disabled for GitHub App backend v1
@@ -817,59 +650,51 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     }
     clearAllLocalData();
     store.replaceWithRemote([]);
+    notifyStoreListeners();
     setSessionToken(null);
     setUser(null);
     setOwnerLogin(null);
     setLinked(false);
     setAutosync(false);
     setMenuOpen(false);
-    setNotes([]);
-    setFolders([]);
     setReadOnlyNotes([]);
-    setMetadataError(null);
-    setPublicRepoMeta(null);
-    setPublicRateLimited(false);
-    setPublicMetaError(null);
     setNewEntry(null);
     setActiveId(null);
-    setDoc(null);
-    setRepoMeta(null);
-    setAccessState('unknown');
-    initialPullRef.done = false;
+    setReadOnlyDoc(null);
+    initialPullRef.current.done = false;
     setSyncMsg('Signed out');
   };
 
   const onSyncNow = async () => {
     try {
       setSyncMsg(null);
-      setSyncing(true);
       if (!sessionToken || !linked || slug === 'new' || !canEdit) {
         setSyncMsg('Connect GitHub and configure repo first');
         return;
       }
-      const summary = await syncBidirectional(store, slug);
-      recordAutoSyncRun(slug);
+      const summary = await performSync();
       const parts: string[] = [];
-      if (summary.pulled) parts.push(`pulled ${summary.pulled}`);
-      if (summary.merged) parts.push(`merged ${summary.merged}`);
-      if (summary.pushed) parts.push(`pushed ${summary.pushed}`);
-      if (summary.deletedRemote) parts.push(`deleted remote ${summary.deletedRemote}`);
-      if (summary.deletedLocal) parts.push(`deleted local ${summary.deletedLocal}`);
+      if (summary?.pulled) parts.push(`pulled ${summary.pulled}`);
+      if (summary?.merged) parts.push(`merged ${summary.merged}`);
+      if (summary?.pushed) parts.push(`pushed ${summary.pushed}`);
+      if (summary?.deletedRemote) parts.push(`deleted remote ${summary.deletedRemote}`);
+      if (summary?.deletedLocal) parts.push(`deleted local ${summary.deletedLocal}`);
       setSyncMsg(parts.length ? `Synced: ${parts.join(', ')}` : 'Up to date');
     } catch (err) {
       console.error(err);
       setSyncMsg('Sync failed');
-    } finally {
-      setSyncing(false);
-      setNotes(store.listNotes());
-      // Ensure the active editor reflects merged/pulled text
-      setDoc(activeId ? store.loadNote(activeId) : null);
     }
   };
 
   const showSidebar = (notes.length > 0 && linked) || (isPublicReadonly && readOnlyNotes.length > 0);
   const layoutClass = showSidebar ? '' : 'single';
   const noteList = isPublicReadonly ? readOnlyNotes : notes;
+  const localDoc = useMemo(() => {
+    if (!canEdit) return null;
+    if (!activeId) return null;
+    return store.loadNote(activeId);
+  }, [canEdit, activeId, store, notes]);
+  const doc = canEdit ? localDoc : readOnlyDoc;
   const folderList = useMemo(() => {
     if (isPublicReadonly) {
       const set = new Set<string>();
@@ -1051,12 +876,12 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                     setSidebarOpen(false);
                     const entry = readOnlyNotes.find((n) => n.id === id);
                     if (!entry) return;
-                    const cfg = buildConfigWithMeta();
+                    const cfg = remoteConfigForSlug(slug, repoAccess.defaultBranch);
                     void (async () => {
                       try {
                         const remote = await pullNote(cfg, entry.path);
                         if (!remote) return;
-                        setDoc({
+                        setReadOnlyDoc({
                           id: entry.id,
                           path: entry.path,
                           title: entry.title,
@@ -1079,26 +904,25 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                 onDeleteFile={canEdit ? onDelete : () => undefined}
                 onCreateFile={
                   canEdit
-                    ? (dir, name) => {
-                        let id = store.createNote(name, '', dir);
-                        setNotes(store.listNotes());
-                        setFolders(store.listFolders());
-                        setActiveId(id);
-                        scheduleAutoSync();
-                        return id;
-                      }
+                        ? (dir, name) => {
+                            let id = store.createNote(name, '', dir);
+                            notifyStoreListeners();
+                            setActiveId(id);
+                            scheduleAutoSync();
+                            return id;
+                          }
                     : () => undefined
                 }
                 onCreateFolder={
                   canEdit
-                    ? (parentDir, name) => {
-                        try {
-                          store.createFolder(parentDir, name);
-                          setFolders(store.listFolders());
-                        } catch (e) {
-                          console.error(e);
-                          setSyncMsg('Invalid folder name.');
-                        }
+                            ? (parentDir, name) => {
+                                try {
+                                  store.createFolder(parentDir, name);
+                                  notifyStoreListeners();
+                                } catch (e) {
+                                  console.error(e);
+                                  setSyncMsg('Invalid folder name.');
+                                }
                       }
                     : () => undefined
                 }
@@ -1110,16 +934,14 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
             </div>
             {route.kind === 'repo' && linked && canEdit ? (
               <div className="repo-autosync-toggle">
-                <Toggle
-                  checked={autosync}
-                  onChange={(enabled) => {
-                    setAutosync(enabled);
-                    setAutosyncEnabled(slug, enabled);
-                    if (enabled) scheduleAutoSync(0);
-                  }}
-                  label="Autosync"
-                  description="Runs background sync after edits and periodically."
-                />
+                  <Toggle
+                    checked={autosync}
+                    onChange={(enabled) => {
+                        setAutosync(enabled);
+                      }}
+                    label="Autosync"
+                    description="Runs background sync after edits and periodically."
+                  />
               </div>
             ) : null}
           </aside>
@@ -1288,6 +1110,320 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
   );
 }
 
+type RepoAccessParams = {
+  route: Route;
+  sessionToken: string | null;
+  linked: boolean;
+};
+
+type AccessDeriveInput = {
+  meta: RepoMetadata;
+  isPrivate: boolean | null;
+  defaultBranch: string | null;
+  rateLimited: boolean;
+  sessionToken: string | null;
+  usedPublicRead: boolean;
+};
+
+function useRepoAccess({ route, sessionToken, linked }: RepoAccessParams): RepoAccessState {
+  const owner = route.kind === 'repo' ? route.owner : null;
+  const repo = route.kind === 'repo' ? route.repo : null;
+  const [state, setState] = useState<RepoAccessState>({ ...initialAccessState, status: 'checking' });
+
+  useEffect(() => {
+    if (!owner || !repo) return;
+    let cancelled = false;
+    const checkingState: RepoAccessState = { ...initialAccessState, status: 'checking' };
+    setState((prev) => (areAccessStatesEqual(prev, checkingState) ? prev : checkingState));
+    (async () => {
+      try {
+        const meta = await apiGetRepoMetadata(owner, repo);
+        let isPrivate = meta.isPrivate;
+        let defaultBranch = meta.defaultBranch;
+        let rateLimited = meta.rateLimited === true;
+        let usedPublicRead = false;
+        if ((isPrivate === null || defaultBranch === null) && !meta.repoSelected) {
+          const info = await fetchPublicRepoInfo(owner, repo);
+          if (info.ok) {
+            if (isPrivate === null && typeof info.isPrivate === 'boolean') isPrivate = info.isPrivate;
+            if (defaultBranch === null) defaultBranch = info.defaultBranch ?? null;
+            usedPublicRead = info.isPrivate === false;
+          } else {
+            if (typeof info.isPrivate === 'boolean' && isPrivate === null) isPrivate = info.isPrivate;
+            if (info.rateLimited) rateLimited = true;
+          }
+        }
+        const next = deriveAccessFromMetadata({
+          meta,
+          isPrivate,
+          defaultBranch,
+          rateLimited,
+          sessionToken,
+          usedPublicRead,
+        });
+        if (!cancelled) {
+          setState((prev) => (areAccessStatesEqual(prev, next) ? prev : next));
+        }
+      } catch (err) {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : 'unknown-error';
+        const errorState: RepoAccessState = {
+          ...initialAccessState,
+          level: 'none',
+          status: 'error',
+          error: message,
+        };
+        setState((prev) => (areAccessStatesEqual(prev, errorState) ? prev : errorState));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [owner, repo, sessionToken, linked]);
+
+  if (!owner || !repo) return initialAccessState;
+  return state;
+}
+
+function deriveAccessFromMetadata(input: AccessDeriveInput): RepoAccessState {
+  const { meta, isPrivate, defaultBranch, rateLimited, sessionToken, usedPublicRead } = input;
+  const hasSession = !!sessionToken;
+  const repoSelected = meta.repoSelected === true;
+
+  let level: RepoAccessLevel = 'none';
+  if (repoSelected && hasSession) {
+    level = 'write';
+  } else if (repoSelected) {
+    level = 'read';
+  } else if (usedPublicRead || isPrivate === false) {
+    level = 'read';
+  } else {
+    level = 'none';
+  }
+
+  const status: RepoAccessStatus = rateLimited ? 'rate-limited' : 'ready';
+  const needsInstall = hasSession && isPrivate !== false && !repoSelected;
+
+  return {
+    level,
+    status,
+    metadata: meta,
+    defaultBranch,
+    error: null,
+    rateLimited,
+    needsInstall,
+    manageUrl: meta.manageUrl ?? null,
+    isPrivate,
+  };
+}
+
+type RepoStoreSnapshot = {
+  notes: NoteMeta[];
+  folders: string[];
+};
+
+function useRepoStore(store: LocalStore, slug: string) {
+  const listenersRef = useRef(new Set<() => void>());
+  const snapshotRef = useRef<RepoStoreSnapshot>({
+    notes: store.listNotes(),
+    folders: store.listFolders(),
+  });
+
+  const computeSnapshot = useCallback((): RepoStoreSnapshot => {
+    const notes = store.listNotes();
+    const folders = store.listFolders();
+    const prev = snapshotRef.current;
+    if (snapshotsEqual(prev, { notes, folders })) {
+      return prev;
+    }
+    return { notes, folders };
+  }, [store]);
+
+  const emit = useCallback(() => {
+    const next = computeSnapshot();
+    if (next === snapshotRef.current) return;
+    snapshotRef.current = next;
+    for (const listener of listenersRef.current) {
+      try {
+        listener();
+      } catch (err) {
+        console.error('vibenote: repo store listener failed', err);
+      }
+    }
+  }, [computeSnapshot]);
+
+  useEffect(() => {
+    snapshotRef.current = computeSnapshot();
+  }, [computeSnapshot]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const encodedSlug = encodeURIComponent(slug);
+    const prefix = `vibenote:repo:${encodedSlug}:`;
+    const handler = (event: StorageEvent) => {
+      if (event.storageArea !== window.localStorage) return;
+      if (!event.key || !event.key.startsWith(prefix)) return;
+      emit();
+    };
+    window.addEventListener('storage', handler);
+    return () => window.removeEventListener('storage', handler);
+  }, [emit, slug]);
+
+  const subscribe = useCallback((listener: () => void) => {
+    listenersRef.current.add(listener);
+    return () => {
+      listenersRef.current.delete(listener);
+    };
+  }, []);
+
+  const getSnapshot = useCallback(() => snapshotRef.current, []);
+
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+
+  return {
+    notes: snapshot.notes,
+    folders: snapshot.folders,
+    notifyStoreListeners: emit,
+  };
+}
+
+type AutosyncParams = {
+  slug: string;
+  route: Route;
+  store: LocalStore;
+  sessionToken: string | null;
+  linked: boolean;
+  canEdit: boolean;
+  notifyStoreListeners: () => void;
+};
+
+type PerformSyncOptions = {
+  silent?: boolean;
+};
+
+function useAutosync(params: AutosyncParams) {
+  const { slug, route, store, sessionToken, linked, canEdit, notifyStoreListeners } = params;
+  const [autosync, setAutosyncState] = useState<boolean>(() => (slug !== 'new' ? isAutosyncEnabled(slug) : false));
+  const [syncing, setSyncing] = useState(false);
+  const timerRef = useRef<number | null>(null);
+  const inFlightRef = useRef(false);
+
+  useEffect(() => {
+    setAutosyncState(slug !== 'new' ? isAutosyncEnabled(slug) : false);
+  }, [slug]);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current !== null) {
+        window.clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, []);
+
+  const performSync = useCallback(
+    async (options: PerformSyncOptions = {}): Promise<SyncSummary | null> => {
+      if (inFlightRef.current) return null;
+      inFlightRef.current = true;
+      setSyncing(true);
+      try {
+        if (!sessionToken || !linked || slug === 'new' || !canEdit) return null;
+        const summary = await syncBidirectional(store, slug);
+        recordAutoSyncRun(slug);
+        notifyStoreListeners();
+        return summary;
+      } catch (err) {
+        if (options.silent) {
+          console.error(err);
+          return null;
+        }
+        throw err;
+      } finally {
+        inFlightRef.current = false;
+        setSyncing(false);
+      }
+    },
+    [sessionToken, linked, slug, canEdit, store, notifyStoreListeners]
+  );
+
+  const scheduleAutoSync = useCallback(
+    (debounceMs: number = AUTO_SYNC_DEBOUNCE_MS) => {
+      if (!autosync) return;
+      if (route.kind !== 'repo') return;
+      if (!sessionToken || !linked || slug === 'new' || !canEdit) return;
+      const last = getLastAutoSyncAt(slug) ?? 0;
+      const now = Date.now();
+      const dueIn = Math.max(0, AUTO_SYNC_MIN_INTERVAL_MS - (now - last));
+      const delay = Math.max(debounceMs, dueIn);
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+      timerRef.current = window.setTimeout(() => {
+        timerRef.current = null;
+        void performSync({ silent: true });
+      }, delay);
+    },
+    [autosync, route.kind, sessionToken, linked, slug, canEdit, performSync]
+  );
+
+  useEffect(() => {
+    if (route.kind !== 'repo') return;
+    if (!autosync) return;
+    if (!sessionToken || !linked || slug === 'new' || !canEdit) return;
+    scheduleAutoSync(0);
+  }, [route.kind, autosync, sessionToken, linked, slug, canEdit, scheduleAutoSync]);
+
+  useEffect(() => {
+    if (route.kind !== 'repo') return;
+    if (!autosync || !sessionToken || !linked || slug === 'new' || !canEdit) return;
+    const id = window.setInterval(() => scheduleAutoSync(0), 180_000);
+    return () => window.clearInterval(id);
+  }, [route.kind, autosync, sessionToken, linked, slug, canEdit, scheduleAutoSync]);
+
+  const setAutosync = useCallback(
+    (enabled: boolean) => {
+      setAutosyncState(enabled);
+      setAutosyncEnabled(slug, enabled);
+      if (!enabled) {
+        if (timerRef.current !== null) {
+          window.clearTimeout(timerRef.current);
+          timerRef.current = null;
+        }
+        return;
+      }
+      scheduleAutoSync(0);
+    },
+    [scheduleAutoSync, slug]
+  );
+
+  return {
+    autosync,
+    setAutosync,
+    scheduleAutoSync,
+    performSync,
+    syncing,
+    setSyncing,
+  } as const;
+}
+
+function areAccessStatesEqual(a: RepoAccessState, b: RepoAccessState): boolean {
+  return (
+    a.level === b.level &&
+    a.status === b.status &&
+    a.metadata === b.metadata &&
+    a.defaultBranch === b.defaultBranch &&
+    a.error === b.error &&
+    a.rateLimited === b.rateLimited &&
+    a.needsInstall === b.needsInstall &&
+    a.manageUrl === b.manageUrl &&
+    a.isPrivate === b.isPrivate
+  );
+}
+
+function remoteConfigForSlug(slug: string, branch: string | null): RemoteConfig {
+  const cfg: RemoteConfig = buildRemoteConfig(slug);
+  if (branch) cfg.branch = branch;
+  return cfg;
+}
+
 function buildCollapsedMap(expanded: string[], folders: string[]): Record<string, boolean> {
   let expandedSet = new Set(expanded.filter((dir) => typeof dir === 'string' && dir !== ''));
   let map: Record<string, boolean> = { '': false };
@@ -1320,6 +1456,35 @@ function collapsedMapsEqual(a: Record<string, boolean>, b: Record<string, boolea
   if (keysA.length !== keysB.length) return false;
   for (let key of keysA) {
     if (a[key] !== b[key]) return false;
+  }
+  return true;
+}
+
+function snapshotsEqual(a: RepoStoreSnapshot, b: RepoStoreSnapshot): boolean {
+  return noteMetasEqual(a.notes, b.notes) && foldersEqual(a.folders, b.folders);
+}
+
+function noteMetasEqual(a: NoteMeta[], b: NoteMeta[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const left = a[i];
+    const right = b[i];
+    if (!left || !right) return false;
+    if (left.id !== right.id) return false;
+    if (left.path !== right.path) return false;
+    if (left.title !== right.title) return false;
+    if ((left.dir || '') !== (right.dir || '')) return false;
+    if (left.updatedAt !== right.updatedAt) return false;
+  }
+  return true;
+}
+
+function foldersEqual(a: string[], b: string[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
   }
   return true;
 }
