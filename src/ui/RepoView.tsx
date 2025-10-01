@@ -24,6 +24,7 @@ import {
   getSessionToken as getAppSessionToken,
   getSessionUser as getAppSessionUser,
   ensureAppUserAvatarCached,
+  ensureFreshAccessToken,
   signOutFromGitHubApp,
   type AppUser,
 } from '../auth/app-auth';
@@ -161,6 +162,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
   });
   const initialPullRef = useRef({ done: false });
 
+  // Restore the last focused note so the editor never flashes empty on reload.
   useEffect(() => {
     if (slug === 'new') return;
     if (activeId) return;
@@ -170,11 +172,13 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     if (exists) setActiveId(stored);
   }, [slug, store, activeId]);
 
+  // Persist the chosen note so the next visit can resume at the same place.
   useEffect(() => {
     if (slug === 'new') return;
     setLastActiveNoteId(slug, activeId ?? null);
   }, [activeId, slug]);
 
+  // Backfill the cached avatar once so we can render without depending on remote URLs.
   useEffect(() => {
     let cancelled = false;
     if (!user || user.avatarDataUrl || !user.avatarUrl) return;
@@ -189,12 +193,14 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     };
   }, [user?.avatarDataUrl, user?.avatarUrl, ensureAppUserAvatarCached]);
 
+  // Reconcile folder collapse state with what we saved for this repo slug.
   useEffect(() => {
     let expanded = slug === 'new' ? [] : getExpandedFolders(slug);
     let next = buildCollapsedMap(expanded, store.listFolders());
     setCollapsedFoldersState((prev) => (collapsedMapsEqual(prev, next) ? prev : next));
   }, [slug, store]);
 
+  // Keep the collapse map in sync when the folder list mutates.
   useEffect(() => {
     setCollapsedFoldersState((prev) => {
       let next = syncCollapsedWithFolders(prev, folders);
@@ -202,6 +208,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     });
   }, [folders]);
 
+  // Persist expanded folders so a reload keeps the same tree view.
   useEffect(() => {
     if (slug !== 'new') {
       let expanded: string[] = [];
@@ -214,6 +221,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     }
   }, [collapsedFolders, slug]);
 
+  // Remember recently opened repos once we know the current repo is reachable.
   useEffect(() => {
     if (route.kind !== 'repo') return;
     if (repoAccess.level === 'none') return;
@@ -225,7 +233,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     });
   }, [slug, route, linked, onRecordRecent, repoAccess.level]);
 
-  // When we navigate to a reachable repo we haven't linked locally yet, auto-load its notes
+  // Kick off the one-time remote import when visiting a writable repo we have not linked yet.
   useEffect(() => {
     (async () => {
       if (route.kind !== 'repo') return;
@@ -263,6 +271,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     })();
   }, [route, repoAccess.level, linked, slug, store, canEdit, repoAccess.defaultBranch]);
 
+  // Drop any cached read-only data once we regain write access.
   useEffect(() => {
     if (isPublicReadonly) return;
     setReadOnlyNotes((prev) => (prev.length === 0 ? prev : []));
@@ -270,6 +279,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     setReadOnlyLoading(false);
   }, [isPublicReadonly]);
 
+  // Populate the read-only note list straight from GitHub when we lack write access.
   useEffect(() => {
     if (!isPublicReadonly) return;
     let cancelled = false;
@@ -323,6 +333,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     };
   }, [isPublicReadonly, slug, repoAccess.defaultBranch]);
 
+  // Ensure the active note still exists when the note index changes.
   useEffect(() => {
     if (!canEdit) return;
     setActiveId((prev) => {
@@ -505,7 +516,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     setShowSwitcher(true);
   };
 
-  // Keyboard shortcuts: Cmd/Ctrl+K and "g" then "r" open the repo switcher
+  // Keyboard shortcuts: Cmd/Ctrl+K and "g" then "r" open the repo switcher.
   useEffect(() => {
     let lastG = 0;
     const isTypingTarget = (el: EventTarget | null) => {
@@ -581,12 +592,14 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     </svg>
   );
 
+  // Auto-dismiss toasts so they do not linger indefinitely.
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 4000);
     return () => clearTimeout(t);
   }, [toast]);
 
+  // Close the account dropdown when clicking anywhere else on the page.
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
@@ -598,49 +611,59 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     return () => document.removeEventListener('click', onDoc);
   }, []);
 
-  // Session-based user is restored from localStorage on init (see getAppSessionUser())
-
-  // Attempt a final background push via Service Worker when the page is closing.
+  // Attempt a last-minute sync via the Service Worker so pending edits survive tab closure.
   useEffect(() => {
-    const shouldFlush = () => false; // SW flush disabled for GitHub App backend v1
-    const onPageHide = () => {
-      if (!shouldFlush()) return;
-      const sendViaSW = async () => {
-        try {
-          if (!('serviceWorker' in navigator)) return false;
-          const reg = await navigator.serviceWorker.ready;
-          const ctrl = reg?.active;
-          if (!ctrl) return false;
-          // Compute minimal changed set: only notes whose text differs from lastSyncedHash
-          const files = store
-            .listNotes()
-            .map((m) => store.loadNote(m.id))
-            .filter((d): d is NonNullable<typeof d> => !!d)
-            .filter((d) => d.lastSyncedHash !== hashText(d.text || ''))
-            .map((d) => ({ path: d.path, text: d.text || '', baseSha: d.lastRemoteSha }));
-          if (files.length === 0) return true;
-          const [owner, repo] = slug.split('/', 2);
-          void files;
-          void owner;
-          void repo;
-          return true;
-        } catch {
-          return false;
-        }
-      };
-      // Try SW-based flush
-      void sendViaSW();
+    if (route.kind !== 'repo') return;
+    if (!sessionToken || !linked || slug === 'new' || !canEdit) return;
+    if (!('serviceWorker' in navigator)) return;
+
+    const flushViaServiceWorker = async () => {
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        const ctrl = reg?.active;
+        if (!ctrl) return;
+        const accessToken = await ensureFreshAccessToken();
+        if (!accessToken) return;
+        const cfg = remoteConfigForSlug(slug, repoAccess.defaultBranch);
+        const pending = store
+          .listNotes()
+          .map((meta) => store.loadNote(meta.id))
+          .filter((doc): doc is NoteDoc => !!doc)
+          .filter((doc) => doc.lastSyncedHash !== hashText(doc.text ?? ''))
+          .map((doc) => ({
+            path: doc.path,
+            text: doc.text ?? '',
+            baseSha: doc.lastRemoteSha,
+            message: 'vibenote: background sync',
+          }));
+        if (pending.length === 0) return;
+        ctrl.postMessage({
+          type: 'vibenote-flush',
+          payload: {
+            token: accessToken,
+            config: cfg,
+            files: pending,
+          },
+        });
+      } catch (err) {
+        // Background flush is best effort; log for debugging only.
+        console.warn('vibenote: background flush failed', err);
+      }
     };
-    const onVisibility = () => {
-      if (document.visibilityState === 'hidden') onPageHide();
+
+    const onPageHide = () => {
+      void flushViaServiceWorker();
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') void flushViaServiceWorker();
     };
     window.addEventListener('pagehide', onPageHide);
-    document.addEventListener('visibilitychange', onVisibility);
+    document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
       window.removeEventListener('pagehide', onPageHide);
-      document.removeEventListener('visibilitychange', onVisibility);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [autosync, linked, slug, store]);
+  }, [route.kind, sessionToken, linked, slug, canEdit, store, repoAccess.defaultBranch]);
 
   const onSignOut = async () => {
     try {
@@ -1128,6 +1151,7 @@ function useRepoAccess({ route, sessionToken, linked }: RepoAccessParams): RepoA
   const repo = route.kind === 'repo' ? route.repo : null;
   const [state, setState] = useState<RepoAccessState>({ ...initialAccessState, status: 'checking' });
 
+  // Query GitHub (and the public fallback) whenever the targeted repo changes.
   useEffect(() => {
     if (!owner || !repo) return;
     let cancelled = false;
@@ -1242,6 +1266,7 @@ function useRepoStore(store: LocalStore) {
     }
   }, [store]);
 
+  // React to storage events from other tabs so the tree stays in sync across windows.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const handler = (event: StorageEvent) => {
@@ -1294,10 +1319,12 @@ function useAutosync(params: AutosyncParams) {
   const timerRef = useRef<number | null>(null);
   const inFlightRef = useRef(false);
 
+  // Pick up persisted autosync preferences when mounting for a repo.
   useEffect(() => {
     setAutosyncState(slug !== 'new' ? isAutosyncEnabled(slug) : false);
   }, [slug]);
 
+  // Clear any pending timers if the hook gets torn down.
   useEffect(() => {
     return () => {
       if (timerRef.current !== null) {
@@ -1350,6 +1377,7 @@ function useAutosync(params: AutosyncParams) {
     [autosync, route.kind, sessionToken, linked, slug, canEdit, performSync]
   );
 
+  // Schedule an immediate background sync when autosync becomes eligible.
   useEffect(() => {
     if (route.kind !== 'repo') return;
     if (!autosync) return;
@@ -1357,6 +1385,7 @@ function useAutosync(params: AutosyncParams) {
     scheduleAutoSync(0);
   }, [route.kind, autosync, sessionToken, linked, slug, canEdit, scheduleAutoSync]);
 
+  // Keep polling in the background so we pick up remote changes over time.
   useEffect(() => {
     if (route.kind !== 'repo') return;
     if (!autosync || !sessionToken || !linked || slug === 'new' || !canEdit) return;
