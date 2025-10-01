@@ -141,6 +141,23 @@ export async function ensureFreshAccessToken(): Promise<string | null> {
   return record.token;
 }
 
+export async function refreshAccessTokenNow(): Promise<string | null> {
+  const sessionToken = getSessionToken();
+  if (!sessionToken) {
+    // Nothing to refresh; make sure we drop any stale token record
+    clearAccessToken();
+    return null;
+  }
+  // Force a refresh request so we can recover from "bad credentials" without full sign-out
+  const refreshed = await requestAccessTokenRefresh(sessionToken);
+  if (!refreshed) {
+    // Backend declined the refresh; treat the cached token as invalid
+    clearAccessToken();
+    return null;
+  }
+  return refreshed.token;
+}
+
 export async function signOutFromGitHubApp(): Promise<void> {
   const base = getApiBase();
   const sessionToken = getSessionToken();

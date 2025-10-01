@@ -1,4 +1,4 @@
-import { ensureFreshAccessToken, getApiBase } from '../auth/app-auth';
+import { ensureFreshAccessToken, refreshAccessTokenNow, getApiBase } from '../auth/app-auth';
 import { fetchPublicRepoInfo } from './github-public';
 
 const GITHUB_API_BASE = 'https://api.github.com';
@@ -38,27 +38,37 @@ export async function getRepoMetadata(owner: string, repo: string): Promise<Repo
 
   if (token) {
     try {
-      let res = await githubGet(token, `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`);
-      if (res.ok) {
-        let json = (await res.json()) as any;
+      let repoRes: Response | null = await githubGet(
+        token,
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`
+      );
+      if (repoRes.status === 401) {
+        const refreshed = await refreshAccessTokenNow();
+        token = refreshed;
+        repoRes = refreshed
+          ? await githubGet(refreshed, `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`)
+          : null;
+      }
+      if (repoRes && repoRes.ok) {
+        let json = (await repoRes.json()) as any;
         isPrivate = json && typeof json.private === 'boolean' ? Boolean(json.private) : null;
         defaultBranch = json && typeof json.default_branch === 'string' ? String(json.default_branch) : null;
         let permissions = json && typeof json.permissions === 'object' ? json.permissions : null;
         userHasPush = Boolean(permissions && permissions.push === true);
         fetchedWithToken = true;
-      } else {
-        if (res.status === 403) {
-          let body = await safeJson(res);
-          let message = body && typeof body.message === 'string' ? body.message.toLowerCase() : '';
-          if (message.includes('rate limit') || message.includes('abuse')) {
-            rateLimited = true;
-          }
+      } else if (repoRes && repoRes.status === 403) {
+        let body = await safeJson(repoRes);
+        let message = body && typeof body.message === 'string' ? body.message.toLowerCase() : '';
+        if (message.includes('rate limit') || message.includes('abuse')) {
+          rateLimited = true;
         }
       }
     } catch (err) {
       console.warn('vibenote: failed to fetch repo metadata with auth', err);
     }
+  }
 
+  if (token) {
     try {
       const access = await resolveInstallationAccess(token, owner, repo);
       installed = access.installed;
