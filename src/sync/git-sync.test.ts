@@ -253,7 +253,7 @@ describe('syncBidirectional', () => {
     await syncBidirectional(store, 'user/repo');
     await syncBidirectional(store, 'user/repo');
     expectParity(store, remote);
-    expect(listTombstones(store.getSlug())).toHaveLength(0);
+    expect(listTombstones(store.slug)).toHaveLength(0);
     const firstDoc = store.loadNote(firstId);
     const secondDoc = store.loadNote(secondId);
     expect(firstDoc?.path).toBe('First.md');
@@ -267,7 +267,7 @@ describe('syncBidirectional', () => {
     await syncBidirectional(store, 'user/repo');
     expectParity(store, remote);
     expect(store.listNotes()).toHaveLength(0);
-    expect(listTombstones(store.getSlug())).toHaveLength(0);
+    expect(listTombstones(store.slug)).toHaveLength(0);
   });
 
   test('renames move files remotely', async () => {

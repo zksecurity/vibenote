@@ -105,9 +105,7 @@ export async function putFile(
   file: { path: string; text: string; baseSha?: string },
   message: string
 ): Promise<string> {
-  let res = await commitChanges(config, message, [
-    { path: file.path, contentBase64: toBase64(file.text) },
-  ]);
+  let res = await commitChanges(config, message, [{ path: file.path, contentBase64: toBase64(file.text) }]);
   return extractBlobSha(res, file.path) ?? res.commitSha;
 }
 
@@ -259,9 +257,10 @@ async function commitChanges(
       await throwGitHubError(commitRes, `/repos/${config.owner}/${config.repo}/git/commits/${headSha}`);
     }
     let commitJson = (await commitRes.json()) as any;
-    baseTreeSha = commitJson && commitJson.tree && typeof commitJson.tree.sha === 'string'
-      ? String(commitJson.tree.sha)
-      : null;
+    baseTreeSha =
+      commitJson && commitJson.tree && typeof commitJson.tree.sha === 'string'
+        ? String(commitJson.tree.sha)
+        : null;
   } else if (refRes.status === 404) {
     isInitialCommit = true;
   } else {
@@ -421,7 +420,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
   let merged = 0;
 
   const config = buildRemoteConfig(slug);
-  const storeSlug = store.getSlug();
+  const storeSlug = store.slug;
   const entries = await listNoteFiles(config);
   const remoteMap = new Map<string, string>(entries.map((e) => [e.path, e.sha] as const));
   const pending = listTombstones(storeSlug);

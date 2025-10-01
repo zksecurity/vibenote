@@ -59,7 +59,7 @@ type LocalStoreOptions = {
 };
 
 export class LocalStore {
-  private slug: string;
+  slug: string;
   private index: NoteMeta[];
   private notesDir: string;
   private indexKey: string;
@@ -90,10 +90,6 @@ export class LocalStore {
       this.createNote('Welcome', WELCOME_NOTE);
       this.index = this.loadIndex();
     }
-  }
-
-  getSlug(): string {
-    return this.slug;
   }
 
   setNotesDir(dir: string) {

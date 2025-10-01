@@ -101,7 +101,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     }
     return new LocalStore(slug);
   }, [slug, route.kind]);
-  const { notes, folders, notifyStoreListeners } = useRepoStore(store, slug);
+  const { notes, folders, notifyStoreListeners } = useRepoStore(store);
   // Restore the previously active note as early as possible so the editor does not flicker to empty state.
   const [activeId, setActiveId] = useState<string | null>(() => {
     if (slug === 'new') return null;
@@ -145,7 +145,8 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
   const accessStatusReady = repoAccess.status === 'ready' || repoAccess.status === 'rate-limited';
   const metadataError = repoAccess.status === 'error' ? repoAccess.error : null;
   const canEdit =
-    !!sessionToken && (repoAccess.level === 'write' || (!accessStatusReady && linked) || (!!metadataError && linked));
+    !!sessionToken &&
+    (repoAccess.level === 'write' || (!accessStatusReady && linked) || (!!metadataError && linked));
   const isPublicReadonly = repoAccess.level === 'read' && repoAccess.isPrivate === false;
   const needsInstallForPrivate = repoAccess.needsInstall;
   const isRateLimited = repoAccess.status === 'rate-limited';
@@ -261,7 +262,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
       }
     })();
   }, [route, repoAccess.level, linked, slug, store, canEdit, repoAccess.defaultBranch]);
-
 
   useEffect(() => {
     if (isPublicReadonly) return;
@@ -904,25 +904,25 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                 onDeleteFile={canEdit ? onDelete : () => undefined}
                 onCreateFile={
                   canEdit
-                        ? (dir, name) => {
-                            let id = store.createNote(name, '', dir);
-                            notifyStoreListeners();
-                            setActiveId(id);
-                            scheduleAutoSync();
-                            return id;
-                          }
+                    ? (dir, name) => {
+                        let id = store.createNote(name, '', dir);
+                        notifyStoreListeners();
+                        setActiveId(id);
+                        scheduleAutoSync();
+                        return id;
+                      }
                     : () => undefined
                 }
                 onCreateFolder={
                   canEdit
-                            ? (parentDir, name) => {
-                                try {
-                                  store.createFolder(parentDir, name);
-                                  notifyStoreListeners();
-                                } catch (e) {
-                                  console.error(e);
-                                  setSyncMsg('Invalid folder name.');
-                                }
+                    ? (parentDir, name) => {
+                        try {
+                          store.createFolder(parentDir, name);
+                          notifyStoreListeners();
+                        } catch (e) {
+                          console.error(e);
+                          setSyncMsg('Invalid folder name.');
+                        }
                       }
                     : () => undefined
                 }
@@ -934,14 +934,14 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
             </div>
             {route.kind === 'repo' && linked && canEdit ? (
               <div className="repo-autosync-toggle">
-                  <Toggle
-                    checked={autosync}
-                    onChange={(enabled) => {
-                        setAutosync(enabled);
-                      }}
-                    label="Autosync"
-                    description="Runs background sync after edits and periodically."
-                  />
+                <Toggle
+                  checked={autosync}
+                  onChange={(enabled) => {
+                    setAutosync(enabled);
+                  }}
+                  label="Autosync"
+                  description="Runs background sync after edits and periodically."
+                />
               </div>
             ) : null}
           </aside>
@@ -995,9 +995,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                 {isPublicReadonly && (
                   <div className="alert">
                     <span className="badge">Read-only</span>
-                    <span className="alert-text">
-                      You can view, but not edit files in this repository.
-                    </span>
+                    <span className="alert-text">You can view, but not edit files in this repository.</span>
                     {sessionToken ? (
                       <button className="btn primary" onClick={openAccessSetup}>
                         Get Write Access
@@ -1222,26 +1220,18 @@ type RepoStoreSnapshot = {
   folders: string[];
 };
 
-function useRepoStore(store: LocalStore, slug: string) {
+function useRepoStore(store: LocalStore) {
   const listenersRef = useRef(new Set<() => void>());
-  const snapshotRef = useRef<RepoStoreSnapshot>({
-    notes: store.listNotes(),
-    folders: store.listFolders(),
-  });
-
-  const computeSnapshot = useCallback((): RepoStoreSnapshot => {
-    const notes = store.listNotes();
-    const folders = store.listFolders();
-    const prev = snapshotRef.current;
-    if (snapshotsEqual(prev, { notes, folders })) {
-      return prev;
-    }
-    return { notes, folders };
-  }, [store]);
+  const snapshotRef = useRef<RepoStoreSnapshot>({ notes: [], folders: [] });
+  if (snapshotRef.current.notes.length === 0 && snapshotRef.current.folders.length === 0) {
+    snapshotRef.current = readRepoSnapshot(store);
+  }
+  const storagePrefix = `vibenote:repo:${encodeURIComponent(store.slug)}:`;
 
   const emit = useCallback(() => {
-    const next = computeSnapshot();
-    if (next === snapshotRef.current) return;
+    const current = snapshotRef.current;
+    const next = readRepoSnapshot(store);
+    if (current && snapshotsEqual(current, next)) return;
     snapshotRef.current = next;
     for (const listener of listenersRef.current) {
       try {
@@ -1250,24 +1240,18 @@ function useRepoStore(store: LocalStore, slug: string) {
         console.error('vibenote: repo store listener failed', err);
       }
     }
-  }, [computeSnapshot]);
-
-  useEffect(() => {
-    snapshotRef.current = computeSnapshot();
-  }, [computeSnapshot]);
+  }, [store]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const encodedSlug = encodeURIComponent(slug);
-    const prefix = `vibenote:repo:${encodedSlug}:`;
     const handler = (event: StorageEvent) => {
       if (event.storageArea !== window.localStorage) return;
-      if (!event.key || !event.key.startsWith(prefix)) return;
+      if (!event.key || !event.key.startsWith(storagePrefix)) return;
       emit();
     };
     window.addEventListener('storage', handler);
     return () => window.removeEventListener('storage', handler);
-  }, [emit, slug]);
+  }, [emit, storagePrefix]);
 
   const subscribe = useCallback((listener: () => void) => {
     listenersRef.current.add(listener);
@@ -1303,7 +1287,9 @@ type PerformSyncOptions = {
 
 function useAutosync(params: AutosyncParams) {
   const { slug, route, store, sessionToken, linked, canEdit, notifyStoreListeners } = params;
-  const [autosync, setAutosyncState] = useState<boolean>(() => (slug !== 'new' ? isAutosyncEnabled(slug) : false));
+  const [autosync, setAutosyncState] = useState<boolean>(() =>
+    slug !== 'new' ? isAutosyncEnabled(slug) : false
+  );
   const [syncing, setSyncing] = useState(false);
   const timerRef = useRef<number | null>(null);
   const inFlightRef = useRef(false);
@@ -1458,6 +1444,13 @@ function collapsedMapsEqual(a: Record<string, boolean>, b: Record<string, boolea
     if (a[key] !== b[key]) return false;
   }
   return true;
+}
+
+function readRepoSnapshot(store: LocalStore): RepoStoreSnapshot {
+  return {
+    notes: store.listNotes(),
+    folders: store.listFolders(),
+  };
 }
 
 function snapshotsEqual(a: RepoStoreSnapshot, b: RepoStoreSnapshot): boolean {
