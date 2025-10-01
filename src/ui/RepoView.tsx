@@ -437,7 +437,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
       window.removeEventListener('storage', onStorage);
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [slug, store]);
+  }, [slug, store, canEdit]);
 
   const scheduleAutoSync = (debounceMs: number = AUTO_SYNC_DEBOUNCE_MS) => {
     if (!autosync) return;
@@ -867,10 +867,8 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     }
   };
 
-  const isRepoUnreachable =
-    route.kind === 'repo' && accessState === 'unreachable' && !isPublicReadonly && !needsInstallForPrivate;
   const showSidebar = (notes.length > 0 && linked) || (isPublicReadonly && readOnlyNotes.length > 0);
-  const layoutClass = showSidebar ? (isRepoUnreachable ? 'single' : '') : 'single';
+  const layoutClass = showSidebar ? '' : 'single';
   const noteList = isPublicReadonly ? readOnlyNotes : notes;
   const folderList = useMemo(() => {
     if (isPublicReadonly) {
@@ -955,7 +953,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
             </>
           ) : (
             <>
-              {linked && !isRepoUnreachable && canEdit && (
+              {linked && canEdit && (
                 <button
                   className={`btn secondary sync-btn ${syncing ? 'is-syncing' : ''}`}
                   onClick={onSyncNow}
@@ -990,264 +988,242 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
         </div>
       </header>
       <div className={`app-layout ${layoutClass}`}>
-        {isRepoUnreachable ? (
-          <section className="workspace" style={{ width: '100%' }}>
-            <div className="workspace-body">
-              <div className="empty-state">
-                <h2>Can’t access this repository</h2>
-                <p>
-                  You don’t have permission to view{' '}
-                  <strong>{route.kind === 'repo' ? `${route.owner}/${route.repo}` : ''}</strong> with the
-                  current GitHub device token.
-                </p>
-                <p>
-                  Sign out and sign in with a token that has access, or switch to a different repository from
-                  the header.
-                </p>
+        {showSidebar && (
+          <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
+            <div className="sidebar-header">
+              <div className="sidebar-title">
+                <div className="sidebar-title-main">
+                  <span>Notes</span>
+                  <span className="note-count">{noteList.length}</span>
+                </div>
+                <button
+                  className="btn icon only-mobile"
+                  onClick={() => setSidebarOpen(false)}
+                  aria-label="Close notes"
+                >
+                  <CloseIcon />
+                </button>
               </div>
             </div>
-          </section>
-        ) : (
-          <>
-            {showSidebar && (
-              <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
-                <div className="sidebar-header">
-                  <div className="sidebar-title">
-                    <div className="sidebar-title-main">
-                      <span>Notes</span>
-                      <span className="note-count">{noteList.length}</span>
-                    </div>
-                    <button
-                      className="btn icon only-mobile"
-                      onClick={() => setSidebarOpen(false)}
-                      aria-label="Close notes"
-                    >
-                      <CloseIcon />
-                    </button>
-                  </div>
-                </div>
-                {canEdit && (
-                  <div className="sidebar-actions">
-                    <button className="btn primary" onClick={onCreate}>
-                      New note
-                    </button>
-                    <button
-                      className="btn secondary"
-                      onClick={() => {
-                        let parentDir = '';
-                        if (selection?.kind === 'folder') parentDir = selection.dir;
-                        if (selection?.kind === 'file') {
-                          let n = noteList.find((x) => x.id === selection.id);
-                          if (n) parentDir = (n.dir as string) || '';
-                        }
-                        onCreateFolder(parentDir);
-                      }}
-                    >
-                      New folder
-                    </button>
-                  </div>
-                )}
-                <div className="sidebar-body">
-                  <FileTree
-                    files={
-                      noteList.map((n) => ({
-                        id: n.id,
-                        name: n.title || 'Untitled',
-                        path: n.path,
-                        dir: (n.dir as string) || '',
-                      })) as FileEntry[]
+            {canEdit && (
+              <div className="sidebar-actions">
+                <button className="btn primary" onClick={onCreate}>
+                  New note
+                </button>
+                <button
+                  className="btn secondary"
+                  onClick={() => {
+                    let parentDir = '';
+                    if (selection?.kind === 'folder') parentDir = selection.dir;
+                    if (selection?.kind === 'file') {
+                      let n = noteList.find((x) => x.id === selection.id);
+                      if (n) parentDir = (n.dir as string) || '';
                     }
-                    folders={folderList}
-                    activeId={activeId}
-                    collapsed={collapsedFolders}
-                    onCollapsedChange={(next) =>
-                      setCollapsedFoldersState((prev) =>
-                        collapsedMapsEqual(prev, next) ? prev : syncCollapsedWithFolders(next, folders)
-                      )
-                    }
-                    onSelectionChange={(sel) => setSelection(sel as any)}
-                    onSelectFile={(id) => {
-                      if (!canEdit) {
-                        setActiveId(id);
-                        setSidebarOpen(false);
-                        const entry = readOnlyNotes.find((n) => n.id === id);
-                        if (!entry) return;
-                        const cfg = buildConfigWithMeta();
-                        void (async () => {
-                          try {
-                            const remote = await pullNote(cfg, entry.path);
-                            if (!remote) return;
-                            setDoc({
-                              id: entry.id,
-                              path: entry.path,
-                              title: entry.title,
-                              dir: entry.dir,
-                              text: remote.text,
-                              updatedAt: Date.now(),
-                              lastRemoteSha: remote.sha,
-                              lastSyncedHash: hashText(remote.text),
-                            });
-                          } catch (e) {
-                            console.error(e);
-                          }
-                        })();
-                        return;
-                      }
-                      setActiveId(id);
-                      setSidebarOpen(false);
-                    }}
-                    onRenameFile={canEdit ? onRename : () => undefined}
-                    onDeleteFile={canEdit ? onDelete : () => undefined}
-                    onCreateFile={
-                      canEdit
-                        ? (dir, name) => {
-                            let id = store.createNote(name, '', dir);
-                            setNotes(store.listNotes());
-                            setFolders(store.listFolders());
-                            setActiveId(id);
-                            scheduleAutoSync();
-                            return id;
-                          }
-                        : () => undefined
-                    }
-                    onCreateFolder={
-                      canEdit
-                        ? (parentDir, name) => {
-                            try {
-                              store.createFolder(parentDir, name);
-                              setFolders(store.listFolders());
-                            } catch (e) {
-                              console.error(e);
-                              setSyncMsg('Invalid folder name.');
-                            }
-                          }
-                        : () => undefined
-                    }
-                    onRenameFolder={canEdit ? onRenameFolder : () => undefined}
-                    onDeleteFolder={canEdit ? onDeleteFolder : () => undefined}
-                    newEntry={canEdit ? newEntry : null}
-                    onFinishCreate={() => canEdit && setNewEntry(null)}
-                  />
-                </div>
-                {route.kind === 'repo' && linked && canEdit ? (
-                  <div className="repo-autosync-toggle">
-                    <Toggle
-                      checked={autosync}
-                      onChange={(enabled) => {
-                        setAutosync(enabled);
-                        setAutosyncEnabled(slug, enabled);
-                        if (enabled) scheduleAutoSync(0);
-                      }}
-                      label="Autosync"
-                      description="Runs background sync after edits and periodically."
-                    />
-                  </div>
-                ) : null}
-              </aside>
+                    onCreateFolder(parentDir);
+                  }}
+                >
+                  New folder
+                </button>
+              </div>
             )}
-            <section className="workspace">
-              <div className="workspace-body">
-                {readOnlyLoading ? (
-                  <div className="empty-state">
-                    <h2>Loading repository…</h2>
-                    <p>Fetching files from GitHub. Hang tight.</p>
-                  </div>
-                ) : route.kind === 'repo' && needsInstallForPrivate ? (
-                  <div className="empty-state">
-                    <h2>Can't access this repository</h2>
-                    <p>This repository is private or not yet enabled for the VibeNote GitHub App.</p>
-                    <p>
-                      Continue to GitHub and either select <strong>Only select repositories</strong> and pick
-                      <code>
-                        {' '}
-                        {route.owner}/{route.repo}{' '}
-                      </code>
-                      , or grant access to all repositories (not recommended).
-                    </p>
-                    {sessionToken ? (
-                      <button className="btn primary" onClick={openAccessSetup}>
-                        Get Read/Write Access
-                      </button>
-                    ) : (
-                      <p>Please sign in with GitHub to request access.</p>
-                    )}
-                  </div>
+            <div className="sidebar-body">
+              <FileTree
+                files={
+                  noteList.map((n) => ({
+                    id: n.id,
+                    name: n.title || 'Untitled',
+                    path: n.path,
+                    dir: (n.dir as string) || '',
+                  })) as FileEntry[]
+                }
+                folders={folderList}
+                activeId={activeId}
+                collapsed={collapsedFolders}
+                onCollapsedChange={(next) =>
+                  setCollapsedFoldersState((prev) =>
+                    collapsedMapsEqual(prev, next) ? prev : syncCollapsedWithFolders(next, folders)
+                  )
+                }
+                onSelectionChange={(sel) => setSelection(sel as any)}
+                onSelectFile={(id) => {
+                  if (!canEdit) {
+                    setActiveId(id);
+                    setSidebarOpen(false);
+                    const entry = readOnlyNotes.find((n) => n.id === id);
+                    if (!entry) return;
+                    const cfg = buildConfigWithMeta();
+                    void (async () => {
+                      try {
+                        const remote = await pullNote(cfg, entry.path);
+                        if (!remote) return;
+                        setDoc({
+                          id: entry.id,
+                          path: entry.path,
+                          title: entry.title,
+                          dir: entry.dir,
+                          text: remote.text,
+                          updatedAt: Date.now(),
+                          lastRemoteSha: remote.sha,
+                          lastSyncedHash: hashText(remote.text),
+                        });
+                      } catch (e) {
+                        console.error(e);
+                      }
+                    })();
+                    return;
+                  }
+                  setActiveId(id);
+                  setSidebarOpen(false);
+                }}
+                onRenameFile={canEdit ? onRename : () => undefined}
+                onDeleteFile={canEdit ? onDelete : () => undefined}
+                onCreateFile={
+                  canEdit
+                    ? (dir, name) => {
+                        let id = store.createNote(name, '', dir);
+                        setNotes(store.listNotes());
+                        setFolders(store.listFolders());
+                        setActiveId(id);
+                        scheduleAutoSync();
+                        return id;
+                      }
+                    : () => undefined
+                }
+                onCreateFolder={
+                  canEdit
+                    ? (parentDir, name) => {
+                        try {
+                          store.createFolder(parentDir, name);
+                          setFolders(store.listFolders());
+                        } catch (e) {
+                          console.error(e);
+                          setSyncMsg('Invalid folder name.');
+                        }
+                      }
+                    : () => undefined
+                }
+                onRenameFolder={canEdit ? onRenameFolder : () => undefined}
+                onDeleteFolder={canEdit ? onDeleteFolder : () => undefined}
+                newEntry={canEdit ? newEntry : null}
+                onFinishCreate={() => canEdit && setNewEntry(null)}
+              />
+            </div>
+            {route.kind === 'repo' && linked && canEdit ? (
+              <div className="repo-autosync-toggle">
+                <Toggle
+                  checked={autosync}
+                  onChange={(enabled) => {
+                    setAutosync(enabled);
+                    setAutosyncEnabled(slug, enabled);
+                    if (enabled) scheduleAutoSync(0);
+                  }}
+                  label="Autosync"
+                  description="Runs background sync after edits and periodically."
+                />
+              </div>
+            ) : null}
+          </aside>
+        )}
+        <section className="workspace">
+          <div className="workspace-body">
+            {readOnlyLoading ? (
+              <div className="empty-state">
+                <h2>Loading repository…</h2>
+                <p>Fetching files from GitHub. Hang tight.</p>
+              </div>
+            ) : route.kind === 'repo' && needsInstallForPrivate ? (
+              <div className="empty-state">
+                <h2>Can't access this repository</h2>
+                <p>This repository is private or not yet enabled for the VibeNote GitHub App.</p>
+                <p>
+                  Continue to GitHub and either select <strong>Only select repositories</strong> and pick
+                  <code>
+                    {' '}
+                    {route.owner}/{route.repo}{' '}
+                  </code>
+                  , or grant access to all repositories (not recommended).
+                </p>
+                {sessionToken ? (
+                  <button className="btn primary" onClick={openAccessSetup}>
+                    Get Read/Write Access
+                  </button>
                 ) : (
-                  <>
-                    {metadataError && (
-                      <div className="alert warning">
-                        <span className="badge">Offline</span>
-                        <span className="alert-text">
-                          Could not reach GitHub. You can still edit notes offline.
-                        </span>
-                      </div>
-                    )}
-                    {metadataError == null && isRateLimited && (
-                      <div className="alert warning">
-                        <span className="badge">Limited</span>
-                        <span className="alert-text">
-                          GitHub rate limits temporarily prevent checking repository access. Public
-                          repositories remain viewable; retry shortly for private access checks.
-                        </span>
-                      </div>
-                    )}
-                    {isPublicReadonly && (
-                      <div className="alert">
-                        <span className="badge">Read-only</span>
-                        <span className="alert-text">
-                          You can view, but not edit files in this repository.
-                        </span>
-                        {sessionToken ? (
-                          <button className="btn primary" onClick={openAccessSetup}>
-                            Get Write Access
-                          </button>
-                        ) : null}
-                      </div>
-                    )}
-                    {doc ? (
-                      <div className="workspace-panels">
-                        <Editor
-                          key={doc.id}
-                          doc={doc}
-                          readOnly={isPublicReadonly || needsInstallForPrivate || !canEdit}
-                          onChange={(id, text) => {
-                            store.saveNote(id, text);
-                            scheduleAutoSync();
-                          }}
-                        />
-                      </div>
-                    ) : isPublicReadonly ? (
-                      <div className="empty-state">
-                        <h2>Browse on GitHub to view files</h2>
-                        <p>This repository has no notes cached locally yet.</p>
-                        <p>
-                          Open the repository on GitHub or select a file from the sidebar to load it in
-                          VibeNote.
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="empty-state">
-                        <h2>Welcome to VibeNote</h2>
-                        <p>Select a note from the sidebar or create a new one to get started.</p>
-                        <p>
-                          To sync with GitHub, connect your account and link a repository. Once connected, use{' '}
-                          <strong>Sync now</strong> anytime to pull and push updates.
-                        </p>
-                        {syncMsg && <p className="empty-state-status">{syncMsg}</p>}
-                      </div>
-                    )}
-                  </>
+                  <p>Please sign in with GitHub to request access.</p>
                 )}
               </div>
-              {syncMsg && (
-                <div className="status-banner">
-                  <span>Status</span>
-                  <span>{syncMsg}</span>
-                </div>
-              )}
-            </section>
-          </>
-        )}
+            ) : (
+              <>
+                {metadataError && (
+                  <div className="alert warning">
+                    <span className="badge">Offline</span>
+                    <span className="alert-text">
+                      Could not reach GitHub. You can still edit notes offline.
+                    </span>
+                  </div>
+                )}
+                {metadataError == null && isRateLimited && (
+                  <div className="alert warning">
+                    <span className="badge">Limited</span>
+                    <span className="alert-text">
+                      GitHub rate limits temporarily prevent checking repository access. Public repositories
+                      remain viewable; retry shortly for private access checks.
+                    </span>
+                  </div>
+                )}
+                {isPublicReadonly && (
+                  <div className="alert">
+                    <span className="badge">Read-only</span>
+                    <span className="alert-text">
+                      You can view, but not edit files in this repository.
+                    </span>
+                    {sessionToken ? (
+                      <button className="btn primary" onClick={openAccessSetup}>
+                        Get Write Access
+                      </button>
+                    ) : null}
+                  </div>
+                )}
+                {doc ? (
+                  <div className="workspace-panels">
+                    <Editor
+                      key={doc.id}
+                      doc={doc}
+                      readOnly={isPublicReadonly || needsInstallForPrivate || !canEdit}
+                      onChange={(id, text) => {
+                        store.saveNote(id, text);
+                        scheduleAutoSync();
+                      }}
+                    />
+                  </div>
+                ) : isPublicReadonly ? (
+                  <div className="empty-state">
+                    <h2>Browse on GitHub to view files</h2>
+                    <p>This repository has no notes cached locally yet.</p>
+                    <p>
+                      Open the repository on GitHub or select a file from the sidebar to load it in VibeNote.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="empty-state">
+                    <h2>Welcome to VibeNote</h2>
+                    <p>Select a note from the sidebar or create a new one to get started.</p>
+                    <p>
+                      To sync with GitHub, connect your account and link a repository. Once connected, use{' '}
+                      <strong>Sync now</strong> anytime to pull and push updates.
+                    </p>
+                    {syncMsg && <p className="empty-state-status">{syncMsg}</p>}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+          {syncMsg && (
+            <div className="status-banner">
+              <span>Status</span>
+              <span>{syncMsg}</span>
+            </div>
+          )}
+        </section>
       </div>
       {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
 
