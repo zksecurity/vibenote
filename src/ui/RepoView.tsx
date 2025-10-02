@@ -21,10 +21,8 @@ import {
   signInWithGitHubApp,
   getSessionToken as getAppSessionToken,
   getSessionUser as getAppSessionUser,
-  ensureAppUserAvatarCached,
   ensureFreshAccessToken,
   signOutFromGitHubApp,
-  type AppUser,
 } from '../auth/app-auth';
 import {
   getRepoMetadata as apiGetRepoMetadata,
@@ -122,8 +120,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
   const [linked, setLinked] = useState(() => slug !== 'new' && isRepoLinked(slug));
 
   // Keep the signed-in GitHub App user details for header UI.
-  const initialAppUser = useMemo(getAppSessionUser, []);
-  const [user, setUser] = useState(initialAppUser);
+  const [user, setUser] = useState(getAppSessionUser);
   const userAvatarSrc = user?.avatarDataUrl ?? user?.avatarUrl ?? undefined;
 
   // compute repo access state and some derived values
@@ -158,21 +155,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     canEdit,
   });
   const initialPullRef = useRef({ done: false });
-
-  // Backfill the cached avatar once so we can render without depending on remote URLs.
-  useEffect(() => {
-    let cancelled = false;
-    if (!user || user.avatarDataUrl || !user.avatarUrl) return;
-    (async () => {
-      const updated = await ensureAppUserAvatarCached();
-      if (!cancelled && updated && updated.avatarDataUrl) {
-        setUser(updated);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.avatarDataUrl, user?.avatarUrl, ensureAppUserAvatarCached]);
 
   // Remember recently opened repos once we know the current repo is reachable.
   useEffect(() => {
@@ -605,7 +587,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                   <SyncIcon spinning={syncing} />
                 </button>
               )}
-              {user ? (
+              {user && (
                 <button
                   className="btn ghost account-btn"
                   onClick={() => setMenuOpen((v) => !v)}
@@ -618,10 +600,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                       {(user.name || user.login || '?').charAt(0).toUpperCase()}
                     </span>
                   )}
-                </button>
-              ) : (
-                <button className="btn secondary" onClick={onConnect}>
-                  Refresh GitHub login
                 </button>
               )}
             </>
@@ -759,7 +737,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                       To sync with GitHub, connect your account and link a repository. Once connected, use{' '}
                       <strong>Sync now</strong> anytime to pull and push updates.
                     </p>
-                    {syncMsg && <p className="empty-state-status">{syncMsg}</p>}
                   </div>
                 )}
               </>

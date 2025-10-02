@@ -74,8 +74,7 @@ export async function signInWithGitHubApp(
           avatarDataUrl: rawUser.avatarDataUrl ?? null,
         };
         if (!normalized.avatarDataUrl && normalized.avatarUrl) {
-          const cached = await fetchAvatarDataUrl(normalized.avatarUrl);
-          if (cached) normalized.avatarDataUrl = cached;
+          normalized.avatarDataUrl = await fetchAvatarDataUrl(normalized.avatarUrl);
         }
         localStorage.setItem(SESSION_KEY, token);
         localStorage.setItem(USER_KEY, JSON.stringify(normalized));
@@ -207,21 +206,6 @@ async function requestAccessTokenRefresh(sessionToken: string): Promise<AccessTo
     console.warn('vibenote: refresh request failed', err);
     return null;
   }
-}
-
-export async function ensureAppUserAvatarCached(): Promise<AppUser | null> {
-  const user = getSessionUser();
-  if (!user) return null;
-  if (user.avatarDataUrl || !user.avatarUrl) return user;
-  const cached = await fetchAvatarDataUrl(user.avatarUrl);
-  if (!cached) return user;
-  const updated: AppUser = { ...user, avatarDataUrl: cached };
-  try {
-    localStorage.setItem(USER_KEY, JSON.stringify(updated));
-  } catch (err) {
-    console.warn('vibenote: failed to persist cached avatar', err);
-  }
-  return updated;
 }
 
 function getApiBase(): string {
