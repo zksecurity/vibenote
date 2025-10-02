@@ -126,23 +126,24 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
   const [toast, setToast] = useState<{ text: string; href?: string } | null>(null);
   // Toggle the repo switcher overlay.
   const [showSwitcher, setShowSwitcher] = useState(false);
+
+  // compute repo access state and some derived values
   const repoAccess = useRepoAccess({ route, sessionToken, linked });
   const manageUrl = repoAccess.manageUrl;
-  const accessStatusReady = repoAccess.status === 'ready' || repoAccess.status === 'rate-limited';
-  const metadataError = repoAccess.status === 'error' ? repoAccess.error : null;
-  const canEdit =
-    !!sessionToken &&
-    (repoAccess.level === 'write' || (!accessStatusReady && linked) || (!!metadataError && linked));
-  const isPublicReadonly = repoAccess.level === 'read' && repoAccess.isPrivate === false;
+  const accessStatusReady =
+    repoAccess.status === 'ready' || repoAccess.status === 'rate-limited' || repoAccess.status === 'error';
+  const isMetadataError = repoAccess.status === 'error';
+  const isReadOnly = repoAccess.level === 'read';
 
-  // Only persist repo-scoped preferences while the repo is editable.
-  // TODO this should actually use the "optimistic write access" state, which is true when either
-  // we found the repo to be stored as linked locally, or when we have confirmed write access remotely.
-  const persistRepoPrefs = repoAccess.level === 'write';
+  // whether we treat the repo as locally writable
+  // note that we are optimistic about write access until the access check completes
+  const canEdit =
+    route.kind === 'new' ||
+    (!!sessionToken && (repoAccess.level === 'write' || (!accessStatusReady && linked)));
 
   const needsInstallForPrivate = repoAccess.needsInstall;
   const isRateLimited = repoAccess.status === 'rate-limited';
-  const { autosync, setAutosync, scheduleAutoSync, performSync, syncing, setSyncing } = useAutosync({
+  const { autosync, setAutosync, scheduleAutoSync, performSync, syncing } = useAutosync({
     slug,
     route,
     store,
@@ -156,7 +157,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     store,
     notes,
     canEdit,
-    persistPrefs: persistRepoPrefs,
   });
   const initialPullRef = useRef({ done: false });
 
@@ -225,17 +225,17 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     })();
   }, [route, repoAccess.level, linked, slug, store, canEdit, repoAccess.defaultBranch]);
 
-  // Drop any cached read-only data once we regain write access.
+  // Drop any cached read-only data once we gain write access.
   useEffect(() => {
-    if (isPublicReadonly) return;
+    if (isReadOnly) return;
     setReadOnlyNotes((prev) => (prev.length === 0 ? prev : []));
     setReadOnlyDoc((prev) => (prev === null ? prev : null));
     setReadOnlyLoading(false);
-  }, [isPublicReadonly]);
+  }, [isReadOnly]);
 
   // Populate the read-only note list straight from GitHub when we lack write access.
   useEffect(() => {
-    if (!isPublicReadonly) return;
+    if (!isReadOnly) return;
     let cancelled = false;
     setReadOnlyLoading(true);
     (async () => {
@@ -285,7 +285,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
       cancelled = true;
       setReadOnlyLoading(false);
     };
-  }, [isPublicReadonly, slug, repoAccess.defaultBranch]);
+  }, [isReadOnly, slug, repoAccess.defaultBranch]);
 
   const onConnect = async () => {
     try {
@@ -466,9 +466,9 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     }
   };
 
-  const showSidebar = (notes.length > 0 && linked) || (isPublicReadonly && readOnlyNotes.length > 0);
+  const showSidebar = canEdit || isReadOnly;
   const layoutClass = showSidebar ? '' : 'single';
-  const activeNotes = isPublicReadonly ? readOnlyNotes : notes;
+  const activeNotes = isReadOnly ? readOnlyNotes : notes;
   const localDoc = useMemo(() => {
     if (!canEdit) return null;
     if (!activeId) return null;
@@ -478,7 +478,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
 
   // Derive the folder set from whichever source is powering the tree (and include ancestor dirs for read-only data).
   const activeFolders = useMemo(() => {
-    if (isPublicReadonly) {
+    if (isReadOnly) {
       const set = new Set<string>();
       for (const note of readOnlyNotes) {
         if (!note.dir) continue;
@@ -492,7 +492,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
       return Array.from(set).sort();
     }
     return folders;
-  }, [folders, isPublicReadonly, readOnlyNotes]);
+  }, [folders, isReadOnly, readOnlyNotes]);
 
   // Fetch the latest contents when a read-only file is selected from the tree.
   const loadReadOnlyNote = useCallback(
@@ -647,7 +647,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
               notes={activeNotes}
               slug={slug}
               activeFolders={activeFolders}
-              persistRepoPrefs={persistRepoPrefs}
               activeId={activeId}
               setActiveId={setActiveId}
               closeSidebar={() => setSidebarOpen(false)}
@@ -700,7 +699,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
               </div>
             ) : (
               <>
-                {metadataError && (
+                {isMetadataError && (
                   <div className="alert warning">
                     <span className="badge">Offline</span>
                     <span className="alert-text">
@@ -708,7 +707,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                     </span>
                   </div>
                 )}
-                {metadataError == null && isRateLimited && (
+                {!isMetadataError && isRateLimited && (
                   <div className="alert warning">
                     <span className="badge">Limited</span>
                     <span className="alert-text">
@@ -717,7 +716,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                     </span>
                   </div>
                 )}
-                {isPublicReadonly && (
+                {isReadOnly && (
                   <div className="alert">
                     <span className="badge">Read-only</span>
                     <span className="alert-text">You can view, but not edit files in this repository.</span>
@@ -733,14 +732,14 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                     <Editor
                       key={doc.id}
                       doc={doc}
-                      readOnly={isPublicReadonly || needsInstallForPrivate || !canEdit}
+                      readOnly={isReadOnly || needsInstallForPrivate || !canEdit}
                       onChange={(id, text) => {
                         store.saveNote(id, text);
                         scheduleAutoSync();
                       }}
                     />
                   </div>
-                ) : isPublicReadonly ? (
+                ) : isReadOnly ? (
                   <div className="empty-state">
                     <h2>Browse on GitHub to view files</h2>
                     <p>This repository has no notes cached locally yet.</p>
@@ -1103,19 +1102,20 @@ function useAutosync(params: AutosyncParams) {
     scheduleAutoSync,
     performSync,
     syncing,
-    setSyncing,
   } as const;
 }
 
-type ActiveNoteParams = {
+function useActiveNote({
+  slug,
+  store,
+  notes,
+  canEdit,
+}: {
   slug: string;
   store: LocalStore;
   notes: NoteMeta[];
   canEdit: boolean;
-  persistPrefs: boolean;
-};
-
-function useActiveNote({ slug, store, notes, canEdit, persistPrefs }: ActiveNoteParams) {
+}) {
   // Track the currently focused note id for the editor and file tree.
   const [activeId, setActiveId] = useState<string | null>(() => {
     if (slug === 'new') return null;
@@ -1136,10 +1136,10 @@ function useActiveNote({ slug, store, notes, canEdit, persistPrefs }: ActiveNote
 
   // Persist the active note id so future visits resume on the same file (when permitted).
   useEffect(() => {
-    if (!persistPrefs) return;
+    if (!canEdit) return;
     if (slug === 'new') return;
     setLastActiveNoteId(slug, activeId ?? null);
-  }, [activeId, slug, persistPrefs]);
+  }, [activeId, slug, canEdit]);
 
   // Nudge the active note to a valid entry whenever the editable list changes.
   useEffect(() => {
@@ -1154,13 +1154,15 @@ function useActiveNote({ slug, store, notes, canEdit, persistPrefs }: ActiveNote
   return { activeId, setActiveId } as const;
 }
 
-type CollapsedFoldersParams = {
+function useCollapsedFolders({
+  slug,
+  folders,
+  canEdit,
+}: {
   slug: string;
   folders: string[];
-  persistPrefs: boolean;
-};
-
-function useCollapsedFolders({ slug, folders, persistPrefs }: CollapsedFoldersParams) {
+  canEdit: boolean;
+}) {
   // Remember which folders are expanded so the tree view stays consistent per repo.
   const [expandedState, setExpandedState] = useState<string[]>(() =>
     slug === 'new' ? [] : sanitizeExpandedDirs(folders, getExpandedFolders(slug))
@@ -1180,10 +1182,10 @@ function useCollapsedFolders({ slug, folders, persistPrefs }: CollapsedFoldersPa
 
   // Persist expanded folders back to storage for future visits (when enabled).
   useEffect(() => {
-    if (!persistPrefs) return;
+    if (!canEdit) return;
     if (slug === 'new') return;
     setExpandedFolders(slug, expandedState);
-  }, [slug, expandedState, persistPrefs]);
+  }, [slug, expandedState, canEdit]);
 
   const collapsed = useMemo(() => buildCollapsedMap(expandedState, folders), [expandedState, folders]);
 
@@ -1203,7 +1205,6 @@ type FileSidebarProps = {
   notes: (NoteMeta | ReadOnlyNote)[];
   slug: string;
   activeFolders: string[];
-  persistRepoPrefs: boolean;
   activeId: string | null;
   setActiveId: (id: string | null) => void;
   closeSidebar: () => void;
@@ -1220,7 +1221,6 @@ function FileSidebar(props: FileSidebarProps) {
     notes,
     slug,
     activeFolders,
-    persistRepoPrefs,
     activeId,
     setActiveId,
     closeSidebar,
@@ -1248,7 +1248,7 @@ function FileSidebar(props: FileSidebarProps) {
   const { collapsed: collapsedFolders, setCollapsedMap } = useCollapsedFolders({
     slug,
     folders: activeFolders,
-    persistPrefs: persistRepoPrefs,
+    canEdit,
   });
 
   // Track which item is highlighted so new actions know their context.
