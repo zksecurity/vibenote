@@ -151,6 +151,12 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     !!sessionToken &&
     (repoAccess.level === 'write' || (!accessStatusReady && linked) || (!!metadataError && linked));
   const isPublicReadonly = repoAccess.level === 'read' && repoAccess.isPrivate === false;
+
+  // Only persist repo-scoped preferences while the repo is editable.
+  // TODO this should actually use the "optimistic write access" state, which is true when either
+  // we found the repo to be stored as linked locally, or when we have confirmed write access remotely.
+  const persistRepoPrefs = repoAccess.level === 'write';
+
   const needsInstallForPrivate = repoAccess.needsInstall;
   const isRateLimited = repoAccess.status === 'rate-limited';
   const { autosync, setAutosync, scheduleAutoSync, performSync, syncing, setSyncing } = useAutosync({
@@ -162,7 +168,13 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     canEdit,
     notifyStoreListeners,
   });
-  const { activeId, setActiveId } = useActiveNote({ slug, store, notes, canEdit });
+  const { activeId, setActiveId } = useActiveNote({
+    slug,
+    store,
+    notes,
+    canEdit,
+    persistPrefs: persistRepoPrefs,
+  });
   const initialPullRef = useRef({ done: false });
 
   // Backfill the cached avatar once so we can render without depending on remote URLs.
@@ -690,6 +702,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
   const { collapsed: collapsedFolders, setCollapsedMap } = useCollapsedFolders({
     slug,
     folders: activeFolders,
+    persistPrefs: persistRepoPrefs,
   });
 
   return (
@@ -1387,9 +1400,10 @@ type ActiveNoteParams = {
   store: LocalStore;
   notes: NoteMeta[];
   canEdit: boolean;
+  persistPrefs: boolean;
 };
 
-function useActiveNote({ slug, store, notes, canEdit }: ActiveNoteParams) {
+function useActiveNote({ slug, store, notes, canEdit, persistPrefs }: ActiveNoteParams) {
   // Track the currently focused note id for the editor and file tree.
   const [activeId, setActiveId] = useState<string | null>(() => {
     if (slug === 'new') return null;
@@ -1408,11 +1422,12 @@ function useActiveNote({ slug, store, notes, canEdit }: ActiveNoteParams) {
     if (notes.some((note) => note.id === stored)) setActiveId(stored);
   }, [slug, activeId, notes]);
 
-  // Persist the active note id so future visits resume on the same file.
+  // Persist the active note id so future visits resume on the same file (when permitted).
   useEffect(() => {
+    if (!persistPrefs) return;
     if (slug === 'new') return;
     setLastActiveNoteId(slug, activeId ?? null);
-  }, [activeId, slug]);
+  }, [activeId, slug, persistPrefs]);
 
   // Nudge the active note to a valid entry whenever the editable list changes.
   useEffect(() => {
@@ -1430,9 +1445,10 @@ function useActiveNote({ slug, store, notes, canEdit }: ActiveNoteParams) {
 type CollapsedFoldersParams = {
   slug: string;
   folders: string[];
+  persistPrefs: boolean;
 };
 
-function useCollapsedFolders({ slug, folders }: CollapsedFoldersParams) {
+function useCollapsedFolders({ slug, folders, persistPrefs }: CollapsedFoldersParams) {
   // Remember which folders are expanded so the tree view stays consistent per repo.
   const [expandedState, setExpandedState] = useState<string[]>(() =>
     slug === 'new' ? [] : sanitizeExpandedDirs(folders, getExpandedFolders(slug))
@@ -1450,11 +1466,12 @@ function useCollapsedFolders({ slug, folders }: CollapsedFoldersParams) {
     setExpandedState((prev) => sanitizeExpandedDirs(folders, prev));
   }, [folders]);
 
-  // Persist expanded folders back to storage for future visits.
+  // Persist expanded folders back to storage for future visits (when enabled).
   useEffect(() => {
+    if (!persistPrefs) return;
     if (slug === 'new') return;
     setExpandedFolders(slug, expandedState);
-  }, [slug, expandedState]);
+  }, [slug, expandedState, persistPrefs]);
 
   const collapsed = useMemo(() => buildCollapsedMap(expandedState, folders), [expandedState, folders]);
 
