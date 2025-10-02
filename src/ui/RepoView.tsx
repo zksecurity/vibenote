@@ -645,13 +645,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     [readOnlyNotes, slug, repoAccess.defaultBranch, setReadOnlyDoc]
   );
 
-  // Maintain collapsed state against the active folder list so disclosure toggles persist.
-  const { collapsed: collapsedFolders, setCollapsedMap } = useCollapsedFolders({
-    slug,
-    folders: activeFolders,
-    persistPrefs: persistRepoPrefs,
-  });
-
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -779,9 +772,9 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
             <FileSidebar
               canEdit={canEdit}
               notes={activeNotes}
+              slug={slug}
               activeFolders={activeFolders}
-              collapsedFolders={collapsedFolders}
-              onCollapsedChange={setCollapsedMap}
+              persistRepoPrefs={persistRepoPrefs}
               activeId={activeId}
               setActiveId={setActiveId}
               closeSidebar={() => setSidebarOpen(false)}
@@ -1353,9 +1346,9 @@ function useCollapsedFolders({ slug, folders, persistPrefs }: CollapsedFoldersPa
 type FileSidebarProps = {
   canEdit: boolean;
   notes: (NoteMeta | ReadOnlyNote)[];
+  slug: string;
   activeFolders: string[];
-  collapsedFolders: Record<string, boolean>;
-  onCollapsedChange: (next: Record<string, boolean>) => void;
+  persistRepoPrefs: boolean;
   activeId: string | null;
   setActiveId: (id: string | null) => void;
   closeSidebar: () => void;
@@ -1370,9 +1363,9 @@ function FileSidebar(props: FileSidebarProps) {
   const {
     canEdit,
     notes,
+    slug,
     activeFolders,
-    collapsedFolders,
-    onCollapsedChange,
+    persistRepoPrefs,
     activeId,
     setActiveId,
     closeSidebar,
@@ -1395,6 +1388,13 @@ function FileSidebar(props: FileSidebarProps) {
       };
     });
   }, [notes]);
+
+  // Maintain collapsed state against the active folder list so disclosure toggles persist.
+  const { collapsed: collapsedFolders, setCollapsedMap } = useCollapsedFolders({
+    slug,
+    folders: activeFolders,
+    persistPrefs: persistRepoPrefs,
+  });
 
   // Track which item is highlighted so new actions know their context.
   const [selection, setSelection] = useState<
@@ -1528,7 +1528,7 @@ function FileSidebar(props: FileSidebarProps) {
           folders={activeFolders}
           activeId={activeId}
           collapsed={collapsedFolders}
-          onCollapsedChange={onCollapsedChange}
+          onCollapsedChange={setCollapsedMap}
           onSelectionChange={setSelection}
           onSelectFile={handleSelectFile}
           onRenameFile={handleRenameFile}
