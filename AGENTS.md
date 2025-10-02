@@ -75,6 +75,7 @@ function mainMethod() { // ...
   - `if (value !== undefined)` rather than `if (value)`
   - `if (text === "")` rather than `if (!text)`
   - `number !== 0 && array.includes(number)` rather than `number && array.includes(number)`
+- Function arguments: Use an inline type instead of a separate type alias for types that are only used once.
 - When writing shared modules, prefer placing exported/high-level APIs at the top of the file and push low-level helpers toward the bottom, so readers can grasp intent before implementation details.
 - Nullish values: In data types, prefer `undefined` (and `?` on object properties) to model inexistent values. Do not use `null` unless there is a specific strong reason. A valid reason to use `null` is if the data type needs to be JSON-stringified.
 
