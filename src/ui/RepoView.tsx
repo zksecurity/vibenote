@@ -3,8 +3,6 @@ import { FileTree, type FileEntry } from './FileTree';
 import { Editor } from './Editor';
 import {
   LocalStore,
-  clearAllTombstones,
-  clearRepoLink,
   isRepoLinked,
   markRepoLinked,
   isAutosyncEnabled,
@@ -37,7 +35,6 @@ import { fetchPublicRepoInfo } from '../lib/github-public';
 import {
   buildRemoteConfig,
   pullNote,
-  repoExists,
   listNoteFiles,
   syncBidirectional,
   type RemoteConfig,

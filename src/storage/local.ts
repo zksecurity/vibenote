@@ -678,11 +678,11 @@ function saveRecentRepos(entries: RecentRepo[]) {
 
 export function listRecentRepos(): RecentRepo[] {
   const now = Date.now();
-  const sixMonthsMs = 1000 * 60 * 60 * 24 * 30 * 6; // approx 6 months
-  // Purge very old entries and the placeholder 'new'
+  const threeMonthsMs = 1000 * 60 * 60 * 24 * 30 * 3; // approx 3 months
+  // Purge old entries and the placeholder 'new'
   let entries = loadRecentRepos()
     .filter((entry) => entry.slug !== 'new')
-    .filter((entry) => now - entry.lastOpenedAt <= sixMonthsMs);
+    .filter((entry) => now - entry.lastOpenedAt <= threeMonthsMs);
   let mapped = entries.map((entry) => ({
     ...entry,
     connected: entry.connected ?? isRepoLinked(entry.slug),

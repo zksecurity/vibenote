@@ -6,36 +6,15 @@ import { listRecentRepos, recordRecentRepo, type RecentRepo } from '../storage/l
 
 export function App() {
   const { route, navigate } = useRoute();
-  const [recents, setRecents] = useState<RecentRepo[]>(() => listRecentRepos());
 
   // Adjust page title based on route
   useEffect(() => {
-    if (route.kind === 'repo') {
-      document.title = `${route.owner}/${route.repo}`;
-      return;
-    }
-    document.title = 'VibeNote';
+    document.title = route.kind === 'repo' ? `${route.owner}/${route.repo}` : 'VibeNote';
   }, [route]);
 
-  const recordVisit = useCallback(
-    (entry: { slug: string; owner?: string; repo?: string; title?: string; connected?: boolean }) => {
-      recordRecentRepo(entry);
-      setRecents(listRecentRepos());
-    },
-    []
-  );
-
+  // redirects
   useEffect(() => {
-    setRecents(listRecentRepos());
-  }, [route]);
-
-  useEffect(() => {
-    const onStorage = () => setRecents(listRecentRepos());
-    window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
-  }, []);
-
-  useEffect(() => {
+    // if the route is /start, redirect to the most recent repo or /home
     if (route.kind === 'start') {
       let candidate = recents.find((entry) => entry.owner !== undefined && entry.repo !== undefined);
 
@@ -43,31 +22,32 @@ export function App() {
         navigate({ kind: 'repo', owner: candidate.owner!, repo: candidate.repo! }, { replace: true });
         return;
       }
-
       navigate({ kind: 'home' }, { replace: true });
     }
-  }, [route, recents, navigate]);
 
-  useEffect(() => {
+    // if the route is /home and there are no recent repos, redirect to /new for the onboarding flow
     if (route.kind === 'home') {
-      const recentEntries = listRecentRepos();
-      if (recentEntries.length === 0) {
+      if (listRecentRepos().length === 0) {
         navigate({ kind: 'new' }, { replace: true });
       }
     }
-  }, [route, navigate]);
+  }, [route]);
+
+  // list of recent repos, kept in local storage and updated when navigating to a new repo
+  // or updating information about an existing one
+  const [recents, recordRecent] = useRecents();
 
   if (route.kind === 'home') {
     return <HomeView recents={recents} navigate={navigate} />;
   }
 
   if (route.kind === 'start') {
-    // will redirect
+    // will redirect immediately
     return null;
   }
 
   if (route.kind === 'new') {
-    return <RepoView slug="new" route={route} navigate={navigate} onRecordRecent={recordVisit} />;
+    return <RepoView slug="new" route={route} navigate={navigate} onRecordRecent={recordRecent} />;
   }
 
   if (route.kind === 'repo') {
@@ -76,10 +56,29 @@ export function App() {
         slug={`${route.owner}/${route.repo}`}
         route={route}
         navigate={navigate}
-        onRecordRecent={recordVisit}
+        onRecordRecent={recordRecent}
       />
     );
   }
 
   return null;
+}
+
+function useRecents() {
+  const [recents, setRecents] = useState<RecentRepo[]>(() => listRecentRepos());
+
+  useEffect(() => {
+    const onStorage = () => setRecents(listRecentRepos());
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
+  const recordRecent = useCallback(
+    (entry: { slug: string; owner?: string; repo?: string; title?: string; connected?: boolean }) => {
+      recordRecentRepo(entry);
+      setRecents(listRecentRepos());
+    },
+    []
+  );
+  return [recents, recordRecent] as const;
 }
