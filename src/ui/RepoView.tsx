@@ -117,7 +117,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
 
   // Track whether this repo slug has already been linked to GitHub sync.
-  const [linked, setLinked] = useState(() => slug !== 'new' && isRepoLinked(slug));
+  const [linked, setLinked] = useState(() => isRepoLinked(slug));
 
   // Keep the signed-in GitHub App user details for header UI.
   const [user, setUser] = useState(getAppSessionUser);
@@ -189,10 +189,8 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
         const synced = store.listNotes();
         setActiveId((prev) => {
           if (prev) return prev;
-          if (slug !== 'new') {
-            let stored = getLastActiveNoteId(slug);
-            if (stored && synced.some((n) => n.id === stored)) return stored;
-          }
+          let stored = getLastActiveNoteId(slug);
+          if (stored && synced.some((n) => n.id === stored)) return stored;
           return null;
         });
         markRepoLinked(slug);
@@ -1089,7 +1087,6 @@ function useActiveNote({
 }) {
   // Track the currently focused note id for the editor and file tree.
   const [activeId, setActiveId] = useState<string | null>(() => {
-    if (slug === 'new') return null;
     const stored = getLastActiveNoteId(slug);
     if (!stored) return null;
     const available = store.listNotes();
@@ -1098,7 +1095,6 @@ function useActiveNote({
 
   // Restore the last active note from storage when loading an existing repo.
   useEffect(() => {
-    if (slug === 'new') return;
     if (activeId) return;
     const stored = getLastActiveNoteId(slug);
     if (!stored) return;
@@ -1108,7 +1104,6 @@ function useActiveNote({
   // Persist the active note id so future visits resume on the same file (when permitted).
   useEffect(() => {
     if (!canEdit) return;
-    if (slug === 'new') return;
     setLastActiveNoteId(slug, activeId ?? null);
   }, [activeId, slug, canEdit]);
 
@@ -1136,12 +1131,12 @@ function useCollapsedFolders({
 }) {
   // Remember which folders are expanded so the tree view stays consistent per repo.
   const [expandedState, setExpandedState] = useState<string[]>(() =>
-    slug === 'new' ? [] : sanitizeExpandedDirs(folders, getExpandedFolders(slug))
+    sanitizeExpandedDirs(folders, getExpandedFolders(slug))
   );
 
   // Refresh expanded state when the slug changes to honor stored preferences.
   useEffect(() => {
-    const stored = slug === 'new' ? [] : getExpandedFolders(slug);
+    const stored = getExpandedFolders(slug);
     const next = sanitizeExpandedDirs(folders, stored);
     setExpandedState((prev) => (foldersEqual(prev, next) ? prev : next));
   }, [slug, folders]);
@@ -1154,7 +1149,6 @@ function useCollapsedFolders({
   // Persist expanded folders back to storage for future visits (when enabled).
   useEffect(() => {
     if (!canEdit) return;
-    if (slug === 'new') return;
     setExpandedFolders(slug, expandedState);
   }, [slug, expandedState, canEdit]);
 
