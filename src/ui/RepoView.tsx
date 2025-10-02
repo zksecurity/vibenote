@@ -100,7 +100,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     return new LocalStore(slug, { seedWelcome: true });
   }, [slug, route.kind]);
   const { notes, folders, notifyStoreListeners } = useRepoStore(store);
-  const { collapsed: collapsedFolders, setCollapsedMap } = useCollapsedFolders({ slug, folders });
   // Hold the currently loaded read-only note so the editor can render remote content.
   const [readOnlyDoc, setReadOnlyDoc] = useState<NoteDoc | null>(null);
   type ReadOnlyNote = { id: string; path: string; title: string; dir: string; sha?: string };
@@ -668,16 +667,30 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     return store.loadNote(activeId);
   }, [canEdit, activeId, store, notes]);
   const doc = canEdit ? localDoc : readOnlyDoc;
-  const folderList = useMemo(() => {
+
+  // Derive the folder set from whichever source is powering the tree (and include ancestor dirs for read-only data).
+  const activeFolders = useMemo(() => {
     if (isPublicReadonly) {
       const set = new Set<string>();
       for (const note of readOnlyNotes) {
-        if (note.dir) set.add(note.dir);
+        if (!note.dir) continue;
+        let current = note.dir.replace(/(^\/+|\/+?$)/g, '');
+        while (current) {
+          set.add(current);
+          const idx = current.lastIndexOf('/');
+          current = idx >= 0 ? current.slice(0, idx) : '';
+        }
       }
       return Array.from(set).sort();
     }
     return folders;
   }, [folders, isPublicReadonly, readOnlyNotes]);
+
+  // Maintain collapsed state against the active folder list so disclosure toggles persist.
+  const { collapsed: collapsedFolders, setCollapsedMap } = useCollapsedFolders({
+    slug,
+    folders: activeFolders,
+  });
 
   return (
     <div className="app-shell">
@@ -834,7 +847,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                     dir: (n.dir as string) || '',
                   })) as FileEntry[]
                 }
-                folders={folderList}
+                folders={activeFolders}
                 activeId={activeId}
                 collapsed={collapsedFolders}
                 onCollapsedChange={setCollapsedMap}
