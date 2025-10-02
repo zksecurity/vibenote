@@ -28,7 +28,7 @@ export function getSessionUser(): AppUser | null {
   try {
     const raw = localStorage.getItem(USER_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<AppUser> & { login?: string };
+    const parsed = JSON.parse(raw) as Partial<AppUser>;
     if (!parsed || !parsed.id || !parsed.login) return null;
     return {
       id: String(parsed.id),
@@ -50,9 +50,7 @@ export function clearSession() {
 
 export async function signInWithGitHubApp(
   returnTo?: string
-): Promise<
-  { token: string; user: AppUser; accessToken: string; accessTokenExpiresAt: string } | null
-> {
+): Promise<{ token: string; user: AppUser; accessToken: string; accessTokenExpiresAt: string } | null> {
   const base = getApiBase();
   const url = new URL(base + '/v1/auth/github/start');
   url.searchParams.set('returnTo', returnTo || window.location.href);
@@ -65,9 +63,7 @@ export async function signInWithGitHubApp(
       if (d.type !== 'vibenote:auth') return;
       window.removeEventListener('message', handler);
       const token = String(d.sessionToken || '');
-      let tokens = d.tokens as
-        | { accessToken?: string; accessTokenExpiresAt?: string }
-        | undefined;
+      let tokens = d.tokens as { accessToken?: string; accessTokenExpiresAt?: string } | undefined;
       const rawUser = d.user ? (d.user as Partial<AppUser> & { id?: string; login?: string }) : null;
       if (token && rawUser && rawUser.id && rawUser.login) {
         const normalized: AppUser = {

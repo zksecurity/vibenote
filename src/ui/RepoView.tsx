@@ -102,30 +102,29 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     return new LocalStore(slug, { seedWelcome: true });
   }, [slug, route.kind]);
   const { notes, folders, notifyStoreListeners } = useRepoStore(store);
+
   // Hold the currently loaded read-only note so the editor can render remote content.
   const [readOnlyDoc, setReadOnlyDoc] = useState<NoteDoc | null>(null);
+
   // Cache read-only note metadata fetched straight from GitHub when in view-only mode.
   const [readOnlyNotes, setReadOnlyNotes] = useState<ReadOnlyNote[]>([]);
+
   // Indicate when remote read-only data is being fetched to show loading states.
   const [readOnlyLoading, setReadOnlyLoading] = useState(false);
-  // Track sidebar visibility, especially for mobile drawer toggles.
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+
   // Store the current GitHub App session token to toggle authenticated features instantly.
-  const [sessionToken, setSessionToken] = useState<string | null>(getAppSessionToken());
+  const [sessionToken, setSessionToken] = useState(getAppSessionToken);
+
   // Carry the latest sync status message shown across the workspace.
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
-  const initialAppUser = useMemo(() => getAppSessionUser(), []);
+
   // Track whether this repo slug has already been linked to GitHub sync.
   const [linked, setLinked] = useState(() => slug !== 'new' && isRepoLinked(slug));
+
   // Keep the signed-in GitHub App user details for header UI.
-  const [user, setUser] = useState<AppUser | null>(initialAppUser);
+  const initialAppUser = useMemo(getAppSessionUser, []);
+  const [user, setUser] = useState(initialAppUser);
   const userAvatarSrc = user?.avatarDataUrl ?? user?.avatarUrl ?? undefined;
-  // Track whether the account dropdown menu is currently expanded.
-  const [menuOpen, setMenuOpen] = useState(false);
-  // Manage the ephemeral toast message shown at the bottom of the app.
-  const [toast, setToast] = useState<{ text: string; href?: string } | null>(null);
-  // Toggle the repo switcher overlay.
-  const [showSwitcher, setShowSwitcher] = useState(false);
 
   // compute repo access state and some derived values
   const repoAccess = useRepoAccess({ route, sessionToken, linked });
@@ -317,59 +316,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     }
   };
 
-  // Keyboard shortcuts: Cmd/Ctrl+K and "g" then "r" open the repo switcher.
-  useEffect(() => {
-    let lastG = 0;
-    const isTypingTarget = (el: EventTarget | null) => {
-      const n = el as HTMLElement | null;
-      if (!n) return false;
-      const tag = (n.tagName || '').toLowerCase();
-      return tag === 'input' || tag === 'textarea' || (n as any).isContentEditable === true;
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented) return;
-      const key = e.key.toLowerCase();
-      // Always allow Ctrl/Cmd+K to open the switcher, even when typing
-      if ((e.ctrlKey || e.metaKey) && key === 'k') {
-        e.preventDefault();
-        setShowSwitcher(true);
-        return;
-      }
-      if (isTypingTarget(e.target)) return;
-      const now = Date.now();
-      if (key === 'g') {
-        lastG = now;
-        return;
-      }
-      if (key === 'r' && now - lastG < 800) {
-        e.preventDefault();
-        lastG = 0;
-        setShowSwitcher(true);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
-
-  // Auto-dismiss toasts so they do not linger indefinitely.
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 4000);
-    return () => clearTimeout(t);
-  }, [toast]);
-
-  // Close the account dropdown when clicking anywhere else on the page.
-  useEffect(() => {
-    const onDoc = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (!target.closest('.account-menu') && !target.closest('.account-btn')) {
-        setMenuOpen(false);
-      }
-    };
-    document.addEventListener('click', onDoc);
-    return () => document.removeEventListener('click', onDoc);
-  }, []);
-
   // Attempt a last-minute sync via the Service Worker so pending edits survive tab closure.
   useEffect(() => {
     if (route.kind !== 'repo') return;
@@ -466,8 +412,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     }
   };
 
-  const showSidebar = canEdit || isReadOnly;
-  const layoutClass = showSidebar ? '' : 'single';
   const activeNotes = isReadOnly ? readOnlyNotes : notes;
   const localDoc = useMemo(() => {
     if (!canEdit) return null;
@@ -519,6 +463,66 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     },
     [readOnlyNotes, slug, repoAccess.defaultBranch, setReadOnlyDoc]
   );
+
+  // UI STATE
+
+  const showSidebar = canEdit || isReadOnly;
+  const layoutClass = showSidebar ? '' : 'single';
+
+  // Track sidebar visibility, especially for mobile drawer toggles.
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Track whether the account dropdown menu is currently expanded.
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // Close the account dropdown when clicking anywhere else on the page.
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.account-menu') && !target.closest('.account-btn')) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('click', onDoc);
+    return () => document.removeEventListener('click', onDoc);
+  }, []);
+
+  // Toggle the repo switcher overlay.
+  const [showSwitcher, setShowSwitcher] = useState(false);
+
+  // Keyboard shortcuts: Cmd/Ctrl+K and "g" then "r" open the repo switcher.
+  useEffect(() => {
+    let lastG = 0;
+    const isTypingTarget = (el: EventTarget | null) => {
+      const n = el as HTMLElement | null;
+      if (!n) return false;
+      const tag = (n.tagName || '').toLowerCase();
+      return tag === 'input' || tag === 'textarea' || (n as any).isContentEditable === true;
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      const key = e.key.toLowerCase();
+      // Always allow Ctrl/Cmd+K to open the switcher, even when typing
+      if ((e.ctrlKey || e.metaKey) && key === 'k') {
+        e.preventDefault();
+        setShowSwitcher(true);
+        return;
+      }
+      if (isTypingTarget(e.target)) return;
+      const now = Date.now();
+      if (key === 'g') {
+        lastG = now;
+        return;
+      }
+      if (key === 'r' && now - lastG < 800) {
+        e.preventDefault();
+        lastG = 0;
+        setShowSwitcher(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   return (
     <div className="app-shell">
@@ -685,7 +689,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                   Continue to GitHub and either select <strong>Only select repositories</strong> and pick
                   <code>
                     {' '}
-                    {route.owner}/{route.repo}{' '}
+                    {route.owner}/{route.repo}
                   </code>
                   , or grant access to all repositories (not recommended).
                 </p>
@@ -789,16 +793,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
           <button className="btn subtle full-width" onClick={onSignOut}>
             Sign out
           </button>
-        </div>
-      )}
-      {toast && (
-        <div className="toast">
-          <span>{toast.text}</span>
-          {toast.href && (
-            <a className="btn subtle" href={toast.href} target="_blank" rel="noreferrer">
-              Open
-            </a>
-          )}
         </div>
       )}
       {showSwitcher && (
