@@ -1246,14 +1246,15 @@ type RepoStoreSnapshot = {
 
 function useRepoStore(store: LocalStore) {
   const listenersRef = useRef(new Set<() => void>());
-  const snapshotRef = useRef<RepoStoreSnapshot>({ notes: [], folders: [] });
-  if (snapshotRef.current.notes.length === 0 && snapshotRef.current.folders.length === 0) {
+  const snapshotRef = useRef<RepoStoreSnapshot | undefined>(undefined);
+  // set to initial state from localStorage on first render
+  if (snapshotRef.current === undefined) {
     snapshotRef.current = readRepoSnapshot(store);
   }
   const storagePrefix = `vibenote:repo:${encodeURIComponent(store.slug)}:`;
 
   const emit = useCallback(() => {
-    const current = snapshotRef.current;
+    const current = snapshotRef.current!;
     const next = readRepoSnapshot(store);
     if (current && snapshotsEqual(current, next)) return;
     snapshotRef.current = next;
@@ -1285,7 +1286,7 @@ function useRepoStore(store: LocalStore) {
     };
   }, []);
 
-  const getSnapshot = useCallback(() => snapshotRef.current, []);
+  const getSnapshot = useCallback(() => snapshotRef.current!, []);
 
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
