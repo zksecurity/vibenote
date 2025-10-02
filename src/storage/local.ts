@@ -2,8 +2,7 @@ export type NoteMeta = {
   id: string;
   path: string;
   title: string;
-  // Relative directory path inside notesDir; '' for root
-  dir?: string;
+  dir?: string; // "" for root
   updatedAt: number;
 };
 
@@ -23,9 +22,6 @@ const REPO_PREFIX = `${NS}:repo`;
 const LINK_PREFIX = `${NS}:repo-link`;
 const PREFS_SUFFIX = 'prefs';
 const FOLDERS_SUFFIX = 'folders';
-const LEGACY_INDEX_KEY = legacyKey('index');
-const LEGACY_TOMBSTONES_KEY = legacyKey('tombstones');
-const LEGACY_NOTE_PREFIX = legacyKey('note');
 
 const WELCOME_NOTE = `# 👋 Welcome to VibeNote
 
@@ -53,47 +49,26 @@ const WELCOME_NOTE = `# 👋 Welcome to VibeNote
 
 Happy writing! ✍️`;
 
-type LocalStoreOptions = {
-  seedWelcome?: boolean;
-  notesDir?: string;
-};
-
 export class LocalStore {
   slug: string;
   private index: NoteMeta[];
-  private notesDir: string;
   private indexKey: string;
   private notePrefix: string;
   private foldersKey: string;
 
-  constructor(slugOrOpts: string | LocalStoreOptions = {}, maybeOpts: LocalStoreOptions = {}) {
-    let slug: string;
-    let opts: LocalStoreOptions;
-    if (typeof slugOrOpts === 'string') {
-      slug = normalizeSlug(slugOrOpts);
-      opts = maybeOpts ?? {};
-    } else {
-      opts = slugOrOpts;
-      slug = guessLegacySlug();
-    }
+  constructor(slug: string, { seedWelcome = false } = {}) {
+    slug = normalizeSlug(slug);
     this.slug = slug;
-    this.notesDir = opts.notesDir ?? '';
     this.indexKey = repoKey(this.slug, 'index');
     this.notePrefix = `${repoKey(this.slug, 'note')}:`;
     this.foldersKey = repoKey(this.slug, FOLDERS_SUFFIX);
-    migrateLegacyNamespaceIfNeeded(this.slug);
     this.index = this.loadIndex();
     // Migration/backfill: ensure dir is present and folders index is built
     this.backfillDirsAndFolders();
-    let shouldSeed = opts.seedWelcome ?? true;
-    if (shouldSeed && this.index.length === 0) {
+    if (seedWelcome && this.index.length === 0) {
       this.createNote('Welcome', WELCOME_NOTE);
       this.index = this.loadIndex();
     }
-  }
-
-  setNotesDir(dir: string) {
-    this.notesDir = dir;
   }
 
   listNotes(): NoteMeta[] {
@@ -124,8 +99,7 @@ export class LocalStore {
     let safe = ensureValidTitle(title || 'Untitled');
     let displayTitle = title.trim() || 'Untitled';
     let normDir = normalizeDir(dir);
-    let relPath = joinPath(normDir, `${safe}.md`);
-    let path = joinPath(this.notesDir, relPath);
+    let path = joinPath(normDir, `${safe}.md`);
     let meta: NoteMeta = { id, path, title: displayTitle, dir: normDir, updatedAt: Date.now() };
     let doc: NoteDoc = { ...meta, text };
     let idx = this.loadIndex();
@@ -143,9 +117,8 @@ export class LocalStore {
     if (!doc) return;
     let fromPath = doc.path;
     let safe = ensureValidTitle(title || 'Untitled');
-    let normDir = normalizeDir(doc.dir ?? extractDir(this.notesDir, fromPath));
-    let relPath = joinPath(normDir, `${safe}.md`);
-    let path = joinPath(this.notesDir, relPath);
+    let normDir = normalizeDir(doc.dir ?? extractDir(fromPath));
+    let path = joinPath(normDir, `${safe}.md`);
     let updatedAt = Date.now();
     let next: NoteDoc = { ...doc, title: safe, path, dir: normDir, updatedAt };
     let pathChanged = fromPath !== path;
@@ -207,7 +180,7 @@ export class LocalStore {
     for (let file of files) {
       let id = crypto.randomUUID();
       let title = basename(file.path).replace(/\.md$/i, '');
-      let dir = extractDir(this.notesDir, file.path);
+      let dir = extractDir(file.path);
       if (dir !== '') folderSet.add(dir);
       let meta: NoteMeta = { id, path: file.path, title, dir, updatedAt: now };
       let doc: NoteDoc = {
@@ -282,7 +255,7 @@ export class LocalStore {
     // Update notes under moved folder
     let idx = this.loadIndex();
     for (let meta of idx) {
-      let dir = normalizeDir(meta.dir ?? extractDir(this.notesDir, meta.path));
+      let dir = normalizeDir(meta.dir ?? extractDir(meta.path));
       if (dir === from || dir.startsWith(from + '/')) {
         let rest = dir.slice(from.length);
         let nextDir = normalizeDir(to + rest);
@@ -308,7 +281,7 @@ export class LocalStore {
     // Delete contained notes (record tombstones)
     let idx = this.loadIndex();
     for (let meta of idx.slice()) {
-      let dir = normalizeDir(meta.dir ?? extractDir(this.notesDir, meta.path));
+      let dir = normalizeDir(meta.dir ?? extractDir(meta.path));
       if (dir === target || dir.startsWith(target + '/')) {
         this.deleteNote(meta.id);
       }
@@ -321,8 +294,7 @@ export class LocalStore {
     if (!doc) return;
     let fromPath = doc.path;
     let normDir = normalizeDir(dir);
-    let relPath = joinPath(normDir, `${ensureValidTitle(doc.title)}.md`);
-    let toPath = joinPath(this.notesDir, relPath);
+    let toPath = joinPath(normDir, `${ensureValidTitle(doc.title)}.md`);
     if (toPath === fromPath) return;
     let updatedAt = Date.now();
     let next: NoteDoc = { ...doc, dir: normDir, path: toPath, updatedAt };
@@ -371,7 +343,7 @@ export class LocalStore {
       if (!meta) continue;
       let needDir = meta.dir === undefined;
       if (needDir) {
-        let dir = extractDir(this.notesDir, meta.path);
+        let dir = extractDir(meta.path);
         if (dir !== '') folderSet.add(dir);
         idx[i] = { ...meta, dir } as NoteMeta;
         // Also patch the stored document
@@ -407,12 +379,8 @@ export class LocalStore {
 
 // --- Internal helpers for LocalStore ---
 
-function extractDir(notesDir: string, fullPath: string): string {
+function extractDir(fullPath: string): string {
   let p = fullPath;
-  if (notesDir) {
-    let prefix = notesDir.replace(/\/+$/, '') + '/';
-    if (p.startsWith(prefix)) p = p.slice(prefix.length);
-  }
   let i = p.lastIndexOf('/');
   let dir = i >= 0 ? p.slice(0, i) : '';
   return normalizeDir(dir);
@@ -597,7 +565,7 @@ export function moveNotePath(slug: string, id: string, toPath: string) {
     return;
   }
   let updatedAt = Date.now();
-  let nextDir = extractDir('', toPath);
+  let nextDir = extractDir(toPath);
   let next: NoteDoc = { ...doc, path: toPath, dir: nextDir, updatedAt };
   localStorage.setItem(key, JSON.stringify(next));
   let idx = loadIndexForSlug(slug);
@@ -651,10 +619,6 @@ function repoKey(slug: string, suffix: string): string {
   return `${REPO_PREFIX}:${encodeSlug(slug)}:${suffix}`;
 }
 
-function legacyKey(s: string): string {
-  return `${NS}:${s}`;
-}
-
 function encodeSlug(slug: string): string {
   return encodeURIComponent(slug);
 }
@@ -685,81 +649,6 @@ function normalizeSlug(slug: string): string {
   return trimmed;
 }
 
-export function guessLegacySlug(): string {
-  let raw = localStorage.getItem(legacyKey('config'));
-  if (!raw) return 'new';
-  try {
-    let cfg = JSON.parse(raw) as { owner?: string; repo?: string };
-    if (typeof cfg.owner === 'string' && typeof cfg.repo === 'string') {
-      return `${cfg.owner}/${cfg.repo}`;
-    }
-  } catch {}
-  return 'new';
-}
-
-function readLegacyRepoConfig(): { owner: string; repo: string } | null {
-  let raw = localStorage.getItem(legacyKey('config'));
-  if (!raw) return null;
-  try {
-    let cfg = JSON.parse(raw) as { owner?: string; repo?: string };
-    if (typeof cfg.owner === 'string' && typeof cfg.repo === 'string') {
-      return { owner: cfg.owner, repo: cfg.repo };
-    }
-  } catch {}
-  return null;
-}
-
-function migrateLegacyNamespaceIfNeeded(targetSlug: string) {
-  const newIndexKey = repoKey(targetSlug, 'index');
-  if (localStorage.getItem(newIndexKey)) return;
-  // Only migrate legacy data into the matching legacy slug to avoid polluting other namespaces
-  const legacyCfg = readLegacyRepoConfig();
-  if (!legacyCfg) return;
-  const legacySlug = `${legacyCfg.owner}/${legacyCfg.repo}`;
-  if (legacySlug !== targetSlug) return;
-  const legacyIndexRaw = localStorage.getItem(LEGACY_INDEX_KEY);
-  if (!legacyIndexRaw) return;
-  let legacyIndex: NoteMeta[];
-  try {
-    legacyIndex = JSON.parse(legacyIndexRaw) as NoteMeta[];
-  } catch {
-    return;
-  }
-  localStorage.setItem(newIndexKey, legacyIndexRaw);
-  for (let note of legacyIndex) {
-    let legacyNoteKey = `${LEGACY_NOTE_PREFIX}:${note.id}`;
-    let noteRaw = localStorage.getItem(legacyNoteKey);
-    if (!noteRaw) continue;
-    localStorage.setItem(`${repoKey(targetSlug, 'note')}:${note.id}`, noteRaw);
-    localStorage.removeItem(legacyNoteKey);
-  }
-  localStorage.removeItem(LEGACY_INDEX_KEY);
-  let legacyTombs = localStorage.getItem(LEGACY_TOMBSTONES_KEY);
-  if (legacyTombs) {
-    localStorage.setItem(repoKey(targetSlug, 'tombstones'), legacyTombs);
-    localStorage.removeItem(LEGACY_TOMBSTONES_KEY);
-  }
-}
-
-export function listKnownRepoSlugs(): string[] {
-  let prefix = `${REPO_PREFIX}:`;
-  let suffix = ':index';
-  let slugs = new Set<string>();
-  for (let i = 0; i < localStorage.length; i++) {
-    let key = localStorage.key(i);
-    if (!key) continue;
-    if (key.startsWith(prefix) && key.endsWith(suffix)) {
-      let encoded = key.slice(prefix.length, key.length - suffix.length);
-      let slug = decodeSlug(encoded);
-      if (slug) slugs.add(slug);
-    }
-  }
-  if (localStorage.getItem(LEGACY_INDEX_KEY)) {
-    slugs.add(guessLegacySlug());
-  }
-  return Array.from(slugs).sort();
-}
-
 export type RecentRepo = {
   slug: string;
   owner?: string;
@@ -788,7 +677,6 @@ function saveRecentRepos(entries: RecentRepo[]) {
 }
 
 export function listRecentRepos(): RecentRepo[] {
-  const legacy = readLegacyRepoConfig();
   const now = Date.now();
   const sixMonthsMs = 1000 * 60 * 60 * 24 * 30 * 6; // approx 6 months
   // Purge very old entries and the placeholder 'new'
@@ -799,22 +687,6 @@ export function listRecentRepos(): RecentRepo[] {
     ...entry,
     connected: entry.connected ?? isRepoLinked(entry.slug),
   }));
-
-  if (legacy) {
-    const slug = `${legacy.owner}/${legacy.repo}`;
-    const exists = mapped.some((entry) => entry.slug === slug);
-    if (!exists) {
-      markRepoLinked(slug);
-      localStorage.removeItem(legacyKey('config'));
-      mapped.unshift({
-        slug,
-        owner: legacy.owner,
-        repo: legacy.repo,
-        lastOpenedAt: Date.now(),
-        connected: true,
-      });
-    }
-  }
 
   const sorted = mapped.sort((a, b) => b.lastOpenedAt - a.lastOpenedAt);
   // Persist pruning so storage stays tidy
@@ -850,14 +722,7 @@ export function clearRepoLink(slug: string) {
 }
 
 export function isRepoLinked(slug: string): boolean {
-  if (localStorage.getItem(linkKey(slug)) !== null) return true;
-  const legacy = readLegacyRepoConfig();
-  if (legacy && `${legacy.owner}/${legacy.repo}` === slug) {
-    markRepoLinked(slug);
-    localStorage.removeItem(legacyKey('config'));
-    return true;
-  }
-  return false;
+  return localStorage.getItem(linkKey(slug)) !== null;
 }
 
 export function clearAllLocalData() {

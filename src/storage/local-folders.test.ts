@@ -31,7 +31,7 @@ describe('LocalStore folder operations', () => {
   });
 
   test('create/rename/move/delete folder updates notes and index', () => {
-    let store = new LocalStore('user/repo', { seedWelcome: false });
+    let store = new LocalStore('user/repo');
     store.createFolder('', 'a');
     store.createFolder('a', 'b');
     let id1 = store.createNote('One', '1', 'a');

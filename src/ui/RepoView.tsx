@@ -98,9 +98,9 @@ export function RepoView(props: RepoViewProps) {
 function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps) {
   const store = useMemo(() => {
     if (route.kind === 'repo') {
-      return new LocalStore(slug, { seedWelcome: false });
+      return new LocalStore(slug);
     }
-    return new LocalStore(slug);
+    return new LocalStore(slug, { seedWelcome: true });
   }, [slug, route.kind]);
   const { notes, folders, notifyStoreListeners } = useRepoStore(store);
   const { collapsed: collapsedFolders, setCollapsedMap } = useCollapsedFolders({ slug, folders });
@@ -410,7 +410,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
 
       let targetSlug = `${targetOwner}/${targetRepo}`;
       let matchesCurrent = targetSlug === slug;
-      let targetStore = matchesCurrent ? store : new LocalStore(targetSlug, { seedWelcome: false });
+      let targetStore = matchesCurrent ? store : new LocalStore(targetSlug);
       let hadRemoteBefore = matchesCurrent && linked;
       let targetConfig: RemoteConfig = buildRemoteConfig(targetSlug);
 
@@ -1446,10 +1446,7 @@ function useCollapsedFolders({ slug, folders }: CollapsedFoldersParams) {
     setExpandedFolders(slug, expandedState);
   }, [slug, expandedState]);
 
-  const collapsed = useMemo(
-    () => buildCollapsedMap(expandedState, folders),
-    [expandedState, folders]
-  );
+  const collapsed = useMemo(() => buildCollapsedMap(expandedState, folders), [expandedState, folders]);
 
   const setCollapsedMap = (next: Record<string, boolean>) => {
     const expanded = expandedDirsFromCollapsed(next);

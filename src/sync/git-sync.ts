@@ -25,7 +25,6 @@ export interface RemoteConfig {
   owner: string;
   repo: string;
   branch: string;
-  notesDir: string; // e.g., 'notes'
 }
 
 export interface RemoteFile {
@@ -41,7 +40,7 @@ const GITHUB_API_BASE = 'https://api.github.com';
 export function buildRemoteConfig(slug: string): RemoteConfig {
   const [owner, repo] = slug.split('/', 2);
   if (!owner || !repo) throw new Error('Invalid repository slug');
-  return { owner, repo, branch: 'main', notesDir: '' };
+  return { owner, repo, branch: 'main' };
 }
 
 export async function repoExists(owner: string, repo: string): Promise<boolean> {
@@ -125,9 +124,8 @@ export async function commitBatch(
   return firstPath ? extractBlobSha(res, firstPath) ?? res.commitSha : res.commitSha;
 }
 
-// List Markdown files under the configured notesDir at HEAD
+// List Markdown files at HEAD
 export async function listNoteFiles(config: RemoteConfig): Promise<{ path: string; sha: string }[]> {
-  const rootDir = (config.notesDir || '').replace(/(^\/+|\/+?$)/g, '');
   const filterEntries = (entries: Array<{ path?: string; sha?: string; type?: string }>) => {
     const results: { path: string; sha: string }[] = [];
     for (const e of entries) {
@@ -135,10 +133,9 @@ export async function listNoteFiles(config: RemoteConfig): Promise<{ path: strin
       const path = e.path;
       const sha = e.sha;
       if (type !== 'blob' || !path || !sha) continue;
-      if (rootDir && !path.startsWith(rootDir + '/')) continue;
       if (!/\.md$/i.test(path)) continue;
       const name = path.slice(path.lastIndexOf('/') + 1);
-      if (!rootDir && name.toLowerCase() === 'readme.md') continue;
+      if (name.toLowerCase() === 'readme.md') continue;
       results.push({ path, sha });
     }
     return results;

@@ -244,7 +244,7 @@ describe('syncBidirectional', () => {
     };
     const mod = await import('./git-sync');
     syncBidirectional = mod.syncBidirectional;
-    store = new LocalStore('user/repo', { seedWelcome: false });
+    store = new LocalStore('user/repo');
   });
 
   test('pushes new notes and remains stable', async () => {

@@ -32,12 +32,12 @@ describe('LocalStore cross-tab resilience', () => {
 
   test('stale second instance does not resurrect a deleted note', () => {
     const slug = 'user/repo';
-    const a = new LocalStore(slug, { seedWelcome: false });
+    const a = new LocalStore(slug);
     const id1 = a.createNote('A', 'aaa');
     const id2 = a.createNote('B', 'bbb');
 
     // Second tab created before deletion; holds its own in-memory index
-    const b = new LocalStore(slug, { seedWelcome: false });
+    const b = new LocalStore(slug);
     expect(
       b
         .listNotes()
@@ -55,7 +55,7 @@ describe('LocalStore cross-tab resilience', () => {
     if (docB) b.saveNote(docB.id, docB.text + ' updated');
 
     // LocalStorage should still be without id1
-    const c = new LocalStore(slug, { seedWelcome: false });
+    const c = new LocalStore(slug);
     expect(c.listNotes().some((n) => n.id === id1)).toBe(false);
   });
 });

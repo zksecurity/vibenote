@@ -2,11 +2,20 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useRoute } from './routing';
 import { RepoView } from './RepoView';
 import { HomeView } from './HomeView';
-import { listKnownRepoSlugs, listRecentRepos, recordRecentRepo, type RecentRepo } from '../storage/local';
+import { listRecentRepos, recordRecentRepo, type RecentRepo } from '../storage/local';
 
 export function App() {
   const { route, navigate } = useRoute();
   const [recents, setRecents] = useState<RecentRepo[]>(() => listRecentRepos());
+
+  // Adjust page title based on route
+  useEffect(() => {
+    if (route.kind === 'repo') {
+      document.title = `${route.owner}/${route.repo}`;
+      return;
+    }
+    document.title = 'VibeNote';
+  }, [route]);
 
   const recordVisit = useCallback(
     (entry: { slug: string; owner?: string; repo?: string; title?: string; connected?: boolean }) => {
@@ -27,14 +36,6 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (route.kind === 'repo') {
-      document.title = `${route.owner}/${route.repo}`;
-      return;
-    }
-    document.title = 'VibeNote';
-  }, [route]);
-
-  useEffect(() => {
     if (route.kind === 'start') {
       let candidate = recents.find((entry) => entry.owner !== undefined && entry.repo !== undefined);
 
@@ -51,10 +52,7 @@ export function App() {
     if (route.kind === 'home') {
       const recentEntries = listRecentRepos();
       if (recentEntries.length === 0) {
-        const fallback = listKnownRepoSlugs();
-        if (fallback.length === 0) {
-          navigate({ kind: 'new' }, { replace: true });
-        }
+        navigate({ kind: 'new' }, { replace: true });
       }
     }
   }, [route, navigate]);

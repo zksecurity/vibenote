@@ -24,7 +24,7 @@ This document captures the core architecture, sync logic, and decisions so anoth
 
 ## Repository Layout
 
-- Notes live at the repository root by default (configurable via `notesDir`).
+- Notes live at the repository root.
 - One note per Markdown file, `<slug>.md`.
 - `RepoConfigModal` seeds a README explaining VibeNote when creating a new repo and skips it from the note list.
   - TODO this is currently not working
@@ -81,7 +81,7 @@ Notes:
 
 `src/sync/git-sync.ts` now talks to the GitHub Git Data API directly from the browser:
 
-- `configureRemote` persists `{ owner, repo, branch, notesDir }` in `localStorage`.
+- `configureRemote` persists `{ owner, repo, branch }` in `localStorage`.
 - `pullNote`, `listNoteFiles`, and `fetchBlob` fetch via REST using the short-lived user token (with public fallbacks).
 - `commitBatch`, `putFile`, and `deleteFiles` build trees/commits client-side and update refs with the same token.
 - `syncBidirectional` mediates merges, handles local tombstones, restores remote deletions when needed, and records per-note sync hashes.
@@ -93,10 +93,10 @@ Future options still include moving to GraphQL/tree APIs for scale or introducin
 Key namespace: `vibenote:*`
 
 - `vibenote:gh-token` – GitHub OAuth access token (device flow output).
-- `vibenote:config` – JSON: `{ owner, repo, branch, notesDir }`.
+- `vibenote:config` – JSON: `{ owner, repo, branch }`.
 - `vibenote:index` – JSON list: `[{ id, path, title, dir, updatedAt }]`.
 - `vibenote:note:<id>` – JSON: `{ id, path, title, dir, text, updatedAt, lastRemoteSha, lastSyncedHash }`.
-- `vibenote:folders` – JSON list of folder paths under `notesDir` (e.g., `['a', 'a/b']`).
+- `vibenote:folders` – JSON list of folder paths (e.g., `['a', 'a/b']`).
 - `vibenote:tombstones` – Array of delete/rename markers used to reconcile remote deletions safely.
 
 ## UI Outline
