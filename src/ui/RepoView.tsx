@@ -392,14 +392,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     }
   };
 
-  const ensureOwnerAndOpen = async () => {
-    if (!ownerLogin) {
-      const u = getAppSessionUser();
-      setOwnerLogin(u?.login ?? null);
-    }
-    setShowSwitcher(true);
-  };
-
   // Keyboard shortcuts: Cmd/Ctrl+K and "g" then "r" open the repo switcher.
   useEffect(() => {
     let lastG = 0;
@@ -415,7 +407,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
       // Always allow Ctrl/Cmd+K to open the switcher, even when typing
       if ((e.ctrlKey || e.metaKey) && key === 'k') {
         e.preventDefault();
-        void ensureOwnerAndOpen();
+        setShowSwitcher(true);
         return;
       }
       if (isTypingTarget(e.target)) return;
@@ -427,7 +419,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
       if (key === 'r' && now - lastG < 800) {
         e.preventDefault();
         lastG = 0;
-        void ensureOwnerAndOpen();
+        setShowSwitcher(true);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -628,7 +620,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
             <span className="repo-anchor align-workspace">
               <button
                 className={`btn ghost repo-btn`}
-                onClick={ensureOwnerAndOpen}
+                onClick={() => setShowSwitcher(true)}
                 title={linked ? 'Change repository' : 'Choose repository'}
               >
                 <GitHubIcon />
@@ -911,7 +903,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
           onLinkExisting={() => {
             setShowConfig(false);
             setRepoModalError(null);
-            void ensureOwnerAndOpen();
+            setShowSwitcher(true);
           }}
         />
       )}
