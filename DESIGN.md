@@ -26,7 +26,7 @@ This document captures the core architecture, sync logic, and decisions so anoth
 
 - Notes live at the repository root.
 - One note per Markdown file, `<slug>.md`.
-- `RepoConfigModal` seeds a README explaining VibeNote when creating a new repo and skips it from the note list.
+- Seeds a README explaining VibeNote when creating a new repo and skips it from the note list.
   - TODO this is currently not working
 - Future work can add an index/metadata file when ordering/custom attributes are needed.
 
