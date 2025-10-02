@@ -42,7 +42,6 @@ import {
 } from '../sync/git-sync';
 import { hashText } from '../storage/local';
 import { RepoSwitcher } from './RepoSwitcher';
-import { RepoConfigModal } from './RepoConfigModal';
 import { Toggle } from './Toggle';
 import { GitHubIcon, ExternalLinkIcon, NotesIcon, CloseIcon, SyncIcon } from './RepoIcons';
 import type { Route } from './routing';
@@ -113,13 +112,9 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // Store the current GitHub App session token to toggle authenticated features instantly.
   const [sessionToken, setSessionToken] = useState<string | null>(getAppSessionToken());
-  // Toggle the repository configuration modal visibility.
-  const [showConfig, setShowConfig] = useState(false);
   // Carry the latest sync status message shown across the workspace.
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const initialAppUser = useMemo(() => getAppSessionUser(), []);
-  // Cache the GitHub login to seed repo switcher defaults.
-  const [ownerLogin, setOwnerLogin] = useState<string | null>(initialAppUser?.login ?? null);
   // Track whether this repo slug has already been linked to GitHub sync.
   const [linked, setLinked] = useState(() => slug !== 'new' && isRepoLinked(slug));
   // Keep the signed-in GitHub App user details for header UI.
@@ -129,10 +124,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
   const [menuOpen, setMenuOpen] = useState(false);
   // Manage the ephemeral toast message shown at the bottom of the app.
   const [toast, setToast] = useState<{ text: string; href?: string } | null>(null);
-  // Remember which mode the repo modal should present (onboarding vs manage).
-  const [repoModalMode, setRepoModalMode] = useState<'onboard' | 'manage'>('manage');
-  // Carry validation or network errors specific to the repo modal.
-  const [repoModalError, setRepoModalError] = useState<string | null>(null);
   // Toggle the repo switcher overlay.
   const [showSwitcher, setShowSwitcher] = useState(false);
   const repoAccess = useRepoAccess({ route, sessionToken, linked });
@@ -302,7 +293,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
       if (result) {
         setSessionToken(result.token);
         setUser(result.user);
-        setOwnerLogin(result.user.login);
       }
     } catch (e) {
       console.error(e);
@@ -324,71 +314,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     } catch (e) {
       console.error(e);
       setSyncMsg('Failed to open GitHub');
-    }
-  };
-
-  const onConfigSubmit = async (cfg: { owner: string; repo: string; branch: string; autosync: boolean }) => {
-    setSyncMsg(null);
-    setRepoModalError(null);
-    setSyncing(true);
-    try {
-      let targetOwner = cfg.owner.trim();
-      let targetRepo = cfg.repo.trim();
-      if (!targetOwner || !targetRepo) {
-        setRepoModalError('Enter an owner and repository name.');
-        return;
-      }
-
-      let targetSlug = `${targetOwner}/${targetRepo}`;
-      let matchesCurrent = targetSlug === slug;
-      let targetStore = matchesCurrent ? store : new LocalStore(targetSlug);
-      let hadRemoteBefore = matchesCurrent && linked;
-      let targetConfig: RemoteConfig = buildRemoteConfig(targetSlug);
-
-      // No in-app repo creation with GitHub App model; we simply link and guide via install CTAs
-
-      markRepoLinked(targetSlug);
-      setAutosyncEnabled(targetSlug, cfg.autosync === true);
-      onRecordRecent({ slug: targetSlug, owner: targetOwner, repo: targetRepo, connected: true });
-      if (matchesCurrent) {
-        setLinked(true);
-        setAutosync(cfg.autosync === true);
-      }
-
-      // With the GitHub App model, initialization happens once access is granted.
-
-      const entries = await listNoteFiles(targetConfig);
-      const remoteFiles: { path: string; text: string; sha?: string }[] = [];
-      for (let entry of entries) {
-        const remoteFile = await pullNote(targetConfig, entry.path);
-        if (remoteFile)
-          remoteFiles.push({ path: remoteFile.path, text: remoteFile.text, sha: remoteFile.sha });
-      }
-      targetStore.replaceWithRemote(remoteFiles);
-
-      let statusMsg = 'Connected to repository';
-      if (matchesCurrent) {
-        const syncedNotes = targetStore.listNotes();
-        notifyStoreListeners();
-        setActiveId(syncedNotes[0]?.id ?? null);
-        setSyncMsg(statusMsg);
-        if (cfg.autosync === true) scheduleAutoSync(0); // run on page load/connect
-      } else {
-        setSyncMsg(statusMsg);
-      }
-
-      setRepoModalError(null);
-      setShowConfig(false);
-      if (!matchesCurrent) {
-        navigate({ kind: 'repo', owner: targetOwner, repo: targetRepo });
-      }
-    } catch (e) {
-      console.error(e);
-      const msg = 'Failed to configure repository';
-      setRepoModalError(msg);
-      setSyncMsg(msg);
-    } finally {
-      setSyncing(false);
     }
   };
 
@@ -424,7 +349,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [ownerLogin]);
+  }, []);
 
   // Auto-dismiss toasts so they do not linger indefinitely.
   useEffect(() => {
@@ -510,7 +435,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     notifyStoreListeners();
     setSessionToken(null);
     setUser(null);
-    setOwnerLogin(null);
     setLinked(false);
     setAutosync(false);
     setMenuOpen(false);
@@ -619,7 +543,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
           {route.kind === 'repo' ? (
             <span className="repo-anchor align-workspace">
               <button
-                className={`btn ghost repo-btn`}
+                className="btn ghost repo-btn"
                 onClick={() => setShowSwitcher(true)}
                 title={linked ? 'Change repository' : 'Choose repository'}
               >
@@ -641,22 +565,20 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
               </a>
             </span>
           ) : sessionToken ? (
-            <button
-              type="button"
-              className="btn ghost repo-btn align-workspace repo-btn-empty"
-              onClick={() => {
-                setRepoModalMode('manage');
-                setRepoModalError(null);
-                setShowConfig(true);
-              }}
-              disabled={syncing}
-              title="Choose repository"
-            >
-              <GitHubIcon />
-              <span className="repo-label">
-                <span>Choose repository</span>
-              </span>
-            </button>
+            <span className="repo-anchor align-workspace">
+              <button
+                type="button"
+                className="btn ghost repo-btn repo-btn-empty"
+                onClick={() => setShowSwitcher(true)}
+                disabled={syncing}
+                title="Choose repository"
+              >
+                <GitHubIcon />
+                <span className="repo-label">
+                  <span>Choose repository</span>
+                </span>
+              </button>
+            </span>
           ) : null}
         </div>
         <div className="topbar-actions">
@@ -887,24 +809,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
           navigate={navigate}
           onRecordRecent={onRecordRecent}
           onClose={() => setShowSwitcher(false)}
-        />
-      )}
-      {showConfig && (
-        <RepoConfigModal
-          mode={repoModalMode}
-          ownerLogin={ownerLogin}
-          syncing={syncing}
-          error={repoModalError}
-          onSubmit={onConfigSubmit}
-          onClose={() => {
-            setShowConfig(false);
-            setRepoModalError(null);
-          }}
-          onLinkExisting={() => {
-            setShowConfig(false);
-            setRepoModalError(null);
-            setShowSwitcher(true);
-          }}
         />
       )}
     </div>

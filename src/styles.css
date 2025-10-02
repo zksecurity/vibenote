@@ -160,6 +160,10 @@ textarea {
   flex-shrink: 0;
 }
 
+.btn.repo-btn-empty {
+  color: var(--muted);
+}
+
 .repo-label {
   display: inline-flex;
   align-items: baseline;
@@ -424,38 +428,6 @@ textarea {
 .btn.ghost:hover {
   background: rgba(9, 105, 218, 0.1);
   box-shadow: none;
-}
-
-.btn.repo-btn-empty {
-  background: var(--surface);
-  border-color: var(--border);
-  color: var(--muted);
-  box-shadow: none;
-}
-
-.btn.repo-btn-empty:hover {
-  background: var(--surface-subtle);
-  border-color: var(--accent-border);
-  color: var(--text);
-  box-shadow: none;
-}
-
-.btn.repo-btn-empty:active {
-  background: var(--surface-subtle);
-  border-color: var(--accent-border);
-  box-shadow: none;
-}
-
-.btn.repo-btn-empty:disabled {
-  background: var(--surface);
-  border-color: var(--border);
-  color: var(--muted);
-  opacity: 0.6;
-  box-shadow: none;
-}
-
-.repo-btn-empty .repo-label {
-  color: inherit;
 }
 
 .btn.subtle {
