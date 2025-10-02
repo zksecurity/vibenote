@@ -73,6 +73,8 @@ type RepoAccessState = {
   isPrivate: boolean | null;
 };
 
+type ReadOnlyNote = { id: string; path: string; title: string; dir: string; sha?: string };
+
 const initialAccessState: RepoAccessState = {
   level: 'none',
   status: 'idle',
@@ -102,23 +104,12 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
   const { notes, folders, notifyStoreListeners } = useRepoStore(store);
   // Hold the currently loaded read-only note so the editor can render remote content.
   const [readOnlyDoc, setReadOnlyDoc] = useState<NoteDoc | null>(null);
-  type ReadOnlyNote = { id: string; path: string; title: string; dir: string; sha?: string };
   // Cache read-only note metadata fetched straight from GitHub when in view-only mode.
   const [readOnlyNotes, setReadOnlyNotes] = useState<ReadOnlyNote[]>([]);
   // Indicate when remote read-only data is being fetched to show loading states.
   const [readOnlyLoading, setReadOnlyLoading] = useState(false);
   // Track sidebar visibility, especially for mobile drawer toggles.
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  // Persist current tree selection so actions like create/rename know their context.
-  const [selection, setSelection] = useState<
-    { kind: 'folder'; dir: string } | { kind: 'file'; id: string } | null
-  >(null);
-  // Drive inline creation rows in the FileTree with a stable descriptor.
-  const [newEntry, setNewEntry] = useState<{
-    kind: 'file' | 'folder';
-    parentDir: string;
-    key: number;
-  } | null>(null);
   // Store the current GitHub App session token to toggle authenticated features instantly.
   const [sessionToken, setSessionToken] = useState<string | null>(getAppSessionToken());
   // Toggle the repository configuration modal visibility.
@@ -303,75 +294,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
       setReadOnlyLoading(false);
     };
   }, [isPublicReadonly, slug, repoAccess.defaultBranch]);
-
-  const onCreate = () => {
-    if (!canEdit) return;
-    let parentDir = '';
-    if (selection?.kind === 'folder') parentDir = selection.dir;
-    if (selection?.kind === 'file') {
-      let n = notes.find((x) => x.id === selection.id);
-      if (n) parentDir = (n.dir as string) || '';
-    }
-    setNewEntry({ kind: 'file', parentDir, key: Date.now() });
-  };
-
-  const onCreateFolder = (parentDir: string) => {
-    if (!canEdit) return;
-    setNewEntry({ kind: 'folder', parentDir, key: Date.now() });
-  };
-
-  const onRenameFolder = (dir: string, newName: string) => {
-    if (!canEdit) return;
-    try {
-      store.renameFolder(dir, newName);
-      notifyStoreListeners();
-      scheduleAutoSync();
-    } catch (e) {
-      console.error(e);
-      setSyncMsg('Invalid folder name.');
-    }
-  };
-
-  // Move is deferred to later (drag & drop); not supported for now
-  const onMoveFolder = (_fromDir: string, _toDir?: string) => {};
-
-  const onDeleteFolder = (dir: string) => {
-    if (!canEdit) return;
-    // Skip confirmation if folder (and subtree) contains no files
-    let hasNotes = notes.some((n) => {
-      let d = (n.dir as string) || '';
-      return d === dir || d.startsWith(dir + '/');
-    });
-    if (hasNotes) {
-      if (!window.confirm('Delete folder and all contained notes?')) return;
-    }
-    store.deleteFolder(dir);
-    notifyStoreListeners();
-    const list = store.listNotes();
-    if (activeId && !list.some((n) => n.id === activeId)) setActiveId(list[0]?.id ?? null);
-    scheduleAutoSync();
-  };
-
-  const onRename = (id: string, title: string) => {
-    if (!canEdit) return;
-    try {
-      store.renameNote(id, title);
-      notifyStoreListeners();
-      scheduleAutoSync();
-    } catch (e) {
-      console.error(e);
-      setSyncMsg('Invalid title. Avoid / and control characters.');
-    }
-  };
-
-  const onDelete = (id: string) => {
-    if (!canEdit) return;
-    store.deleteNote(id);
-    notifyStoreListeners();
-    const list = store.listNotes();
-    if (activeId === id) setActiveId(list[0]?.id ?? null);
-    scheduleAutoSync();
-  };
 
   const onConnect = async () => {
     try {
@@ -642,7 +564,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     setAutosync(false);
     setMenuOpen(false);
     setReadOnlyNotes([]);
-    setNewEntry(null);
     setActiveId(null);
     setReadOnlyDoc(null);
     initialPullRef.current.done = false;
@@ -672,7 +593,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
 
   const showSidebar = (notes.length > 0 && linked) || (isPublicReadonly && readOnlyNotes.length > 0);
   const layoutClass = showSidebar ? '' : 'single';
-  const noteList = isPublicReadonly ? readOnlyNotes : notes;
+  const activeNotes = isPublicReadonly ? readOnlyNotes : notes;
   const localDoc = useMemo(() => {
     if (!canEdit) return null;
     if (!activeId) return null;
@@ -697,6 +618,32 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     }
     return folders;
   }, [folders, isPublicReadonly, readOnlyNotes]);
+
+  // Fetch the latest contents when a read-only file is selected from the tree.
+  const loadReadOnlyNote = useCallback(
+    async (id: string) => {
+      const entry = readOnlyNotes.find((n) => n.id === id);
+      if (!entry) return;
+      const cfg = remoteConfigForSlug(slug, repoAccess.defaultBranch);
+      try {
+        const remote = await pullNote(cfg, entry.path);
+        if (!remote) return;
+        setReadOnlyDoc({
+          id: entry.id,
+          path: entry.path,
+          title: entry.title,
+          dir: entry.dir,
+          text: remote.text,
+          updatedAt: Date.now(),
+          lastRemoteSha: remote.sha,
+          lastSyncedHash: hashText(remote.text),
+        });
+      } catch (error) {
+        console.error(error);
+      }
+    },
+    [readOnlyNotes, slug, repoAccess.defaultBranch, setReadOnlyDoc]
+  );
 
   // Maintain collapsed state against the active folder list so disclosure toggles persist.
   const { collapsed: collapsedFolders, setCollapsedMap } = useCollapsedFolders({
@@ -818,7 +765,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
               <div className="sidebar-title">
                 <div className="sidebar-title-main">
                   <span>Notes</span>
-                  <span className="note-count">{noteList.length}</span>
+                  <span className="note-count">{activeNotes.length}</span>
                 </div>
                 <button
                   className="btn icon only-mobile"
@@ -829,104 +776,21 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                 </button>
               </div>
             </div>
-            {canEdit && (
-              <div className="sidebar-actions">
-                <button className="btn primary" onClick={onCreate}>
-                  New note
-                </button>
-                <button
-                  className="btn secondary"
-                  onClick={() => {
-                    let parentDir = '';
-                    if (selection?.kind === 'folder') parentDir = selection.dir;
-                    if (selection?.kind === 'file') {
-                      let n = noteList.find((x) => x.id === selection.id);
-                      if (n) parentDir = (n.dir as string) || '';
-                    }
-                    onCreateFolder(parentDir);
-                  }}
-                >
-                  New folder
-                </button>
-              </div>
-            )}
-            <div className="sidebar-body">
-              <FileTree
-                files={
-                  noteList.map((n) => ({
-                    id: n.id,
-                    name: n.title || 'Untitled',
-                    path: n.path,
-                    dir: (n.dir as string) || '',
-                  })) as FileEntry[]
-                }
-                folders={activeFolders}
-                activeId={activeId}
-                collapsed={collapsedFolders}
-                onCollapsedChange={setCollapsedMap}
-                onSelectionChange={(sel) => setSelection(sel as any)}
-                onSelectFile={(id) => {
-                  if (!canEdit) {
-                    setActiveId(id);
-                    setSidebarOpen(false);
-                    const entry = readOnlyNotes.find((n) => n.id === id);
-                    if (!entry) return;
-                    const cfg = remoteConfigForSlug(slug, repoAccess.defaultBranch);
-                    void (async () => {
-                      try {
-                        const remote = await pullNote(cfg, entry.path);
-                        if (!remote) return;
-                        setReadOnlyDoc({
-                          id: entry.id,
-                          path: entry.path,
-                          title: entry.title,
-                          dir: entry.dir,
-                          text: remote.text,
-                          updatedAt: Date.now(),
-                          lastRemoteSha: remote.sha,
-                          lastSyncedHash: hashText(remote.text),
-                        });
-                      } catch (e) {
-                        console.error(e);
-                      }
-                    })();
-                    return;
-                  }
-                  setActiveId(id);
-                  setSidebarOpen(false);
-                }}
-                onRenameFile={canEdit ? onRename : () => undefined}
-                onDeleteFile={canEdit ? onDelete : () => undefined}
-                onCreateFile={
-                  canEdit
-                    ? (dir, name) => {
-                        let id = store.createNote(name, '', dir);
-                        notifyStoreListeners();
-                        setActiveId(id);
-                        scheduleAutoSync();
-                        return id;
-                      }
-                    : () => undefined
-                }
-                onCreateFolder={
-                  canEdit
-                    ? (parentDir, name) => {
-                        try {
-                          store.createFolder(parentDir, name);
-                          notifyStoreListeners();
-                        } catch (e) {
-                          console.error(e);
-                          setSyncMsg('Invalid folder name.');
-                        }
-                      }
-                    : () => undefined
-                }
-                onRenameFolder={canEdit ? onRenameFolder : () => undefined}
-                onDeleteFolder={canEdit ? onDeleteFolder : () => undefined}
-                newEntry={canEdit ? newEntry : null}
-                onFinishCreate={() => canEdit && setNewEntry(null)}
-              />
-            </div>
+            <FileSidebar
+              canEdit={canEdit}
+              notes={activeNotes}
+              activeFolders={activeFolders}
+              collapsedFolders={collapsedFolders}
+              onCollapsedChange={setCollapsedMap}
+              activeId={activeId}
+              setActiveId={setActiveId}
+              closeSidebar={() => setSidebarOpen(false)}
+              store={store}
+              notifyStoreListeners={notifyStoreListeners}
+              scheduleAutoSync={scheduleAutoSync}
+              setSyncMsg={setSyncMsg}
+              loadReadOnlyNote={loadReadOnlyNote}
+            />
             {route.kind === 'repo' && linked && canEdit ? (
               <div className="repo-autosync-toggle">
                 <Toggle
@@ -1484,6 +1348,201 @@ function useCollapsedFolders({ slug, folders, persistPrefs }: CollapsedFoldersPa
   };
 
   return { collapsed, setCollapsedMap } as const;
+}
+
+type FileSidebarProps = {
+  canEdit: boolean;
+  notes: (NoteMeta | ReadOnlyNote)[];
+  activeFolders: string[];
+  collapsedFolders: Record<string, boolean>;
+  onCollapsedChange: (next: Record<string, boolean>) => void;
+  activeId: string | null;
+  setActiveId: (id: string | null) => void;
+  closeSidebar: () => void;
+  store: LocalStore;
+  notifyStoreListeners: () => void;
+  scheduleAutoSync: (delay?: number) => void;
+  setSyncMsg: (msg: string | null) => void;
+  loadReadOnlyNote: (id: string) => Promise<void>;
+};
+
+function FileSidebar(props: FileSidebarProps) {
+  const {
+    canEdit,
+    notes,
+    activeFolders,
+    collapsedFolders,
+    onCollapsedChange,
+    activeId,
+    setActiveId,
+    closeSidebar,
+    store,
+    notifyStoreListeners,
+    scheduleAutoSync,
+    setSyncMsg,
+    loadReadOnlyNote,
+  } = props;
+
+  // Derive file entries for the tree component from the provided notes list.
+  const files = useMemo<FileEntry[]>(() => {
+    return notes.map((note) => {
+      return {
+        id: note.id,
+        name: note.title || 'Untitled',
+        path: note.path,
+        // no dir is treated as root -- TODO change type to enforce dir is present
+        dir: note.dir ?? '',
+      };
+    });
+  }, [notes]);
+
+  // Track which item is highlighted so new actions know their context.
+  const [selection, setSelection] = useState<
+    { kind: 'folder'; dir: string } | { kind: 'file'; id: string } | null
+  >(null);
+
+  // Drive inline creation rows in the tree with a deterministic key.
+  const [newEntry, setNewEntry] = useState<{
+    kind: 'file' | 'folder';
+    parentDir: string;
+    key: number;
+  } | null>(null);
+
+  // Reset inline creation state when edit access is lost.
+  useEffect(() => {
+    if (!canEdit) setNewEntry(null);
+  }, [canEdit]);
+
+  function getSelectedDir() {
+    if (selection?.kind === 'folder') return selection.dir;
+    if (selection?.kind === 'file') {
+      let fileDirMap = new Map<string, string>();
+      for (let file of files) fileDirMap.set(file.id, file.dir);
+      return fileDirMap.get(selection.id) ?? '';
+    }
+    return '';
+  }
+
+  const handleNewNoteClick = () => {
+    if (!canEdit) return;
+    const parentDir = getSelectedDir();
+    setNewEntry({ kind: 'file', parentDir, key: Date.now() });
+  };
+
+  const handleNewFolderClick = () => {
+    if (!canEdit) return;
+    const parentDir = getSelectedDir();
+    setNewEntry({ kind: 'folder', parentDir, key: Date.now() });
+  };
+
+  const handleCreateFile = (dir: string, name: string) => {
+    if (!canEdit) return;
+    const id = store.createNote(name, '', dir);
+    notifyStoreListeners();
+    setActiveId(id);
+    scheduleAutoSync();
+    return id;
+  };
+
+  const handleCreateFolder = (parentDir: string, name: string) => {
+    if (!canEdit) return;
+    try {
+      store.createFolder(parentDir, name);
+      notifyStoreListeners();
+    } catch (error) {
+      console.error(error);
+      setSyncMsg('Invalid folder name.');
+    }
+  };
+
+  const handleRenameFile = (id: string, title: string) => {
+    if (!canEdit) return;
+    try {
+      store.renameNote(id, title);
+      notifyStoreListeners();
+      scheduleAutoSync();
+    } catch (error) {
+      console.error(error);
+      setSyncMsg('Invalid title. Avoid / and control characters.');
+    }
+  };
+
+  const handleDeleteFile = (id: string) => {
+    if (!canEdit) return;
+    store.deleteNote(id);
+    notifyStoreListeners();
+    const list = store.listNotes();
+    if (activeId === id) setActiveId(list[0]?.id ?? null);
+    scheduleAutoSync();
+  };
+
+  const handleRenameFolder = (dir: string, newName: string) => {
+    if (!canEdit) return;
+    try {
+      store.renameFolder(dir, newName);
+      notifyStoreListeners();
+      scheduleAutoSync();
+    } catch (error) {
+      console.error(error);
+      setSyncMsg('Invalid folder name.');
+    }
+  };
+
+  const handleDeleteFolder = (dir: string) => {
+    if (!canEdit) return;
+    const hasNotes = files.some((file) => file.dir === dir || file.dir.startsWith(dir + '/'));
+    if (hasNotes && !window.confirm('Delete folder and all contained notes?')) return;
+    store.deleteFolder(dir);
+    notifyStoreListeners();
+    const list = store.listNotes();
+    if (activeId && !list.some((note) => note.id === activeId)) setActiveId(list[0]?.id ?? null);
+    scheduleAutoSync();
+  };
+
+  const handleSelectFile = (id: string) => {
+    if (!canEdit) {
+      setActiveId(id);
+      closeSidebar();
+      void loadReadOnlyNote(id);
+      return;
+    }
+    setActiveId(id);
+    closeSidebar();
+  };
+
+  return (
+    <>
+      {canEdit && (
+        <div className="sidebar-actions">
+          <button className="btn primary" onClick={handleNewNoteClick}>
+            New note
+          </button>
+          <button className="btn secondary" onClick={handleNewFolderClick}>
+            New folder
+          </button>
+        </div>
+      )}
+      <div className="sidebar-body">
+        <FileTree
+          files={files}
+          folders={activeFolders}
+          activeId={activeId}
+          collapsed={collapsedFolders}
+          onCollapsedChange={onCollapsedChange}
+          onSelectionChange={setSelection}
+          onSelectFile={handleSelectFile}
+          onRenameFile={handleRenameFile}
+          onDeleteFile={handleDeleteFile}
+          onCreateFile={handleCreateFile}
+          onCreateFolder={handleCreateFolder}
+          onRenameFolder={handleRenameFolder}
+          onDeleteFolder={handleDeleteFolder}
+          newEntry={canEdit ? newEntry : null}
+          onFinishCreate={() => setNewEntry(null)}
+        />
+      </div>
+    </>
+  );
 }
 
 function areAccessStatesEqual(a: RepoAccessState, b: RepoAccessState): boolean {
