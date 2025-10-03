@@ -654,8 +654,11 @@ type AccessDeriveInput = {
 function useRepoAccess({ route, sessionToken, linked }: RepoAccessParams): RepoAccessState {
   const owner = route.kind === 'repo' ? route.owner : null;
   const repo = route.kind === 'repo' ? route.repo : null;
+
+  // Track the evolving access status/metadata for the active repository target.
   const [state, setState] = useState<RepoAccessState>({ ...initialAccessState, status: 'checking' });
 
+  // Query GitHub (and the public fallback) whenever the targeted repo changes.
   useEffect(() => {
     if (!owner || !repo) return;
     let cancelled = false;
@@ -751,6 +754,7 @@ type RepoStoreSnapshot = {
 function useRepoStore(store: LocalStore) {
   const listenersRef = useRef(new Set<() => void>());
   const snapshotRef = useRef<RepoStoreSnapshot | undefined>(undefined);
+  // set to initial state from localStorage on first render
   if (snapshotRef.current === undefined) {
     snapshotRef.current = readRepoSnapshot(store);
   }
@@ -770,6 +774,7 @@ function useRepoStore(store: LocalStore) {
     }
   }, [store]);
 
+  // React to storage events from other tabs so the tree stays in sync across windows.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const handler = (event: StorageEvent) => {
@@ -815,17 +820,21 @@ type PerformSyncOptions = {
 
 function useAutosync(params: AutosyncParams) {
   const { slug, route, store, sessionToken, linked, canEdit, notifyStoreListeners } = params;
+  // Remember the user's autosync preference per repo slug.
   const [autosync, setAutosyncState] = useState<boolean>(() =>
     slug !== 'new' ? isAutosyncEnabled(slug) : false
   );
+  // Indicate when a sync operation is currently running.
   const [syncing, setSyncing] = useState(false);
   const timerRef = useRef<number | null>(null);
   const inFlightRef = useRef(false);
 
+  // Pick up persisted autosync preferences when mounting for a repo.
   useEffect(() => {
     setAutosyncState(slug !== 'new' ? isAutosyncEnabled(slug) : false);
   }, [slug]);
 
+  // Clear any pending timers if the hook gets torn down.
   useEffect(() => {
     return () => {
       if (timerRef.current !== null) {
@@ -878,6 +887,7 @@ function useAutosync(params: AutosyncParams) {
     [autosync, route.kind, sessionToken, linked, slug, canEdit, performSync]
   );
 
+  // Schedule an immediate background sync when autosync becomes eligible.
   useEffect(() => {
     if (route.kind !== 'repo') return;
     if (!autosync) return;
@@ -885,6 +895,7 @@ function useAutosync(params: AutosyncParams) {
     scheduleAutoSync(0);
   }, [route.kind, autosync, sessionToken, linked, slug, canEdit, scheduleAutoSync]);
 
+  // Keep polling in the background so we pick up remote changes over time.
   useEffect(() => {
     if (route.kind !== 'repo') return;
     if (!autosync || !sessionToken || !linked || slug === 'new' || !canEdit) return;
@@ -925,6 +936,7 @@ type ActiveNoteParams = {
 };
 
 function useActiveNote({ slug, store, notes, canEdit }: ActiveNoteParams) {
+  // Track the currently focused note id for the editor and file tree.
   const [activeId, setActiveId] = useState<string | null>(() => {
     const stored = getLastActiveNoteId(slug);
     if (!stored) return null;
@@ -932,6 +944,7 @@ function useActiveNote({ slug, store, notes, canEdit }: ActiveNoteParams) {
     return available.some((note) => note.id === stored) ? stored : null;
   });
 
+  // Restore the last active note from storage when loading an existing repo.
   useEffect(() => {
     if (activeId) return;
     const stored = getLastActiveNoteId(slug);
@@ -939,6 +952,13 @@ function useActiveNote({ slug, store, notes, canEdit }: ActiveNoteParams) {
     if (notes.some((note) => note.id === stored)) setActiveId(stored);
   }, [slug, activeId, notes]);
 
+  // Persist the active note id so future visits resume on the same file (when permitted).
+  useEffect(() => {
+    if (!canEdit) return;
+    setLastActiveNoteId(slug, activeId ?? null);
+  }, [activeId, slug, canEdit]);
+
+  // Nudge the active note to a valid entry whenever the editable list changes.
   useEffect(() => {
     if (!canEdit) return;
     setActiveId((prev) => {
