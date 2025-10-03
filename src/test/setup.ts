@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import { afterEach, beforeEach, vi } from 'vitest';
 
 class MemoryStorage implements Storage {
@@ -52,6 +53,22 @@ beforeEach(() => {
   }
 
   vi.stubGlobal('fetch', vi.fn());
+  vi.stubGlobal('atob', (data: string) => Buffer.from(data, 'base64').toString('binary'));
+  vi.stubGlobal('btoa', (data: string) => Buffer.from(data, 'binary').toString('base64'));
+
+  if (typeof window !== 'undefined') {
+    Object.defineProperty(window, 'atob', {
+      value: globalThis.atob,
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(window, 'btoa', {
+      value: globalThis.btoa,
+      configurable: true,
+      writable: true,
+    });
+  }
+
   vi.spyOn(console, 'debug').mockImplementation(() => {});
   vi.spyOn(console, 'trace').mockImplementation(() => {});
 });

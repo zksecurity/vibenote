@@ -1,35 +1,7 @@
-import { beforeEach, describe, expect, test } from 'vitest';
+import { describe, expect, test } from 'vitest';
 import { LocalStore } from './local';
 
-class MemoryStorage implements Storage {
-  private store = new Map<string, string>();
-  get length(): number {
-    return this.store.size;
-  }
-  clear(): void {
-    this.store.clear();
-  }
-  getItem(key: string): string | null {
-    return this.store.has(key) ? this.store.get(key) ?? null : null;
-  }
-  key(index: number): string | null {
-    return Array.from(this.store.keys())[index] ?? null;
-  }
-  removeItem(key: string): void {
-    this.store.delete(key);
-  }
-  setItem(key: string, value: string): void {
-    this.store.set(key, value);
-  }
-}
-
-const globalAny = globalThis as { localStorage?: Storage };
-
 describe('LocalStore folder operations', () => {
-  beforeEach(() => {
-    globalAny.localStorage = new MemoryStorage();
-  });
-
   test('create/rename/move/delete folder updates notes and index', () => {
     let store = new LocalStore('user/repo');
     store.createFolder('', 'a');

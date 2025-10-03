@@ -1,54 +1,15 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { LocalStore, listTombstones } from '../storage/local';
 
-declare const Buffer: { from(data: string, encoding: string): { toString(enc: string): string } };
-
-vi.mock('../auth/app-auth', () => ({
+const authModule = vi.hoisted(() => ({
   ensureFreshAccessToken: vi.fn().mockResolvedValue('test-token'),
 }));
 
+vi.mock('../auth/app-auth', () => authModule);
+
 const globalAny = globalThis as {
-  localStorage?: Storage;
   fetch?: typeof fetch;
-  atob?: typeof atob;
-  btoa?: typeof btoa;
 };
-
-if (!globalAny.atob) {
-  globalAny.atob = (data: string) => Buffer.from(data, 'base64').toString('binary');
-}
-
-if (!globalAny.btoa) {
-  globalAny.btoa = (data: string) => Buffer.from(data, 'binary').toString('base64');
-}
-
-class MemoryStorage implements Storage {
-  private store = new Map<string, string>();
-
-  get length(): number {
-    return this.store.size;
-  }
-
-  clear(): void {
-    this.store.clear();
-  }
-
-  getItem(key: string): string | null {
-    return this.store.has(key) ? this.store.get(key) ?? null : null;
-  }
-
-  key(index: number): string | null {
-    return Array.from(this.store.keys())[index] ?? null;
-  }
-
-  removeItem(key: string): void {
-    this.store.delete(key);
-  }
-
-  setItem(key: string, value: string): void {
-    this.store.set(key, value);
-  }
-}
 
 type RemoteFile = { text: string; sha: string };
 
@@ -448,14 +409,16 @@ describe('syncBidirectional', () => {
   let syncBidirectional: typeof import('./git-sync').syncBidirectional;
 
   beforeEach(async () => {
-    globalAny.localStorage = new MemoryStorage();
+    authModule.ensureFreshAccessToken.mockReset();
+    authModule.ensureFreshAccessToken.mockResolvedValue('test-token');
     remote = new MockRemoteRepo();
     remote.configure('user', 'repo');
-    globalAny.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const raw =
         typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url;
       return remote.handleFetch(new URL(raw), init);
-    };
+    });
+    globalAny.fetch = fetchMock as unknown as typeof fetch;
     const mod = await import('./git-sync');
     syncBidirectional = mod.syncBidirectional;
     store = new LocalStore('user/repo');
