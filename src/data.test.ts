@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { RepoMetadata } from './lib/backend';
-import { LocalStore, markRepoLinked } from './storage/local';
+import { LocalStore, markRepoLinked, setLastActiveNoteId } from './storage/local';
 
 type RemoteFile = { path: string; text: string; sha: string };
 
@@ -107,6 +107,16 @@ const readOnlyMeta: RepoMetadata = {
 
 function setRepoMetadata(meta: RepoMetadata) {
   mockGetRepoMetadata.mockImplementation(async () => ({ ...meta }));
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject } as const;
 }
 
 describe('useRepoData', () => {
@@ -280,5 +290,43 @@ describe('useRepoData', () => {
 
     await waitFor(() => expect(result.current.state.doc?.text).toBe('# updated remote'));
     expect(mockPullNote).toHaveBeenCalledTimes(1);
+  });
+
+  test('doc remains loaded while repo access resolves', async () => {
+    const slug = 'acme/docs';
+    const onRecordRecent = vi.fn();
+
+    const seededUuid = '00000000-0000-0000-0000-000000000042';
+    const uuidSpy = vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValueOnce(seededUuid);
+    const seedStore = new LocalStore(slug);
+    const noteId = seedStore.createNote('Seed', 'initial text');
+    setLastActiveNoteId(slug, noteId);
+    markRepoLinked(slug);
+    uuidSpy.mockRestore();
+
+    mockGetSessionToken.mockReturnValue('session-token');
+    mockGetSessionUser.mockReturnValue({ login: 'mona', name: 'Mona', avatarUrl: 'https://example.com/mona.png' });
+
+    const pendingMeta = createDeferred<RepoMetadata>();
+    mockGetRepoMetadata.mockImplementation(() => pendingMeta.promise);
+
+    const seenDocIds: Array<string | null | undefined> = [];
+    const { result } = renderHook(() => {
+      const value = useRepoData({ slug, route: { kind: 'repo', owner: 'acme', repo: 'docs' }, onRecordRecent });
+      seenDocIds.push(value.state.doc?.id);
+      return value;
+    });
+
+    await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('checking'));
+    expect(result.current.state.doc?.id).toBe(noteId);
+
+    await act(async () => {
+      pendingMeta.resolve({ ...writableMeta });
+      await pendingMeta.promise;
+    });
+
+    await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
+    expect(result.current.state.doc?.id).toBe(noteId);
+    expect(seenDocIds.every((id) => id === noteId)).toBe(true);
   });
 });
