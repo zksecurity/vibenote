@@ -87,6 +87,15 @@ const initialAccessState: RepoAccessState = {
 
 const AUTO_SYNC_MIN_INTERVAL_MS = 60_000;
 const AUTO_SYNC_DEBOUNCE_MS = 10_000;
+const APPLE_PLATFORM_PATTERN = /mac|iphone|ipad|ipod/i;
+
+function detectPrimaryShortcut(): 'meta' | 'ctrl' {
+  if (typeof navigator === 'undefined') return 'ctrl';
+  let platform = navigator.platform ?? '';
+  if (!platform && typeof navigator.userAgent === 'string') platform = navigator.userAgent;
+  if (APPLE_PLATFORM_PATTERN.test(platform)) return 'meta';
+  return 'ctrl';
+}
 
 export function RepoView(props: RepoViewProps) {
   return <RepoViewInner key={props.slug} {...props} />;
@@ -488,6 +497,10 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
 
   // Toggle the repo switcher overlay.
   const [showSwitcher, setShowSwitcher] = useState(false);
+  const primaryModifier = useMemo(() => detectPrimaryShortcut(), []);
+  const repoShortcutLabel = primaryModifier === 'meta' ? '⌘K' : 'Ctrl+K';
+  const repoButtonBaseTitle = route.kind === 'repo' ? (linked ? 'Change repository' : 'Choose repository') : 'Choose repository';
+  const repoButtonTitle = `${repoButtonBaseTitle} (${repoShortcutLabel})`;
 
   // Keyboard shortcuts: Cmd/Ctrl+K and "g" then "r" open the repo switcher.
   useEffect(() => {
@@ -501,8 +514,9 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
       const key = e.key.toLowerCase();
-      // Always allow Ctrl/Cmd+K to open the switcher, even when typing
-      if ((e.ctrlKey || e.metaKey) && key === 'k') {
+      // Always allow the primary shortcut (Ctrl or Cmd) + K to open the switcher, even when typing
+      const usesPrimaryModifier = primaryModifier === 'meta' ? e.metaKey : e.ctrlKey;
+      if (usesPrimaryModifier && key === 'k') {
         e.preventDefault();
         setShowSwitcher(true);
         return;
@@ -521,7 +535,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [primaryModifier]);
 
   return (
     <div className="app-shell">
@@ -548,7 +562,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
               <button
                 className="btn ghost repo-btn"
                 onClick={() => setShowSwitcher(true)}
-                title={linked ? 'Change repository' : 'Choose repository'}
+                title={repoButtonTitle}
               >
                 <GitHubIcon />
                 <span className="repo-label">
@@ -574,7 +588,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                 className="btn ghost repo-btn repo-btn-empty"
                 onClick={() => setShowSwitcher(true)}
                 disabled={syncing}
-                title="Choose repository"
+                title={repoButtonTitle}
               >
                 <GitHubIcon />
                 <span className="repo-label">
