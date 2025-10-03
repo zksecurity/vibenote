@@ -529,7 +529,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [primaryModifier]);
+  }, []);
 
   return (
     <div className="app-shell">
