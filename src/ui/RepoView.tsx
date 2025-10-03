@@ -1221,6 +1221,21 @@ function FileSidebar(props: FileSidebarProps) {
     [notes]
   );
 
+  // make sure that for every folder, its parent folders is also included (otherwise expanding doesn't work)
+  // TODO there are some code paths that store folders incompletely in local storage, and some that store parent folders
+  // should be consistent.
+  folders = useMemo(() => {
+    let folderSet = new Set(folders);
+    for (let folder of folders) {
+      let parts = folder.split('/');
+      while (parts.length > 1) {
+        parts.pop();
+        folderSet.add(parts.join('/'));
+      }
+    }
+    return Array.from(folderSet).sort();
+  }, [folders]);
+
   // Maintain collapsed state against the active folder list so disclosure toggles persist.
   let { collapsed, setCollapsedMap } = useCollapsedFolders({ slug, folders, canEdit });
 
