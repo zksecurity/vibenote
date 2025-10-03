@@ -124,11 +124,16 @@ type RepoDataState = {
 };
 
 type RepoDataActions = {
-  connect: () => Promise<void>;
-  openAccessSetup: () => Promise<void>;
+  // auth actions
+  signIn: () => Promise<void>;
   signOut: () => Promise<void>;
+  openRepoAccess: () => Promise<void>;
+
+  // syncing actions
   syncNow: () => Promise<void>;
   setAutosync: (enabled: boolean) => void;
+
+  // edit notes/folders
   selectNote: (id: string | null) => Promise<void>;
   createNote: (dir: string, name: string) => string | null;
   createFolder: (parentDir: string, name: string) => void;
@@ -153,6 +158,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
   }, [slug, route.kind]);
 
   const { localNotes, localFolders, notifyStoreListeners } = useRepoStore(store);
+
   // Hold the currently loaded read-only note so the editor can render remote content.
   const [readOnlyDoc, setReadOnlyDoc] = useState<NoteDoc | null>(null);
 
@@ -430,7 +436,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
   // CLICK HANDLERS
 
   // "Connect GitHub" button in the header
-  const connect = async () => {
+  const signIn = async () => {
     try {
       const result = await signInWithGitHubApp();
       if (result) {
@@ -444,7 +450,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
   };
 
   // "Get Write Access" or "Get Read/Write Access" button
-  const openAccessSetup = async () => {
+  const openRepoAccess = async () => {
     try {
       if (manageUrl && repoAccess.metadata?.repoSelected === false) {
         window.open(manageUrl, '_blank', 'noopener');
@@ -624,9 +630,10 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
   };
 
   const actions: RepoDataActions = {
-    connect,
-    openAccessSetup,
+    signIn,
     signOut,
+    openRepoAccess,
+
     syncNow,
     setAutosync,
     selectNote,
@@ -648,15 +655,6 @@ type RepoAccessParams = {
   linked: boolean;
 };
 
-type AccessDeriveInput = {
-  meta: RepoMetadata;
-  isPrivate: boolean | null;
-  defaultBranch: string | null;
-  rateLimited: boolean;
-  sessionToken: string | null;
-  usedPublicRead: boolean;
-};
-
 function useRepoAccess({ route, sessionToken, linked }: RepoAccessParams): RepoAccessState {
   const owner = route.kind === 'repo' ? route.owner : null;
   const repo = route.kind === 'repo' ? route.repo : null;
@@ -673,29 +671,7 @@ function useRepoAccess({ route, sessionToken, linked }: RepoAccessParams): RepoA
     (async () => {
       try {
         const meta = await apiGetRepoMetadata(owner, repo);
-        let isPrivate = meta.isPrivate;
-        let defaultBranch = meta.defaultBranch;
-        let rateLimited = meta.rateLimited === true;
-        let usedPublicRead = false;
-        if ((isPrivate === null || defaultBranch === null) && !meta.repoSelected) {
-          const info = await fetchPublicRepoInfo(owner, repo);
-          if (info.ok) {
-            if (isPrivate === null && typeof info.isPrivate === 'boolean') isPrivate = info.isPrivate;
-            if (defaultBranch === null) defaultBranch = info.defaultBranch ?? null;
-            usedPublicRead = info.isPrivate === false;
-          } else {
-            if (typeof info.isPrivate === 'boolean' && isPrivate === null) isPrivate = info.isPrivate;
-            if (info.rateLimited) rateLimited = true;
-          }
-        }
-        const next = deriveAccessFromMetadata({
-          meta,
-          isPrivate,
-          defaultBranch,
-          rateLimited,
-          sessionToken,
-          usedPublicRead,
-        });
+        const next = deriveAccessFromMetadata({ meta, sessionToken });
         if (!cancelled) {
           setState((prev) => (areAccessStatesEqual(prev, next) ? prev : next));
         }
@@ -720,35 +696,37 @@ function useRepoAccess({ route, sessionToken, linked }: RepoAccessParams): RepoA
   return state;
 }
 
-function deriveAccessFromMetadata(input: AccessDeriveInput): RepoAccessState {
-  const { meta, isPrivate, defaultBranch, rateLimited, sessionToken, usedPublicRead } = input;
+function deriveAccessFromMetadata(input: {
+  meta: RepoMetadata;
+  sessionToken: string | null;
+}): RepoAccessState {
+  const { meta, sessionToken } = input;
   const hasSession = !!sessionToken;
-  const repoSelected = meta.repoSelected === true;
 
   let level: RepoAccessLevel = 'none';
-  if (repoSelected && hasSession) {
+  if (meta.repoSelected && hasSession) {
     level = 'write';
-  } else if (repoSelected) {
+  } else if (meta.repoSelected) {
     level = 'read';
-  } else if (usedPublicRead || isPrivate === false) {
+  } else if (meta.isPrivate === false) {
     level = 'read';
   } else {
     level = 'none';
   }
 
-  const status: RepoAccessStatus = rateLimited ? 'rate-limited' : 'ready';
-  const needsInstall = hasSession && isPrivate !== false && !repoSelected;
+  const status: RepoAccessStatus = meta.rateLimited ? 'rate-limited' : 'ready';
+  const needsInstall = hasSession && level === 'none';
 
   return {
     level,
     status,
     metadata: meta,
-    defaultBranch,
+    defaultBranch: meta.defaultBranch,
     error: null,
-    rateLimited,
+    rateLimited: meta.rateLimited === true,
     needsInstall,
     manageUrl: meta.manageUrl ?? null,
-    isPrivate,
+    isPrivate: meta.isPrivate,
   };
 }
 

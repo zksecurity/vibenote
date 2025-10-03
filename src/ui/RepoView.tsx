@@ -49,10 +49,10 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     isMetadataError,
   } = state;
   const {
-    connect,
-    openAccessSetup: requestAccessSetup,
-    signOut: signOutAction,
-    syncNow: syncNowAction,
+    signIn,
+    signOut,
+    openRepoAccess: openAccessSetup,
+    syncNow,
     setAutosync,
     selectNote,
     createNote,
@@ -129,34 +129,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const closeSidebar = () => setSidebarOpen(false);
-
-  const handleSelectNote = async (id: string) => {
-    await selectNote(id);
-    closeSidebar();
-  };
-
-  const onConnect = async () => {
-    await connect();
-  };
-
-  const openAccessSetup = async () => {
-    await requestAccessSetup();
-  };
-
-  const onSyncNow = async () => {
-    await syncNowAction();
-  };
-
-  const onSignOut = async () => {
-    await signOutAction();
-    setMenuOpen(false);
-  };
-
-  const handleToggleAutosync = (next: boolean) => {
-    setAutosync(next);
-  };
-
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -220,7 +192,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
         </div>
         <div className="topbar-actions">
           {!sessionToken ? (
-            <button className="btn primary" onClick={onConnect}>
+            <button className="btn primary" onClick={signIn}>
               Connect GitHub
             </button>
           ) : (
@@ -228,7 +200,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
               {linked && canEdit && (
                 <button
                   className={`btn secondary sync-btn ${syncing ? 'is-syncing' : ''}`}
-                  onClick={onSyncNow}
+                  onClick={syncNow}
                   disabled={syncing}
                   aria-label={syncing ? 'Syncing' : 'Sync now'}
                   title={syncing ? 'Syncing…' : 'Sync now'}
@@ -264,7 +236,11 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                   <span>Notes</span>
                   <span className="note-count">{activeNotes.length}</span>
                 </div>
-                <button className="btn icon only-mobile" onClick={closeSidebar} aria-label="Close notes">
+                <button
+                  className="btn icon only-mobile"
+                  onClick={() => setSidebarOpen(false)}
+                  aria-label="Close notes"
+                >
                   <CloseIcon />
                 </button>
               </div>
@@ -275,7 +251,10 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
               canEdit={canEdit}
               slug={slug}
               activeId={activeId}
-              onSelect={handleSelectNote}
+              onSelect={async (id: string) => {
+                await selectNote(id);
+                setSidebarOpen(false);
+              }}
               onCreateNote={createNote}
               onCreateFolder={createFolder}
               onRenameNote={renameNote}
@@ -287,7 +266,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
               <div className="repo-autosync-toggle">
                 <Toggle
                   checked={autosync}
-                  onChange={handleToggleAutosync}
+                  onChange={setAutosync}
                   label="Autosync"
                   description="Runs background sync after edits and periodically."
                 />
@@ -383,7 +362,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
           )}
         </section>
       </div>
-      {sidebarOpen && <div className="sidebar-backdrop" onClick={closeSidebar} />}
+      {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
 
       {menuOpen && user && (
         <div className="account-menu">
@@ -400,7 +379,13 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
               <div className="account-handle">@{user.login}</div>
             </div>
           </div>
-          <button className="btn subtle full-width" onClick={onSignOut}>
+          <button
+            className="btn subtle full-width"
+            onClick={async () => {
+              await signOut();
+              setMenuOpen(false);
+            }}
+          >
             Sign out
           </button>
         </div>
