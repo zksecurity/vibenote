@@ -148,9 +148,7 @@ describe('useRepoData', () => {
 
   test('seeds welcome note for a new workspace and keeps it editable', async () => {
     const onRecordRecent = vi.fn();
-    const { result } = renderHook(() =>
-      useRepoData({ slug: 'new', route: { kind: 'new' }, onRecordRecent })
-    );
+    const { result } = renderHook(() => useRepoData({ slug: 'new', route: { kind: 'new' }, onRecordRecent }));
 
     expect(result.current.state.canEdit).toBe(true);
     expect(result.current.state.canSync).toBe(false);
@@ -180,7 +178,11 @@ describe('useRepoData', () => {
     markRepoLinked(slug);
 
     mockGetSessionToken.mockReturnValue('session-token');
-    mockGetSessionUser.mockReturnValue({ login: 'mona', name: 'Mona', avatarUrl: 'https://example.com/mona.png' });
+    mockGetSessionUser.mockReturnValue({
+      login: 'mona',
+      name: 'Mona',
+      avatarUrl: 'https://example.com/mona.png',
+    });
     setRepoMetadata(writableMeta);
     mockSyncBidirectional.mockResolvedValue({
       pulled: 1,
@@ -205,9 +207,7 @@ describe('useRepoData', () => {
     expect(result.current.state.canSync).toBe(true);
 
     await waitFor(() =>
-      expect(onRecordRecent).toHaveBeenCalledWith(
-        expect.objectContaining({ slug, connected: true })
-      )
+      expect(onRecordRecent).toHaveBeenCalledWith(expect.objectContaining({ slug, connected: true }))
     );
 
     await act(async () => {
@@ -248,14 +248,14 @@ describe('useRepoData', () => {
 
     mockGetSessionToken.mockReturnValue(null);
     setRepoMetadata(readOnlyMeta);
-    mockListNoteFiles.mockResolvedValue([
-      { path: 'docs/alpha.md', sha: 'sha-alpha' },
-    ]);
-    mockPullNote.mockImplementation(async (_config, path: string): Promise<RemoteFile> => ({
-      path,
-      text: `# ${path}`,
-      sha: `sha-${path}`,
-    }));
+    mockListNoteFiles.mockResolvedValue([{ path: 'docs/alpha.md', sha: 'sha-alpha' }]);
+    mockPullNote.mockImplementation(
+      async (_config, path: string): Promise<RemoteFile> => ({
+        path,
+        text: `# ${path}`,
+        sha: `sha-${path}`,
+      })
+    );
 
     const { result } = renderHook(() =>
       useRepoData({ slug, route: { kind: 'repo', owner: 'octo', repo: 'wiki' }, onRecordRecent })
@@ -272,9 +272,7 @@ describe('useRepoData', () => {
     expect(result.current.state.doc?.text).toBe('# docs/alpha.md');
 
     await waitFor(() =>
-      expect(onRecordRecent).toHaveBeenCalledWith(
-        expect.objectContaining({ slug, connected: false })
-      )
+      expect(onRecordRecent).toHaveBeenCalledWith(expect.objectContaining({ slug, connected: false }))
     );
 
     mockPullNote.mockClear();
@@ -305,7 +303,11 @@ describe('useRepoData', () => {
     uuidSpy.mockRestore();
 
     mockGetSessionToken.mockReturnValue('session-token');
-    mockGetSessionUser.mockReturnValue({ login: 'mona', name: 'Mona', avatarUrl: 'https://example.com/mona.png' });
+    mockGetSessionUser.mockReturnValue({
+      login: 'mona',
+      name: 'Mona',
+      avatarUrl: 'https://example.com/mona.png',
+    });
 
     const pendingMeta = createDeferred<RepoMetadata>();
     mockGetRepoMetadata.mockImplementation(() => pendingMeta.promise);
@@ -313,11 +315,17 @@ describe('useRepoData', () => {
     const seenDocIds: Array<string | null | undefined> = [];
     const seenReadOnlyLoading: boolean[] = [];
     const seenNeedsInstall: boolean[] = [];
+    const seenCanEdit: boolean[] = [];
     const { result } = renderHook(() => {
-      const value = useRepoData({ slug, route: { kind: 'repo', owner: 'acme', repo: 'docs' }, onRecordRecent });
+      const value = useRepoData({
+        slug,
+        route: { kind: 'repo', owner: 'acme', repo: 'docs' },
+        onRecordRecent,
+      });
       seenDocIds.push(value.state.doc?.id);
       seenReadOnlyLoading.push(value.state.readOnlyLoading);
       seenNeedsInstall.push(value.state.needsInstall);
+      seenCanEdit.push(value.state.canEdit);
       return value;
     });
 
@@ -334,5 +342,6 @@ describe('useRepoData', () => {
     expect(seenDocIds.every((id) => id === noteId)).toBe(true);
     expect(seenReadOnlyLoading.every((flag) => flag === false)).toBe(true);
     expect(seenNeedsInstall.every((flag) => flag === false)).toBe(true);
+    expect(seenCanEdit.every((flag) => flag === true)).toBe(true);
   });
 });
