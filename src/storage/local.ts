@@ -2,7 +2,7 @@ export type NoteMeta = {
   id: string;
   path: string;
   title: string;
-  dir?: string; // "" for root
+  dir: string;
   updatedAt: number;
 };
 
@@ -63,8 +63,10 @@ export class LocalStore {
     this.notePrefix = `${repoKey(this.slug, 'note')}:`;
     this.foldersKey = repoKey(this.slug, FOLDERS_SUFFIX);
     this.index = this.loadIndex();
-    // Migration/backfill: ensure dir is present and folders index is built
-    this.backfillDirsAndFolders();
+    // ensure `folders` index is built
+    // TODO do we need this? we should assume a certain local storage layout and parse strictly to assert it is satisfied
+    // that layout should be documented clearly in the form of types and zod schemas
+    this.backfillFolders();
     if (seedWelcome && this.index.length === 0) {
       this.createNote('Welcome', WELCOME_NOTE);
       this.index = this.loadIndex();
@@ -117,7 +119,7 @@ export class LocalStore {
     if (!doc) return;
     let fromPath = doc.path;
     let safe = ensureValidTitle(title || 'Untitled');
-    let normDir = normalizeDir(doc.dir ?? extractDir(fromPath));
+    let normDir = normalizeDir(doc.dir);
     let path = joinPath(normDir, `${safe}.md`);
     let updatedAt = Date.now();
     let next: NoteDoc = { ...doc, title: safe, path, dir: normDir, updatedAt };
@@ -255,7 +257,7 @@ export class LocalStore {
     // Update notes under moved folder
     let idx = this.loadIndex();
     for (let meta of idx) {
-      let dir = normalizeDir(meta.dir ?? extractDir(meta.path));
+      let dir = normalizeDir(meta.dir);
       if (dir === from || dir.startsWith(from + '/')) {
         let rest = dir.slice(from.length);
         let nextDir = normalizeDir(to + rest);
@@ -281,7 +283,7 @@ export class LocalStore {
     // Delete contained notes (record tombstones)
     let idx = this.loadIndex();
     for (let meta of idx.slice()) {
-      let dir = normalizeDir(meta.dir ?? extractDir(meta.path));
+      let dir = normalizeDir(meta.dir);
       if (dir === target || dir.startsWith(target + '/')) {
         this.deleteNote(meta.id);
       }
@@ -328,39 +330,21 @@ export class LocalStore {
   private touchIndex(id: string, patch: Partial<NoteMeta>) {
     let idx = this.loadIndex();
     let i = idx.findIndex((n) => n.id === id);
-    if (i >= 0) idx[i] = { ...idx[i], ...patch } as NoteMeta;
+    if (i >= 0) idx[i] = { ...idx[i]!, ...patch };
     localStorage.setItem(this.indexKey, JSON.stringify(idx));
     this.index = idx;
     debugLog(this.slug, 'touchIndex', { id, patch });
   }
 
-  private backfillDirsAndFolders() {
+  // TODO get rid of
+  private backfillFolders() {
     let idx = this.loadIndex();
-    let changed = false;
     let folderSet = new Set<string>(this.listFolders());
-    for (let i = 0; i < idx.length; i++) {
-      let meta = idx[i];
-      if (!meta) continue;
-      let needDir = meta.dir === undefined;
-      if (needDir) {
-        let dir = extractDir(meta.path);
-        if (dir !== '') folderSet.add(dir);
-        idx[i] = { ...meta, dir } as NoteMeta;
-        // Also patch the stored document
-        let dr = localStorage.getItem(this.noteKey(meta.id));
-        if (dr) {
-          try {
-            let doc = JSON.parse(dr) as NoteDoc;
-            let next: NoteDoc = { ...doc, dir };
-            localStorage.setItem(this.noteKey(meta.id), JSON.stringify(next));
-          } catch {}
-        }
-        changed = true;
-      } else if ((meta.dir ?? '') !== '') {
-        folderSet.add(normalizeDir(meta.dir ?? ''));
+    for (let meta of idx) {
+      if (meta.dir !== '') {
+        folderSet.add(normalizeDir(meta.dir));
       }
     }
-    if (changed) localStorage.setItem(this.indexKey, JSON.stringify(idx));
     localStorage.setItem(this.foldersKey, JSON.stringify(Array.from(folderSet).sort()));
   }
 
@@ -560,7 +544,7 @@ export function moveNotePath(slug: string, id: string, toPath: string) {
   if (!docRaw) return;
   let doc: NoteDoc;
   try {
-    doc = JSON.parse(docRaw) as NoteDoc;
+    doc = JSON.parse(docRaw);
   } catch {
     return;
   }
@@ -571,8 +555,8 @@ export function moveNotePath(slug: string, id: string, toPath: string) {
   let idx = loadIndexForSlug(slug);
   let j = idx.findIndex((n) => n.id === id);
   if (j >= 0) {
-    let old = idx[j] as NoteMeta;
-    idx[j] = { id: old.id, path: toPath, title: old.title, dir: nextDir, updatedAt } as NoteMeta;
+    let old = idx[j]!;
+    idx[j] = { id: old.id, path: toPath, title: old.title, dir: nextDir, updatedAt };
   }
   localStorage.setItem(repoKey(slug, 'index'), JSON.stringify(idx));
   debugLog(slug, 'moveNotePath', { id, toPath });
@@ -582,7 +566,7 @@ function loadIndexForSlug(slug: string): NoteMeta[] {
   let raw = localStorage.getItem(repoKey(slug, 'index'));
   if (!raw) return [];
   try {
-    return JSON.parse(raw) as NoteMeta[];
+    return JSON.parse(raw);
   } catch {
     return [];
   }
@@ -591,7 +575,7 @@ function loadIndexForSlug(slug: string): NoteMeta[] {
 function touchIndexUpdatedAt(slug: string, id: string, updatedAt: number) {
   let idx = loadIndexForSlug(slug);
   let i = idx.findIndex((n) => n.id === id);
-  if (i >= 0) idx[i] = { ...idx[i], updatedAt } as NoteMeta;
+  if (i >= 0) idx[i] = { ...idx[i]!, updatedAt };
   localStorage.setItem(repoKey(slug, 'index'), JSON.stringify(idx));
 }
 

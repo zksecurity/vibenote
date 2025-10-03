@@ -93,13 +93,16 @@ export function RepoView(props: RepoViewProps) {
 }
 
 function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps) {
+  // ORIGINAL STATE AND MAIN HOOKS
+
+  // Local storage wrapper
   const store = useMemo(() => {
     if (route.kind === 'repo') {
       return new LocalStore(slug);
     }
     return new LocalStore(slug, { seedWelcome: true });
   }, [slug, route.kind]);
-  const { notes, folders, notifyStoreListeners } = useRepoStore(store);
+  const { localNotes, localFolders, notifyStoreListeners } = useRepoStore(store);
 
   // Hold the currently loaded read-only note so the editor can render remote content.
   const [readOnlyDoc, setReadOnlyDoc] = useState<NoteDoc | null>(null);
@@ -114,6 +117,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
   const [sessionToken, setSessionToken] = useState(getAppSessionToken);
 
   // Carry the latest sync status message shown across the workspace.
+  // TODO make this disappear after a timeout
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
 
   // Track whether this repo slug has already been linked to GitHub sync.
@@ -123,8 +127,11 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
   const [user, setUser] = useState(getAppSessionUser);
   const userAvatarSrc = user?.avatarDataUrl ?? user?.avatarUrl ?? undefined;
 
-  // compute repo access state and some derived values
+  // Query GitHub for repo access state and other metadata.
   const repoAccess = useRepoAccess({ route, sessionToken, linked });
+
+  // DERIVED STATE (and hooks that depend on it)
+
   const manageUrl = repoAccess.manageUrl;
   const accessStatusReady =
     repoAccess.status === 'ready' || repoAccess.status === 'rate-limited' || repoAccess.status === 'error';
@@ -139,6 +146,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
 
   const needsInstallForPrivate = repoAccess.needsInstall;
   const isRateLimited = repoAccess.status === 'rate-limited';
+
   const { autosync, setAutosync, scheduleAutoSync, performSync, syncing } = useAutosync({
     slug,
     route,
@@ -148,13 +156,68 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     canEdit,
     notifyStoreListeners,
   });
-  const { activeId, setActiveId } = useActiveNote({
-    slug,
-    store,
-    notes,
-    canEdit,
-  });
-  const initialPullRef = useRef({ done: false });
+
+  // TODO why does this depend on _local notes_ rather than active notes?
+  const { activeId, setActiveId } = useActiveNote({ slug, store, notes: localNotes, canEdit });
+
+  const localDoc = useMemo(() => {
+    if (!canEdit) return null;
+    if (!activeId) return null;
+    return store.loadNote(activeId);
+  }, [canEdit, activeId, store, localNotes]);
+
+  const activeNotes = isReadOnly ? readOnlyNotes : localNotes;
+
+  const doc = canEdit ? localDoc : readOnlyDoc;
+
+  // Derive the folder set from whichever source is powering the tree.
+  const activeFolders = useMemo(() => {
+    if (isReadOnly) {
+      const set = new Set<string>();
+      for (const note of readOnlyNotes) {
+        if (!note.dir) continue;
+        let current = note.dir.replace(/(^\/+|\/+?$)/g, '');
+        // we also need all ancestor folders
+        while (current) {
+          set.add(current);
+          const idx = current.lastIndexOf('/');
+          current = idx >= 0 ? current.slice(0, idx) : '';
+        }
+      }
+      return Array.from(set).sort();
+    }
+    return localFolders;
+  }, [localFolders, isReadOnly, readOnlyNotes]);
+
+  // CALLBACKS / HELPERS
+
+  // Fetch the latest contents when a read-only file is selected from the tree.
+  const loadReadOnlyNote = useCallback(
+    async (id: string) => {
+      const entry = readOnlyNotes.find((n) => n.id === id);
+      if (!entry) return;
+      const cfg = remoteConfigForSlug(slug, repoAccess.defaultBranch);
+      try {
+        const remote = await pullNote(cfg, entry.path);
+        if (!remote) return;
+        setReadOnlyDoc({
+          id: entry.id,
+          path: entry.path,
+          title: entry.title,
+          dir: entry.dir,
+          text: remote.text,
+          updatedAt: Date.now(),
+          lastRemoteSha: remote.sha,
+          lastSyncedHash: hashText(remote.text),
+        });
+      } catch (error) {
+        console.error(error);
+      }
+    },
+    [readOnlyNotes, slug, repoAccess.defaultBranch]
+  );
+
+  // EFFECTS
 
   // Remember recently opened repos once we know the current repo is reachable.
   useEffect(() => {
@@ -169,6 +232,8 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
   }, [slug, route, linked, onRecordRecent, repoAccess.level]);
 
   // Kick off the one-time remote import when visiting a writable repo we have not linked yet.
+  const initialPullRef = useRef({ done: false });
+
   useEffect(() => {
     (async () => {
       if (route.kind !== 'repo') return;
@@ -266,36 +331,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     };
   }, [isReadOnly, slug, repoAccess.defaultBranch]);
 
-  const onConnect = async () => {
-    try {
-      const result = await signInWithGitHubApp();
-      if (result) {
-        setSessionToken(result.token);
-        setUser(result.user);
-      }
-    } catch (e) {
-      console.error(e);
-      setSyncMsg('Failed to sign in');
-    }
-  };
-
-  const openAccessSetup = async () => {
-    try {
-      // the app is already installed and we go straight into the right user's settings to manage repos
-      if (manageUrl && repoAccess.metadata?.repoSelected === false) {
-        window.open(manageUrl, '_blank', 'noopener');
-        return;
-      }
-      // otherwise, we build a link that will first prompt to select the organization/user to install in
-      if (route.kind !== 'repo') return;
-      const url = await apiGetInstallUrl(route.owner, route.repo, window.location.href);
-      window.open(url, '_blank', 'noopener');
-    } catch (e) {
-      console.error(e);
-      setSyncMsg('Failed to open GitHub');
-    }
-  };
-
   // Attempt a last-minute sync via the Service Worker so pending edits survive tab closure.
   useEffect(() => {
     if (route.kind !== 'repo') return;
@@ -350,6 +385,41 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     };
   }, [route.kind, sessionToken, linked, slug, canEdit, store, repoAccess.defaultBranch]);
 
+  // CLICK HANDLERS
+
+  // "Connect GitHub" button in the header
+  const onConnect = async () => {
+    try {
+      const result = await signInWithGitHubApp();
+      if (result) {
+        setSessionToken(result.token);
+        setUser(result.user);
+      }
+    } catch (e) {
+      console.error(e);
+      setSyncMsg('Failed to sign in');
+    }
+  };
+
+  // "Get Write Access" or "Get Read/Write Access" button
+  const openAccessSetup = async () => {
+    try {
+      // the app is already installed and we go straight into the right user's settings to manage repos
+      if (manageUrl && repoAccess.metadata?.repoSelected === false) {
+        window.open(manageUrl, '_blank', 'noopener');
+        return;
+      }
+      // otherwise, we build a link that will first prompt to select the organization/user to install in
+      if (route.kind !== 'repo') return;
+      const url = await apiGetInstallUrl(route.owner, route.repo, window.location.href);
+      window.open(url, '_blank', 'noopener');
+    } catch (e) {
+      console.error(e);
+      setSyncMsg('Failed to open GitHub');
+    }
+  };
+
+  // "Sign out" button in the account menu
   const onSignOut = async () => {
     try {
       await signOutFromGitHubApp();
@@ -371,6 +441,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     setSyncMsg('Signed out');
   };
 
+  // "Sync" button in the header
   const onSyncNow = async () => {
     try {
       setSyncMsg(null);
@@ -392,59 +463,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     }
   };
 
-  const activeNotes = isReadOnly ? readOnlyNotes : notes;
-  const localDoc = useMemo(() => {
-    if (!canEdit) return null;
-    if (!activeId) return null;
-    return store.loadNote(activeId);
-  }, [canEdit, activeId, store, notes]);
-  const doc = canEdit ? localDoc : readOnlyDoc;
-
-  // Derive the folder set from whichever source is powering the tree (and include ancestor dirs for read-only data).
-  const activeFolders = useMemo(() => {
-    if (isReadOnly) {
-      const set = new Set<string>();
-      for (const note of readOnlyNotes) {
-        if (!note.dir) continue;
-        let current = note.dir.replace(/(^\/+|\/+?$)/g, '');
-        while (current) {
-          set.add(current);
-          const idx = current.lastIndexOf('/');
-          current = idx >= 0 ? current.slice(0, idx) : '';
-        }
-      }
-      return Array.from(set).sort();
-    }
-    return folders;
-  }, [folders, isReadOnly, readOnlyNotes]);
-
-  // Fetch the latest contents when a read-only file is selected from the tree.
-  const loadReadOnlyNote = useCallback(
-    async (id: string) => {
-      const entry = readOnlyNotes.find((n) => n.id === id);
-      if (!entry) return;
-      const cfg = remoteConfigForSlug(slug, repoAccess.defaultBranch);
-      try {
-        const remote = await pullNote(cfg, entry.path);
-        if (!remote) return;
-        setReadOnlyDoc({
-          id: entry.id,
-          path: entry.path,
-          title: entry.title,
-          dir: entry.dir,
-          text: remote.text,
-          updatedAt: Date.now(),
-          lastRemoteSha: remote.sha,
-          lastSyncedHash: hashText(remote.text),
-        });
-      } catch (error) {
-        console.error(error);
-      }
-    },
-    [readOnlyNotes, slug, repoAccess.defaultBranch, setReadOnlyDoc]
-  );
-
-  // UI STATE
+  // UI STATE AND EFFECTS
 
   const showSidebar = canEdit || isReadOnly;
   const layoutClass = showSidebar ? '' : 'single';
@@ -623,10 +642,10 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
               </div>
             </div>
             <FileSidebar
-              canEdit={canEdit}
               notes={activeNotes}
+              folders={activeFolders}
+              canEdit={canEdit}
               slug={slug}
-              activeFolders={activeFolders}
               activeId={activeId}
               setActiveId={setActiveId}
               closeSidebar={() => setSidebarOpen(false)}
@@ -944,8 +963,8 @@ function useRepoStore(store: LocalStore) {
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
   return {
-    notes: snapshot.notes,
-    folders: snapshot.folders,
+    localNotes: snapshot.notes,
+    localFolders: snapshot.folders,
     notifyStoreListeners: emit,
   };
 }
@@ -1166,14 +1185,14 @@ function useCollapsedFolders({
 }
 
 type FileSidebarProps = {
-  canEdit: boolean;
   notes: (NoteMeta | ReadOnlyNote)[];
-  slug: string;
-  activeFolders: string[];
+  folders: string[];
+  canEdit: boolean;
   activeId: string | null;
   setActiveId: (id: string | null) => void;
-  closeSidebar: () => void;
+  slug: string;
   store: LocalStore;
+  closeSidebar: () => void;
   notifyStoreListeners: () => void;
   scheduleAutoSync: (delay?: number) => void;
   setSyncMsg: (msg: string | null) => void;
@@ -1181,11 +1200,11 @@ type FileSidebarProps = {
 };
 
 function FileSidebar(props: FileSidebarProps) {
-  const {
+  let {
     canEdit,
     notes,
     slug,
-    activeFolders,
+    folders,
     activeId,
     setActiveId,
     closeSidebar,
@@ -1197,32 +1216,21 @@ function FileSidebar(props: FileSidebarProps) {
   } = props;
 
   // Derive file entries for the tree component from the provided notes list.
-  const files = useMemo<FileEntry[]>(() => {
-    return notes.map((note) => {
-      return {
-        id: note.id,
-        name: note.title || 'Untitled',
-        path: note.path,
-        // no dir is treated as root -- TODO change type to enforce dir is present
-        dir: note.dir ?? '',
-      };
-    });
-  }, [notes]);
+  let files = useMemo<FileEntry[]>(
+    () => notes.map((note) => ({ id: note.id, name: note.title, path: note.path, dir: note.dir })),
+    [notes]
+  );
 
   // Maintain collapsed state against the active folder list so disclosure toggles persist.
-  const { collapsed: collapsedFolders, setCollapsedMap } = useCollapsedFolders({
-    slug,
-    folders: activeFolders,
-    canEdit,
-  });
+  let { collapsed, setCollapsedMap } = useCollapsedFolders({ slug, folders, canEdit });
 
   // Track which item is highlighted so new actions know their context.
-  const [selection, setSelection] = useState<
+  let [selection, setSelection] = useState<
     { kind: 'folder'; dir: string } | { kind: 'file'; id: string } | null
   >(null);
 
   // Drive inline creation rows in the tree with a deterministic key.
-  const [newEntry, setNewEntry] = useState<{
+  let [newEntry, setNewEntry] = useState<{
     kind: 'file' | 'folder';
     parentDir: string;
     key: number;
@@ -1233,31 +1241,28 @@ function FileSidebar(props: FileSidebarProps) {
     if (!canEdit) setNewEntry(null);
   }, [canEdit]);
 
-  function getSelectedDir() {
+  // helper to get the correct parent directory for new notes/folders
+  function selectedDir() {
     if (selection?.kind === 'folder') return selection.dir;
     if (selection?.kind === 'file') {
-      let fileDirMap = new Map<string, string>();
-      for (let file of files) fileDirMap.set(file.id, file.dir);
-      return fileDirMap.get(selection.id) ?? '';
+      return files.find((f) => f.id === selection.id)?.dir ?? '';
     }
     return '';
   }
 
   const handleNewNoteClick = () => {
     if (!canEdit) return;
-    const parentDir = getSelectedDir();
-    setNewEntry({ kind: 'file', parentDir, key: Date.now() });
+    setNewEntry({ kind: 'file', parentDir: selectedDir(), key: Date.now() });
   };
 
   const handleNewFolderClick = () => {
     if (!canEdit) return;
-    const parentDir = getSelectedDir();
-    setNewEntry({ kind: 'folder', parentDir, key: Date.now() });
+    setNewEntry({ kind: 'folder', parentDir: selectedDir(), key: Date.now() });
   };
 
   const handleCreateFile = (dir: string, name: string) => {
     if (!canEdit) return;
-    const id = store.createNote(name, '', dir);
+    let id = store.createNote(name, '', dir);
     notifyStoreListeners();
     setActiveId(id);
     scheduleAutoSync();
@@ -1291,7 +1296,7 @@ function FileSidebar(props: FileSidebarProps) {
     if (!canEdit) return;
     store.deleteNote(id);
     notifyStoreListeners();
-    const list = store.listNotes();
+    let list = store.listNotes();
     if (activeId === id) setActiveId(list[0]?.id ?? null);
     scheduleAutoSync();
   };
@@ -1310,11 +1315,11 @@ function FileSidebar(props: FileSidebarProps) {
 
   const handleDeleteFolder = (dir: string) => {
     if (!canEdit) return;
-    const hasNotes = files.some((file) => file.dir === dir || file.dir.startsWith(dir + '/'));
+    let hasNotes = files.some((file) => file.dir === dir || file.dir.startsWith(dir + '/'));
     if (hasNotes && !window.confirm('Delete folder and all contained notes?')) return;
     store.deleteFolder(dir);
     notifyStoreListeners();
-    const list = store.listNotes();
+    let list = store.listNotes();
     if (activeId && !list.some((note) => note.id === activeId)) setActiveId(list[0]?.id ?? null);
     scheduleAutoSync();
   };
@@ -1323,7 +1328,7 @@ function FileSidebar(props: FileSidebarProps) {
     if (!canEdit) {
       setActiveId(id);
       closeSidebar();
-      void loadReadOnlyNote(id);
+      loadReadOnlyNote(id);
       return;
     }
     setActiveId(id);
@@ -1345,9 +1350,9 @@ function FileSidebar(props: FileSidebarProps) {
       <div className="sidebar-body">
         <FileTree
           files={files}
-          folders={activeFolders}
+          folders={folders}
           activeId={activeId}
-          collapsed={collapsedFolders}
+          collapsed={collapsed}
           onCollapsedChange={setCollapsedMap}
           onSelectionChange={setSelection}
           onSelectFile={handleSelectFile}

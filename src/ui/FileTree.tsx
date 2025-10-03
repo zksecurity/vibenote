@@ -601,7 +601,11 @@ function Icon({
   );
 }
 
-function setCollapsedValue(map: Record<string, boolean>, dir: string, value: boolean): Record<string, boolean> | null {
+function setCollapsedValue(
+  map: Record<string, boolean>,
+  dir: string,
+  value: boolean
+): Record<string, boolean> | null {
   if (dir === '') return null;
   if (map[dir] === value) return null;
   let next: Record<string, boolean> = { ...map };
