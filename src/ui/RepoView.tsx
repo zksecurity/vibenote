@@ -282,7 +282,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
               onDeleteNote={deleteNote}
               onRenameFolder={renameFolder}
               onDeleteFolder={deleteFolder}
-              closeSidebar={closeSidebar}
             />
             {linked && canEdit ? (
               <div className="repo-autosync-toggle">
@@ -425,14 +424,13 @@ type FileSidebarProps = {
   canEdit: boolean;
   slug: string;
   activeId: string | null;
-  onSelect: (id: string) => Promise<void> | void;
+  onSelect: (id: string) => void;
   onCreateNote: (dir: string, name: string) => string | null;
   onCreateFolder: (parentDir: string, name: string) => void;
   onRenameNote: (id: string, title: string) => void;
   onDeleteNote: (id: string) => void;
   onRenameFolder: (dir: string, newName: string) => void;
   onDeleteFolder: (dir: string) => void;
-  closeSidebar: () => void;
 };
 
 function FileSidebar(props: FileSidebarProps) {
@@ -449,7 +447,6 @@ function FileSidebar(props: FileSidebarProps) {
     onDeleteNote,
     onRenameFolder,
     onDeleteFolder,
-    closeSidebar,
   } = props;
 
   // Derive file entries for the tree component from the provided notes list.
@@ -512,42 +509,6 @@ function FileSidebar(props: FileSidebarProps) {
     setNewEntry({ kind: 'folder', parentDir: selectedDir(), key: Date.now() });
   };
 
-  const handleCreateFile = (dir: string, name: string) => {
-    if (!canEdit) return;
-    let id = onCreateNote(dir, name);
-    return id ?? undefined;
-  };
-
-  const handleCreateFolder = (parentDir: string, name: string) => {
-    if (!canEdit) return;
-    onCreateFolder(parentDir, name);
-  };
-
-  const handleRenameFile = (id: string, title: string) => {
-    if (!canEdit) return;
-    onRenameNote(id, title);
-  };
-
-  const handleDeleteFile = (id: string) => {
-    if (!canEdit) return;
-    onDeleteNote(id);
-  };
-
-  const handleRenameFolder = (dir: string, newName: string) => {
-    if (!canEdit) return;
-    onRenameFolder(dir, newName);
-  };
-
-  const handleDeleteFolder = (dir: string) => {
-    if (!canEdit) return;
-    onDeleteFolder(dir);
-  };
-
-  const handleSelectFile = (id: string) => {
-    void onSelect(id);
-    closeSidebar();
-  };
-
   return (
     <>
       {canEdit && (
@@ -568,13 +529,13 @@ function FileSidebar(props: FileSidebarProps) {
           collapsed={collapsed}
           onCollapsedChange={setCollapsedMap}
           onSelectionChange={setSelection}
-          onSelectFile={handleSelectFile}
-          onRenameFile={handleRenameFile}
-          onDeleteFile={handleDeleteFile}
-          onCreateFile={handleCreateFile}
-          onCreateFolder={handleCreateFolder}
-          onRenameFolder={handleRenameFolder}
-          onDeleteFolder={handleDeleteFolder}
+          onSelectFile={onSelect}
+          onRenameFile={onRenameNote}
+          onDeleteFile={onDeleteNote}
+          onCreateFile={onCreateNote}
+          onCreateFolder={onCreateFolder}
+          onRenameFolder={onRenameFolder}
+          onDeleteFolder={onDeleteFolder}
           newEntry={canEdit ? newEntry : null}
           onFinishCreate={() => setNewEntry(null)}
         />

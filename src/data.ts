@@ -95,24 +95,32 @@ export type {
 };
 
 type RepoDataState = {
+  // session state
   sessionToken: string | null;
   user: AppUser | null;
+
+  // repo access state
+  // TODO clean up
   repoAccess: RepoAccessState;
   linked: boolean;
   canEdit: boolean;
   isReadOnly: boolean;
-  doc: NoteDoc | null;
-  activeId: string | null;
-  activeNotes: RepoNoteListItem[];
-  activeFolders: string[];
-  readOnlyLoading: boolean;
-  autosync: boolean;
-  syncing: boolean;
   syncMessage: string | null;
   needsInstallForPrivate: boolean;
   isRateLimited: boolean;
   isMetadataError: boolean;
   manageUrl: string | null;
+
+  // current note state
+  doc: NoteDoc | null;
+  activeId: string | null;
+  activeNotes: RepoNoteListItem[];
+  activeFolders: string[];
+  readOnlyLoading: boolean; // TODO why don't we have a loading state when fetching writable notes?
+
+  // sync state
+  autosync: boolean;
+  syncing: boolean;
 };
 
 type RepoDataActions = {
@@ -131,12 +139,10 @@ type RepoDataActions = {
   updateNoteText: (id: string, text: string) => void;
 };
 
-type RepoDataResult = {
+function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
   state: RepoDataState;
   actions: RepoDataActions;
-};
-
-function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): RepoDataResult {
+} {
   // ORIGINAL STATE AND MAIN HOOKS
   // Local storage wrapper
   const store = useMemo(() => {
