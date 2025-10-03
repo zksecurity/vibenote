@@ -311,9 +311,13 @@ describe('useRepoData', () => {
     mockGetRepoMetadata.mockImplementation(() => pendingMeta.promise);
 
     const seenDocIds: Array<string | null | undefined> = [];
+    const seenReadOnlyLoading: boolean[] = [];
+    const seenNeedsInstall: boolean[] = [];
     const { result } = renderHook(() => {
       const value = useRepoData({ slug, route: { kind: 'repo', owner: 'acme', repo: 'docs' }, onRecordRecent });
       seenDocIds.push(value.state.doc?.id);
+      seenReadOnlyLoading.push(value.state.readOnlyLoading);
+      seenNeedsInstall.push(value.state.needsInstall);
       return value;
     });
 
@@ -328,5 +332,7 @@ describe('useRepoData', () => {
     await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
     expect(result.current.state.doc?.id).toBe(noteId);
     expect(seenDocIds.every((id) => id === noteId)).toBe(true);
+    expect(seenReadOnlyLoading.every((flag) => flag === false)).toBe(true);
+    expect(seenNeedsInstall.every((flag) => flag === false)).toBe(true);
   });
 });
