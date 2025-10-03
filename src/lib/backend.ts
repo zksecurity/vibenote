@@ -125,23 +125,20 @@ async function resolveInstallationAccess(
   installed: boolean;
   repoSelected: boolean;
 }> {
-  const installations = await listUserInstallations(token);
-  if (installations.length === 0) {
-    return { installed: false, repoSelected: false };
-  }
+  let installations = await listUserInstallations(token);
+  // we only consider installations whose account login matches the repo owner
+  // (probably there is exactly one)
+  let ownerLower = owner.toLowerCase();
+  installations = installations.filter((inst) => inst.accountLogin?.toLowerCase() === ownerLower);
 
-  const ownerLower = owner.toLowerCase();
-  const repoLower = repo.toLowerCase();
+  // the owner does not match any installation account login
+  if (installations.length === 0) return { installed: false, repoSelected: false };
+
+  let repoLower = repo.toLowerCase();
   const targetFullName = `${ownerLower}/${repoLower}`;
 
-  // First pass: installations whose account login matches the repo owner
-  let matchedInstallation = false;
-  let matchedSelection: 'all' | 'selected' | null = null;
-  for (const inst of installations) {
-    if (!inst.accountLogin || inst.accountLogin.toLowerCase() !== ownerLower) continue;
+  for (let inst of installations) {
     if (!Number.isFinite(inst.id)) continue;
-    matchedInstallation = true;
-    matchedSelection = inst.repositorySelection;
     if (inst.repositorySelection === 'all') {
       return { installed: true, repoSelected: true };
     }
@@ -156,21 +153,7 @@ async function resolveInstallationAccess(
     }
   }
 
-  if (matchedInstallation) {
-    return { installed: true, repoSelected: false };
-  }
-
-  // Fallback: check other installations in case repo is granted across accounts (rare)
-  for (const inst of installations) {
-    if (!Number.isFinite(inst.id)) continue;
-    if (inst.repositorySelection !== 'selected') continue;
-    const hasRepo = await installationIncludesRepo(token, inst.id, targetFullName);
-    if (hasRepo) {
-      return { installed: true, repoSelected: true };
-    }
-  }
-
-  return { installed: false, repoSelected: false };
+  return { installed: true, repoSelected: false };
 }
 
 type InstallationSummary = {

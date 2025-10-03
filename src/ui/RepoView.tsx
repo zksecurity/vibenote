@@ -33,40 +33,27 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
   const {
     sessionToken,
     user,
-    linked,
+
     canEdit,
-    isReadOnly,
+    canRead,
+    canSync,
+    repoQueryStatus,
+    needsInstall,
+    readOnlyLoading,
+
     doc,
     activeId,
     activeNotes,
     activeFolders,
-    readOnlyLoading,
+
     autosync,
     syncing,
-    syncMessage,
-    needsInstallForPrivate,
-    isRateLimited,
-    isMetadataError,
+    statusMessage,
   } = state;
-  const {
-    signIn,
-    signOut,
-    openRepoAccess: openAccessSetup,
-    syncNow,
-    setAutosync,
-    selectNote,
-    createNote,
-    createFolder,
-    renameNote,
-    deleteNote,
-    renameFolder,
-    deleteFolder,
-    updateNoteText,
-  } = actions;
 
-  const syncMsg = syncMessage;
   const userAvatarSrc = user?.avatarDataUrl ?? user?.avatarUrl ?? undefined;
-  const showSidebar = canEdit || isReadOnly;
+  const showSidebar = canRead;
+  const isReadOnly = !canEdit && canRead;
   const layoutClass = showSidebar ? '' : 'single';
 
   // Pure UI state: sidebar visibility and account menu.
@@ -89,8 +76,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
 
   // Keyboard shortcuts: Cmd/Ctrl+K and "g" then "r" open the repo switcher.
   const repoShortcutLabel = primaryModifier === 'meta' ? '⌘K' : 'Ctrl+K';
-  const repoButtonBaseTitle =
-    route.kind === 'repo' ? (linked ? 'Change repository' : 'Choose repository') : 'Choose repository';
+  const repoButtonBaseTitle = route.kind === 'repo' ? 'Change repository' : 'Choose repository';
   const repoButtonTitle = `${repoButtonBaseTitle} (${repoShortcutLabel})`;
 
   useEffect(() => {
@@ -192,15 +178,15 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
         </div>
         <div className="topbar-actions">
           {!sessionToken ? (
-            <button className="btn primary" onClick={signIn}>
+            <button className="btn primary" onClick={actions.signIn}>
               Connect GitHub
             </button>
           ) : (
             <>
-              {linked && canEdit && (
+              {canSync && (
                 <button
                   className={`btn secondary sync-btn ${syncing ? 'is-syncing' : ''}`}
-                  onClick={syncNow}
+                  onClick={actions.syncNow}
                   disabled={syncing}
                   aria-label={syncing ? 'Syncing' : 'Sync now'}
                   title={syncing ? 'Syncing…' : 'Sync now'}
@@ -252,21 +238,21 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
               slug={slug}
               activeId={activeId}
               onSelect={async (id: string) => {
-                await selectNote(id);
+                await actions.selectNote(id);
                 setSidebarOpen(false);
               }}
-              onCreateNote={createNote}
-              onCreateFolder={createFolder}
-              onRenameNote={renameNote}
-              onDeleteNote={deleteNote}
-              onRenameFolder={renameFolder}
-              onDeleteFolder={deleteFolder}
+              onCreateNote={actions.createNote}
+              onCreateFolder={actions.createFolder}
+              onRenameNote={actions.renameNote}
+              onDeleteNote={actions.deleteNote}
+              onRenameFolder={actions.renameFolder}
+              onDeleteFolder={actions.deleteFolder}
             />
-            {linked && canEdit ? (
+            {canSync ? (
               <div className="repo-autosync-toggle">
                 <Toggle
                   checked={autosync}
-                  onChange={setAutosync}
+                  onChange={actions.setAutosync}
                   label="Autosync"
                   description="Runs background sync after edits and periodically."
                 />
@@ -281,7 +267,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                 <h2>Loading repository…</h2>
                 <p>Fetching files from GitHub. Hang tight.</p>
               </div>
-            ) : route.kind === 'repo' && needsInstallForPrivate ? (
+            ) : route.kind === 'repo' && needsInstall ? (
               <div className="empty-state">
                 <h2>Can't access this repository</h2>
                 <p>This repository is private or not yet enabled for the VibeNote GitHub App.</p>
@@ -294,7 +280,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                   , or grant access to all repositories (not recommended).
                 </p>
                 {sessionToken ? (
-                  <button className="btn primary" onClick={openAccessSetup}>
+                  <button className="btn primary" onClick={actions.openRepoAccess}>
                     Get Read/Write Access
                   </button>
                 ) : (
@@ -303,7 +289,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
               </div>
             ) : (
               <>
-                {isMetadataError && (
+                {repoQueryStatus === 'error' && (
                   <div className="alert warning">
                     <span className="badge">Offline</span>
                     <span className="alert-text">
@@ -311,7 +297,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                     </span>
                   </div>
                 )}
-                {!isMetadataError && isRateLimited && (
+                {repoQueryStatus === 'rate-limited' && (
                   <div className="alert warning">
                     <span className="badge">Limited</span>
                     <span className="alert-text">
@@ -324,7 +310,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                     <span className="badge">Read-only</span>
                     <span className="alert-text">You can view, but not edit files in this repository.</span>
                     {sessionToken ? (
-                      <button className="btn primary" onClick={openAccessSetup}>
+                      <button className="btn primary" onClick={actions.openRepoAccess}>
                         Get Write Access
                       </button>
                     ) : null}
@@ -335,9 +321,9 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                     <Editor
                       key={doc.id}
                       doc={doc}
-                      readOnly={isReadOnly || needsInstallForPrivate || !canEdit}
+                      readOnly={!canEdit}
                       onChange={(id, text) => {
-                        updateNoteText(id, text);
+                        actions.updateNoteText(id, text);
                       }}
                     />
                   </div>
@@ -354,10 +340,10 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
               </>
             )}
           </div>
-          {syncMsg && (
+          {statusMessage && (
             <div className="status-banner">
               <span>Status</span>
-              <span>{syncMsg}</span>
+              <span>{statusMessage}</span>
             </div>
           )}
         </section>
@@ -382,7 +368,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
           <button
             className="btn subtle full-width"
             onClick={async () => {
-              await signOut();
+              await actions.signOut();
               setMenuOpen(false);
             }}
           >

@@ -27,7 +27,6 @@ import {
   getInstallUrl as apiGetInstallUrl,
   type RepoMetadata,
 } from './lib/backend';
-import { fetchPublicRepoInfo } from './lib/github-public';
 import {
   buildRemoteConfig,
   pullNote,
@@ -37,52 +36,6 @@ import {
   type SyncSummary,
 } from './sync/git-sync';
 import type { Route } from './ui/routing';
-
-const AUTO_SYNC_MIN_INTERVAL_MS = 60_000;
-const AUTO_SYNC_DEBOUNCE_MS = 10_000;
-
-type RepoAccessLevel = 'none' | 'read' | 'write';
-type RepoAccessStatus = 'idle' | 'checking' | 'ready' | 'rate-limited' | 'error';
-
-type RepoAccessState = {
-  level: RepoAccessLevel;
-  status: RepoAccessStatus;
-  metadata: RepoMetadata | null;
-  defaultBranch: string | null;
-  error: string | null;
-  rateLimited: boolean;
-  needsInstall: boolean;
-  manageUrl: string | null;
-  isPrivate: boolean | null;
-};
-
-type ReadOnlyNote = { id: string; path: string; title: string; dir: string; sha?: string };
-
-const initialAccessState: RepoAccessState = {
-  level: 'none',
-  status: 'idle',
-  metadata: null,
-  defaultBranch: null,
-  error: null,
-  rateLimited: false,
-  needsInstall: false,
-  manageUrl: null,
-  isPrivate: null,
-};
-
-type RepoDataInputs = {
-  slug: string;
-  route: Route;
-  onRecordRecent: (entry: {
-    slug: string;
-    owner?: string;
-    repo?: string;
-    title?: string;
-    connected?: boolean;
-  }) => void;
-};
-
-type RepoNoteListItem = NoteMeta | ReadOnlyNote;
 
 export { useRepoData };
 export type {
@@ -94,33 +47,37 @@ export type {
   ReadOnlyNote,
 };
 
+const AUTO_SYNC_MIN_INTERVAL_MS = 60_000;
+const AUTO_SYNC_DEBOUNCE_MS = 10_000;
+
+type RepoNoteListItem = NoteMeta | ReadOnlyNote;
+
 type RepoDataState = {
   // session state
   sessionToken: string | null;
   user: AppUser | null;
 
   // repo access state
-  // TODO clean up
-  repoAccess: RepoAccessState;
-  linked: boolean;
   canEdit: boolean;
-  isReadOnly: boolean;
-  syncMessage: string | null;
-  needsInstallForPrivate: boolean;
-  isRateLimited: boolean;
-  isMetadataError: boolean;
+  canRead: boolean;
+  canSync: boolean;
+  needsInstall: boolean;
+  repoQueryStatus: RepoQueryStatus;
   manageUrl: string | null;
+  readOnlyLoading: boolean; // TODO why don't we have a loading state when fetching writable notes?
 
-  // current note state
+  // repo content
   doc: NoteDoc | null;
   activeId: string | null;
   activeNotes: RepoNoteListItem[];
   activeFolders: string[];
-  readOnlyLoading: boolean; // TODO why don't we have a loading state when fetching writable notes?
 
   // sync state
   autosync: boolean;
   syncing: boolean;
+
+  // general info
+  statusMessage: string | null;
 };
 
 type RepoDataActions = {
@@ -142,6 +99,20 @@ type RepoDataActions = {
   renameFolder: (dir: string, newName: string) => void;
   deleteFolder: (dir: string) => void;
   updateNoteText: (id: string, text: string) => void;
+};
+
+type ReadOnlyNote = { id: string; path: string; title: string; dir: string; sha?: string };
+
+type RepoDataInputs = {
+  slug: string;
+  route: Route;
+  onRecordRecent: (entry: {
+    slug: string;
+    owner?: string;
+    repo?: string;
+    title?: string;
+    connected?: boolean;
+  }) => void;
 };
 
 function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
@@ -173,7 +144,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
 
   // Carry the latest sync status message shown across the workspace.
   // TODO make this disappear after a timeout
-  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [statusMessage, setSyncMessage] = useState<string | null>(null);
 
   // Track whether this repo slug has already been linked to GitHub sync.
   const [linked, setLinked] = useState(() => isRepoLinked(slug));
@@ -189,17 +160,15 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
   const manageUrl = repoAccess.manageUrl;
   const accessStatusReady =
     repoAccess.status === 'ready' || repoAccess.status === 'rate-limited' || repoAccess.status === 'error';
-  const isMetadataError = repoAccess.status === 'error';
   const isReadOnly = repoAccess.level === 'read';
 
   // whether we treat the repo as locally writable
-  // note that we are optimistic about write access until the access check completes
+  // note that we are optimistic about write access until the access check completes,
+  // to avoid flickering the UI when revisiting a known writable repo
   const canEdit =
     route.kind === 'new' ||
     (!!sessionToken && (repoAccess.level === 'write' || (!accessStatusReady && linked)));
-
-  const needsInstallForPrivate = repoAccess.needsInstall;
-  const isRateLimited = repoAccess.status === 'rate-limited';
+  const canRead = canEdit || isReadOnly;
 
   const { autosync, setAutosync, scheduleAutoSync, performSync, syncing } = useAutosync({
     slug,
@@ -611,21 +580,22 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
   const state: RepoDataState = {
     sessionToken,
     user,
-    repoAccess,
-    linked,
+
+    canRead,
     canEdit,
-    isReadOnly,
+    canSync: linked && canEdit,
+    repoQueryStatus: repoAccess.status,
+    needsInstall: repoAccess.needsInstall,
+    readOnlyLoading,
+
     doc,
     activeId,
     activeNotes,
     activeFolders,
-    readOnlyLoading,
+
     autosync,
     syncing,
-    syncMessage,
-    needsInstallForPrivate,
-    isRateLimited,
-    isMetadataError,
+    statusMessage,
     manageUrl,
   };
 
@@ -648,6 +618,33 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
 
   return { state, actions };
 }
+
+type RepoAccessLevel = 'none' | 'read' | 'write';
+type RepoQueryStatus = 'idle' | 'checking' | 'ready' | 'rate-limited' | 'error';
+
+type RepoAccessState = {
+  level: RepoAccessLevel;
+  status: RepoQueryStatus;
+  metadata: RepoMetadata | null;
+  defaultBranch: string | null;
+  error: string | null;
+  rateLimited: boolean;
+  needsInstall: boolean;
+  manageUrl: string | null;
+  isPrivate: boolean | null;
+};
+
+const initialAccessState: RepoAccessState = {
+  level: 'none',
+  status: 'idle',
+  metadata: null,
+  defaultBranch: null,
+  error: null,
+  rateLimited: false,
+  needsInstall: false,
+  manageUrl: null,
+  isPrivate: null,
+};
 
 type RepoAccessParams = {
   route: Route;
@@ -714,7 +711,7 @@ function deriveAccessFromMetadata(input: {
     level = 'none';
   }
 
-  const status: RepoAccessStatus = meta.rateLimited ? 'rate-limited' : 'ready';
+  const status: RepoQueryStatus = meta.rateLimited ? 'rate-limited' : 'ready';
   const needsInstall = hasSession && level === 'none';
 
   return {
