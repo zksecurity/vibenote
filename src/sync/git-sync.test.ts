@@ -1,7 +1,11 @@
-import { beforeEach, describe, expect, test } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { LocalStore, listTombstones } from '../storage/local';
 
 declare const Buffer: { from(data: string, encoding: string): { toString(enc: string): string } };
+
+vi.mock('../auth/app-auth', () => ({
+  ensureFreshAccessToken: vi.fn().mockResolvedValue('test-token'),
+}));
 
 const globalAny = globalThis as {
   localStorage?: Storage;
@@ -55,10 +59,24 @@ class MockRemoteRepo {
   private owner = '';
   private repo = '';
   private sequence = 0;
+  private readonly defaultBranch = 'main';
+  private treeSequence = 0;
+  private blobs = new Map<string, string>();
+  private headByBranch = new Map<string, string>();
+  private treeRecords = new Map<string, Map<string, RemoteFile>>();
+  private commitRecords = new Map<string, { treeSha: string; files: Map<string, RemoteFile>; parents: string[] }>();
 
   configure(owner: string, repo: string) {
     this.owner = owner;
     this.repo = repo;
+  }
+
+  private cloneFiles(source: Map<string, RemoteFile>): Map<string, RemoteFile> {
+    const clone = new Map<string, RemoteFile>();
+    for (const [path, file] of source.entries()) {
+      clone.set(path, { text: file.text, sha: file.sha });
+    }
+    return clone;
   }
 
   snapshot(): Map<string, string> {
@@ -70,11 +88,17 @@ class MockRemoteRepo {
   }
 
   setFile(path: string, text: string) {
-    this.files.set(path, { text, sha: this.computeSha(text) });
+    const file = { text, sha: this.computeSha(text) };
+    this.files.set(path, file);
+    this.blobs.set(file.sha, file.text);
+    this.recordManualCommit();
   }
 
   deleteDirect(path: string) {
-    this.files.delete(path);
+    const existed = this.files.delete(path);
+    if (existed) {
+      this.recordManualCommit();
+    }
   }
 
   private computeSha(text: string): string {
@@ -85,6 +109,57 @@ class MockRemoteRepo {
   private nextCommit(): string {
     this.commits += 1;
     return `commit-${this.commits}`;
+  }
+
+  private nextTree(): string {
+    this.treeSequence += 1;
+    return `tree-${this.treeSequence}`;
+  }
+
+  private parseBody(body?: BodyInit | null): any {
+    if (!body) return null;
+    const text = typeof body === 'string' ? body : (body as any).toString();
+    if (!text) return null;
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
+  }
+
+  private matchesRepo(owner: string, repo: string): boolean {
+    return owner === this.owner && repo === this.repo;
+  }
+
+  private getCommitSnapshot(commitSha: string): Map<string, RemoteFile> | null {
+    const record = this.commitRecords.get(commitSha);
+    if (!record) return null;
+    return this.cloneFiles(record.files);
+  }
+
+  private setHead(branch: string, commitSha: string) {
+    const record = this.commitRecords.get(commitSha);
+    if (!record) return;
+    this.headByBranch.set(branch, commitSha);
+    this.files = this.cloneFiles(record.files);
+    for (const file of record.files.values()) {
+      this.blobs.set(file.sha, file.text);
+    }
+  }
+
+  private recordManualCommit() {
+    const snapshot = this.cloneFiles(this.files);
+    const treeSha = this.nextTree();
+    this.treeRecords.set(treeSha, snapshot);
+    const parent = this.headByBranch.get(this.defaultBranch);
+    const commitSha = this.nextCommit();
+    const parents = parent ? [parent] : [];
+    this.commitRecords.set(commitSha, {
+      treeSha,
+      files: this.cloneFiles(snapshot),
+      parents,
+    });
+    this.setHead(this.defaultBranch, commitSha);
   }
 
   private simpleHash(text: string): string {
@@ -106,13 +181,150 @@ class MockRemoteRepo {
       return this.makeResponse(201, {});
     }
 
-    const contentsMatch = pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/contents(.*)$/);
-    if (contentsMatch) {
-      const [, owner, repo, rest] = contentsMatch;
-      if (owner !== this.owner || repo !== this.repo) {
+    const refGetMatch = pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/git\/ref\/heads\/([^/]+)$/);
+    if (refGetMatch && method === 'GET') {
+      const owner = refGetMatch[1] ?? '';
+      const repo = refGetMatch[2] ?? '';
+      const branchSegment = refGetMatch[3] ?? '';
+      if (!this.matchesRepo(owner, repo)) {
         return this.makeResponse(404, { message: 'not found' });
       }
-      const rawPath = (rest ?? '').replace(/^\//, '');
+      const branch = decodeURIComponent(branchSegment);
+      const head = this.headByBranch.get(branch);
+      if (!head) {
+        return this.makeResponse(404, { message: 'not found' });
+      }
+      return this.makeResponse(200, {
+        ref: `refs/heads/${branch}`,
+        object: { sha: head, type: 'commit' },
+      });
+    }
+
+    if (pathname === `/repos/${this.owner}/${this.repo}/git/refs` && method === 'POST') {
+      const body = this.parseBody(init?.body);
+      const ref = typeof body?.ref === 'string' ? body.ref : '';
+      const sha = typeof body?.sha === 'string' ? body.sha : '';
+      if (!ref.startsWith('refs/heads/') || !this.commitRecords.has(sha)) {
+        return this.makeResponse(422, { message: 'invalid ref' });
+      }
+      const branch = ref.replace('refs/heads/', '');
+      this.setHead(branch, sha);
+      return this.makeResponse(201, { ref, object: { sha, type: 'commit' } });
+    }
+
+    const refUpdateMatch = pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/git\/refs\/heads\/([^/]+)$/);
+    if (refUpdateMatch && method === 'PATCH') {
+      const owner = refUpdateMatch[1] ?? '';
+      const repo = refUpdateMatch[2] ?? '';
+      const branchSegment = refUpdateMatch[3] ?? '';
+      if (!this.matchesRepo(owner, repo)) {
+        return this.makeResponse(404, { message: 'not found' });
+      }
+      const payload = this.parseBody(init?.body);
+      const sha = typeof payload?.sha === 'string' ? payload.sha : '';
+      if (!this.commitRecords.has(sha)) {
+        return this.makeResponse(404, { message: 'commit not found' });
+      }
+      const branch = decodeURIComponent(branchSegment);
+      this.setHead(branch, sha);
+      return this.makeResponse(200, { ref: `refs/heads/${branch}`, object: { sha, type: 'commit' } });
+    }
+
+    if (pathname === `/repos/${this.owner}/${this.repo}/git/trees` && method === 'POST') {
+      const body = this.parseBody(init?.body);
+      const entries = Array.isArray(body?.tree) ? body.tree : [];
+      const baseTreeValue = typeof body?.base_tree === 'string' ? body.base_tree : null;
+      const baseSnapshot = baseTreeValue && this.treeRecords.has(baseTreeValue)
+        ? this.cloneFiles(this.treeRecords.get(baseTreeValue) ?? this.files)
+        : this.cloneFiles(this.files);
+      const updatedEntries: Array<{ path: string; type: string; sha: string }> = [];
+      for (const entry of entries) {
+        if (!entry || typeof entry.path !== 'string') continue;
+        const path = entry.path;
+        if (entry.sha === null) {
+          baseSnapshot.delete(path);
+          continue;
+        }
+        if (typeof entry.content === 'string') {
+          const text = entry.content;
+          const sha = this.computeSha(text);
+          baseSnapshot.set(path, { text, sha });
+          this.blobs.set(sha, text);
+          updatedEntries.push({ path, type: 'blob', sha });
+        }
+      }
+      const treeSha = this.nextTree();
+      this.treeRecords.set(treeSha, baseSnapshot);
+      return this.makeResponse(201, { sha: treeSha, tree: updatedEntries });
+    }
+
+    const treeGetMatch = pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/git\/trees\/([^/]+)$/);
+    if (treeGetMatch && method === 'GET') {
+      const owner = treeGetMatch[1] ?? '';
+      const repo = treeGetMatch[2] ?? '';
+      const refSegment = treeGetMatch[3] ?? '';
+      if (!this.matchesRepo(owner, repo)) {
+        return this.makeResponse(404, { message: 'not found' });
+      }
+      const ref = decodeURIComponent(refSegment);
+      let snapshot: Map<string, RemoteFile> | null = null;
+      if (this.headByBranch.has(ref)) {
+        const commitSha = this.headByBranch.get(ref)!;
+        snapshot = this.getCommitSnapshot(commitSha);
+      } else if (this.treeRecords.has(ref)) {
+        snapshot = this.cloneFiles(this.treeRecords.get(ref)!);
+      } else if (this.commitRecords.has(ref)) {
+        const commit = this.commitRecords.get(ref)!;
+        snapshot = this.cloneFiles(commit.files);
+      }
+      if (!snapshot) {
+        snapshot = this.cloneFiles(this.files);
+      }
+      const tree = Array.from(snapshot.entries()).map(([path, file]) => ({
+        path,
+        type: 'blob',
+        sha: file.sha,
+      }));
+      return this.makeResponse(200, { tree });
+    }
+
+    const commitGetMatch = pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/git\/commits\/([^/]+)$/);
+    if (commitGetMatch && method === 'GET') {
+      const owner = commitGetMatch[1] ?? '';
+      const repo = commitGetMatch[2] ?? '';
+      const sha = commitGetMatch[3] ?? '';
+      if (!this.matchesRepo(owner, repo)) {
+        return this.makeResponse(404, { message: 'not found' });
+      }
+      const record = this.commitRecords.get(sha);
+      if (!record) {
+        return this.makeResponse(404, { message: 'not found' });
+      }
+      return this.makeResponse(200, { sha, tree: { sha: record.treeSha }, parents: record.parents });
+    }
+
+    if (pathname === `/repos/${this.owner}/${this.repo}/git/commits` && method === 'POST') {
+      const body = this.parseBody(init?.body);
+      const treeSha = typeof body?.tree === 'string' ? body.tree : '';
+      if (!treeSha || !this.treeRecords.has(treeSha)) {
+        return this.makeResponse(422, { message: 'invalid tree' });
+      }
+      const commitSha = this.nextCommit();
+      const parents = Array.isArray(body?.parents) ? body.parents.map((p: unknown) => String(p)) : [];
+      const filesSnapshot = this.cloneFiles(this.treeRecords.get(treeSha)!);
+      this.commitRecords.set(commitSha, { treeSha, files: filesSnapshot, parents });
+      return this.makeResponse(201, { sha: commitSha, tree: { sha: treeSha }, parents });
+    }
+
+    const contentsMatch = pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/contents(.*)$/);
+    if (contentsMatch) {
+      const owner = contentsMatch[1] ?? '';
+      const repo = contentsMatch[2] ?? '';
+      const rest = contentsMatch[3] ?? '';
+      if (!this.matchesRepo(owner, repo)) {
+        return this.makeResponse(404, { message: 'not found' });
+      }
+      const rawPath = rest.replace(/^\//, '');
       if (method === 'GET') {
         return this.handleGetContents(rawPath);
       }
@@ -126,18 +338,19 @@ class MockRemoteRepo {
 
     const blobMatch = pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/git\/blobs\/([^/]+)$/);
     if (blobMatch && method === 'GET') {
-      const [, owner, repo, sha] = blobMatch;
-      if (owner !== this.owner || repo !== this.repo) {
+      const owner = blobMatch[1] ?? '';
+      const repo = blobMatch[2] ?? '';
+      const sha = blobMatch[3] ?? '';
+      if (!this.matchesRepo(owner, repo)) {
         return this.makeResponse(404, { message: 'not found' });
       }
-      for (const file of this.files.values()) {
-        if (file.sha === sha) {
-          return this.makeResponse(200, {
-            content: Buffer.from(file.text, 'utf8').toString('base64'),
-          });
-        }
+      const text = this.blobs.get(sha);
+      if (!text) {
+        return this.makeResponse(404, { message: 'not found' });
       }
-      return this.makeResponse(404, { message: 'not found' });
+      return this.makeResponse(200, {
+        content: Buffer.from(text, 'utf8').toString('base64'),
+      });
     }
 
     return this.makeResponse(404, { message: 'not found' });
@@ -177,6 +390,7 @@ class MockRemoteRepo {
     }
     const sha = this.computeSha(text);
     this.files.set(path, { text, sha });
+    this.blobs.set(sha, text);
     return this.makeResponse(200, {
       content: { path, sha },
       commit: { sha: this.nextCommit() },
@@ -359,7 +573,7 @@ describe('syncBidirectional', () => {
     expect(paths).toEqual(['nested/Nested.md']);
   });
 
-  test('excludes README.md only at root', async () => {
+  test('excludes README.md regardless of directory', async () => {
     remote.setFile('README.md', 'root readme');
     remote.setFile('sub/README.md', 'sub readme');
     await syncBidirectional(store, 'user/repo');
@@ -367,7 +581,7 @@ describe('syncBidirectional', () => {
       .listNotes()
       .map((n) => n.path)
       .sort();
-    expect(paths).toEqual(['sub/README.md']);
+    expect(paths).toEqual([]);
   });
 });
 

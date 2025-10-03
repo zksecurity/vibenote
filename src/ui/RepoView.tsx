@@ -1222,7 +1222,7 @@ function FileSidebar(props: FileSidebarProps) {
   );
 
   // make sure that for every folder, its parent folders is also included (otherwise expanding doesn't work)
-  // TODO there are some code paths that store folders incompletely in local storage, and some that store parent folders
+  // TODO there are some code paths that store folders incompletely in local storage, and some that store parent folders.
   // should be consistent.
   folders = useMemo(() => {
     let folderSet = new Set(folders);
