@@ -136,8 +136,7 @@ type RepoDataResult = {
   actions: RepoDataActions;
 };
 
-function useRepoData(inputs: RepoDataInputs): RepoDataResult {
-  const { slug, route, onRecordRecent } = inputs;
+function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): RepoDataResult {
   // ORIGINAL STATE AND MAIN HOOKS
   // Local storage wrapper
   const store = useMemo(() => {
@@ -184,7 +183,8 @@ function useRepoData(inputs: RepoDataInputs): RepoDataResult {
   // whether we treat the repo as locally writable
   // note that we are optimistic about write access until the access check completes
   const canEdit =
-    route.kind === 'new' || (!!sessionToken && (repoAccess.level === 'write' || (!accessStatusReady && linked)));
+    route.kind === 'new' ||
+    (!!sessionToken && (repoAccess.level === 'write' || (!accessStatusReady && linked)));
 
   const needsInstallForPrivate = repoAccess.needsInstall;
   const isRateLimited = repoAccess.status === 'rate-limited';
@@ -304,7 +304,7 @@ function useRepoData(inputs: RepoDataInputs): RepoDataResult {
         initialPullRef.current.done = true;
       }
     })();
-  }, [route, repoAccess.level, linked, slug, store, canEdit, repoAccess.defaultBranch, notifyStoreListeners, setActiveId]);
+  }, [route, repoAccess.level, linked, slug, store, canEdit, repoAccess.defaultBranch, notifyStoreListeners]);
 
   // Drop any cached read-only data once we gain write access.
   useEffect(() => {

@@ -33,7 +33,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
   const {
     sessionToken,
     user,
-    repoAccess,
     linked,
     canEdit,
     isReadOnly,
@@ -338,8 +337,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                   <div className="alert warning">
                     <span className="badge">Limited</span>
                     <span className="alert-text">
-                      GitHub rate limits temporarily prevent checking repository access. Public repositories
-                      remain viewable; retry shortly for private access checks.
+                      GitHub rate limits temporarily prevent accessing the repository.
                     </span>
                   </div>
                 )}
@@ -364,14 +362,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                         updateNoteText(id, text);
                       }}
                     />
-                  </div>
-                ) : isReadOnly ? (
-                  <div className="empty-state">
-                    <h2>Browse on GitHub to view files</h2>
-                    <p>This repository has no notes cached locally yet.</p>
-                    <p>
-                      Open the repository on GitHub or select a file from the sidebar to load it in VibeNote.
-                    </p>
                   </div>
                 ) : (
                   <div className="empty-state">
@@ -427,51 +417,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
       )}
     </div>
   );
-}
-
-function useCollapsedFolders({
-  slug,
-  folders,
-  canEdit,
-}: {
-  slug: string;
-  folders: string[];
-  canEdit: boolean;
-}) {
-  // Remember which folders are expanded so the tree view stays consistent per repo.
-  const [expandedState, setExpandedState] = useState<string[]>(() =>
-    sanitizeExpandedDirs(folders, getExpandedFolders(slug))
-  );
-
-  // Refresh expanded state when the slug changes to honor stored preferences.
-  useEffect(() => {
-    const stored = getExpandedFolders(slug);
-    const next = sanitizeExpandedDirs(folders, stored);
-    setExpandedState((prev) => (foldersEqual(prev, next) ? prev : next));
-  }, [slug, folders]);
-
-  // Drop any folders that no longer exist from the expanded list.
-  useEffect(() => {
-    setExpandedState((prev) => sanitizeExpandedDirs(folders, prev));
-  }, [folders]);
-
-  // Persist expanded folders back to storage for future visits (when enabled).
-  useEffect(() => {
-    if (!canEdit) return;
-    setExpandedFolders(slug, expandedState);
-  }, [slug, expandedState, canEdit]);
-
-  const collapsed = useMemo(() => buildCollapsedMap(expandedState, folders), [expandedState, folders]);
-
-  const setCollapsedMap = (next: Record<string, boolean>) => {
-    const expanded = expandedDirsFromCollapsed(next);
-    setExpandedState((prev) => {
-      const nextExpanded = sanitizeExpandedDirs(folders, expanded);
-      return foldersEqual(prev, nextExpanded) ? prev : nextExpanded;
-    });
-  };
-
-  return { collapsed, setCollapsedMap } as const;
 }
 
 type FileSidebarProps = {
@@ -636,6 +581,51 @@ function FileSidebar(props: FileSidebarProps) {
       </div>
     </>
   );
+}
+
+function useCollapsedFolders({
+  slug,
+  folders,
+  canEdit,
+}: {
+  slug: string;
+  folders: string[];
+  canEdit: boolean;
+}) {
+  // Remember which folders are expanded so the tree view stays consistent per repo.
+  const [expandedState, setExpandedState] = useState<string[]>(() =>
+    sanitizeExpandedDirs(folders, getExpandedFolders(slug))
+  );
+
+  // Refresh expanded state when the slug changes to honor stored preferences.
+  useEffect(() => {
+    const stored = getExpandedFolders(slug);
+    const next = sanitizeExpandedDirs(folders, stored);
+    setExpandedState((prev) => (foldersEqual(prev, next) ? prev : next));
+  }, [slug, folders]);
+
+  // Drop any folders that no longer exist from the expanded list.
+  useEffect(() => {
+    setExpandedState((prev) => sanitizeExpandedDirs(folders, prev));
+  }, [folders]);
+
+  // Persist expanded folders back to storage for future visits (when enabled).
+  useEffect(() => {
+    if (!canEdit) return;
+    setExpandedFolders(slug, expandedState);
+  }, [slug, expandedState, canEdit]);
+
+  const collapsed = useMemo(() => buildCollapsedMap(expandedState, folders), [expandedState, folders]);
+
+  const setCollapsedMap = (next: Record<string, boolean>) => {
+    const expanded = expandedDirsFromCollapsed(next);
+    setExpandedState((prev) => {
+      const nextExpanded = sanitizeExpandedDirs(folders, expanded);
+      return foldersEqual(prev, nextExpanded) ? prev : nextExpanded;
+    });
+  };
+
+  return { collapsed, setCollapsedMap } as const;
 }
 
 function buildCollapsedMap(expanded: string[], folders: string[]): Record<string, boolean> {
