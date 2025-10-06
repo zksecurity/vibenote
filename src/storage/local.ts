@@ -135,9 +135,6 @@ const storeCache = new Map<string, LocalStore>();
 
 export function getRepoStore(slug: string): LocalStore {
   const normalized = normalizeSlug(slug);
-  if (normalized === 'new') {
-    return new LocalStore(normalized);
-  }
   let store = storeCache.get(normalized);
   if (!store) {
     store = new LocalStore(normalized);

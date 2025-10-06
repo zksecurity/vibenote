@@ -718,10 +718,8 @@ function deriveAccessFromMetadata(input: {
 // notes or folder lists change (including updates from other tabs).
 function useLocalRepoSnapshot(slug: string) {
   const storeRef = useRef<ReturnType<typeof getRepoStore>>();
-  const slugRef = useRef<string>('');
-  if (!storeRef.current || slugRef.current !== slug) {
+  if (storeRef.current?.slug !== slug) {
     storeRef.current = getRepoStore(slug);
-    slugRef.current = slug;
   }
   const store = storeRef.current;
   return useSyncExternalStore(
