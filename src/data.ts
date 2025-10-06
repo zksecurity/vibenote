@@ -122,12 +122,10 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
 } {
   // ORIGINAL STATE AND MAIN HOOKS
   // Local storage wrapper
-  const store = useMemo(() => {
-    if (route.kind === 'repo') {
-      return new LocalStore(slug);
-    }
-    return new LocalStore(slug, { seedWelcome: true });
-  }, [slug, route.kind]);
+  const store = useMemo(
+    () => new LocalStore(slug, { seedWelcome: route.kind !== 'repo' }),
+    [slug, route.kind]
+  );
 
   const { notes: localNotes, folders: localFolders } = useLocalRepoSnapshot(store);
 
