@@ -63,7 +63,9 @@ function ensureRepoSubscribers(slug: string): RepoSubscribers {
   const normalized = normalizeSlug(slug);
   let shared = repoSubscribers.get(normalized);
   const currentStorage =
-    typeof window !== 'undefined' ? window.localStorage : (globalThis as { localStorage?: Storage }).localStorage;
+    typeof window !== 'undefined'
+      ? window.localStorage
+      : (globalThis as { localStorage?: Storage }).localStorage;
   if (!shared) {
     shared = {
       snapshot: readRepoSnapshot(normalized),
@@ -131,18 +133,14 @@ type RepoSubscribers = {
 const repoSubscribers = new Map<string, RepoSubscribers>();
 const storeCache = new Map<string, LocalStore>();
 
-export type GetRepoStoreOptions = {
-  seedWelcome?: boolean;
-};
-
-export function getRepoStore(slug: string, options: GetRepoStoreOptions = {}): LocalStore {
+export function getRepoStore(slug: string): LocalStore {
   const normalized = normalizeSlug(slug);
   if (normalized === 'new') {
-    return new LocalStore(normalized, options);
+    return new LocalStore(normalized);
   }
   let store = storeCache.get(normalized);
   if (!store) {
-    store = new LocalStore(normalized, options);
+    store = new LocalStore(normalized);
     storeCache.set(normalized, store);
   }
   return store;
@@ -172,7 +170,7 @@ export class LocalStore {
   private notePrefix: string;
   private foldersKey: string;
 
-  constructor(slug: string, { seedWelcome = false } = {}) {
+  constructor(slug: string) {
     slug = normalizeSlug(slug);
     this.slug = slug;
     this.indexKey = repoKey(this.slug, 'index');
@@ -183,7 +181,7 @@ export class LocalStore {
     // TODO do we need this? we should assume a certain local storage layout and parse strictly to assert it is satisfied
     // that layout should be documented clearly in the form of types and zod schemas
     this.backfillFolders();
-    if (seedWelcome && this.index.length === 0) {
+    if (slug === 'new' && this.index.length === 0) {
       this.createNote('Welcome', WELCOME_NOTE);
       this.index = this.loadIndex();
     }

@@ -13,7 +13,6 @@ import {
   setLastActiveNoteId,
   hashText,
   getRepoStore,
-  type GetRepoStoreOptions,
 } from './storage/local';
 import {
   signInWithGitHubApp,
@@ -123,9 +122,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
 } {
   // ORIGINAL STATE AND MAIN HOOKS
   // Local storage wrapper
-  const { notes: localNotes, folders: localFolders } = useLocalRepoSnapshot(slug, {
-    seedWelcome: route.kind !== 'repo',
-  });
+  const { notes: localNotes, folders: localFolders } = useLocalRepoSnapshot(slug);
 
   // Hold the currently loaded read-only note so the editor can render remote content.
   const [readOnlyDoc, setReadOnlyDoc] = useState<NoteDoc | null>(null);
@@ -719,11 +716,11 @@ function deriveAccessFromMetadata(input: {
 
 // Subscribe to the LocalStore's internal cache so React re-renders whenever
 // notes or folder lists change (including updates from other tabs).
-function useLocalRepoSnapshot(slug: string, options: GetRepoStoreOptions) {
+function useLocalRepoSnapshot(slug: string) {
   const storeRef = useRef<ReturnType<typeof getRepoStore>>();
   const slugRef = useRef<string>('');
   if (!storeRef.current || slugRef.current !== slug) {
-    storeRef.current = getRepoStore(slug, options);
+    storeRef.current = getRepoStore(slug);
     slugRef.current = slug;
   }
   const store = storeRef.current;
