@@ -178,16 +178,15 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
     canEdit,
   });
 
-  // TODO why does this depend on _local notes_ rather than active notes?
-  const { activeId, setActiveId } = useActiveNote({ slug, notes: localNotes, canEdit });
+  const activeNotes = isReadOnly ? readOnlyNotes : localNotes;
+
+  const { activeId, setActiveId } = useActiveNote({ slug, notes: activeNotes, canEdit });
 
   const localDoc = useMemo(() => {
     if (!canEdit) return null;
     if (!activeId) return null;
     return store.loadNote(activeId);
   }, [canEdit, activeId, store, localNotes]);
-
-  const activeNotes = isReadOnly ? readOnlyNotes : localNotes;
   const doc = canEdit ? localDoc : readOnlyDoc;
 
   // Derive the folder set from whichever source is powering the tree.
@@ -849,7 +848,15 @@ function useAutosync(params: AutosyncParams) {
   } as const;
 }
 
-function useActiveNote({ slug, notes, canEdit }: { slug: string; notes: NoteMeta[]; canEdit: boolean }) {
+function useActiveNote({
+  slug,
+  notes,
+  canEdit,
+}: {
+  slug: string;
+  notes: { id: string }[];
+  canEdit: boolean;
+}) {
   // Track the currently focused note id for the editor and file tree.
   const [activeId, setActiveId] = useState<string | null>(() => {
     const stored = getLastActiveNoteId(slug);
@@ -871,17 +878,15 @@ function useActiveNote({ slug, notes, canEdit }: { slug: string; notes: NoteMeta
     setLastActiveNoteId(slug, activeId ?? null);
   }, [activeId, slug, canEdit]);
 
-  // Nudge the active note to a valid entry whenever the editable list changes.
+  // Remove selection when the activeId disappears from the list.
   useEffect(() => {
-    if (!canEdit) return;
     setActiveId((prev) => {
       if (prev && notes.some((note) => note.id === prev)) return prev;
-      if (prev) return notes[0]?.id ?? null;
-      return prev;
+      return null;
     });
-  }, [canEdit, notes]);
+  }, [notes]);
 
-  return { activeId, setActiveId } as const;
+  return { activeId, setActiveId };
 }
 
 function remoteConfigForSlug(slug: string, branch: string | null): RemoteConfig {
