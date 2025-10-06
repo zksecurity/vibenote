@@ -623,9 +623,7 @@ function linkKey(slug: string): string {
 
 function debugLog(slug: string, op: string, data: object) {
   if (!DEBUG_ENABLED) return;
-  // eslint-disable-next-line no-console
   console.debug('[VNDBG]', { slug, op, ...data });
-  // eslint-disable-next-line no-console
   console.trace('[VNDBG trace]', op);
 }
 

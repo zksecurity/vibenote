@@ -152,7 +152,6 @@ async function flush(payload) {
   for (const f of files) {
     try {
       // Use waitUntil at top-level caller
-      // eslint-disable-next-line no-await-in-loop
       await putFile(config, f, token);
     } catch {
       // ignore
@@ -211,7 +210,6 @@ async function processQueue() {
   if (!Array.isArray(items) || items.length === 0) return;
   for (const item of items) {
     try {
-      // eslint-disable-next-line no-await-in-loop
       await flush(item.payload);
       await clearQueued([item.id]);
     } catch {
