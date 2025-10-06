@@ -25,7 +25,6 @@ export function Editor({ doc, onChange, readOnly = false }: Props) {
   // Reflect external updates to the same note (e.g., after sync/merge)
   useEffect(() => {
     if (text !== doc.text) setText(doc.text);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc.text]);
 
   const onInput = (val: string) => {

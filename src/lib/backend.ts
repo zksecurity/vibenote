@@ -1,37 +1,25 @@
 import { ensureFreshAccessToken, refreshAccessTokenNow, getApiBase } from '../auth/app-auth';
 import { fetchPublicRepoInfo } from './github-public';
 
+export { type RepoMetadata, getRepoMetadata, getInstallUrl };
+
 const GITHUB_API_BASE = 'https://api.github.com';
 
-type InstallationSummary = {
-  id: number;
-  accountLogin: string | null;
-  repositorySelection: 'all' | 'selected' | null;
-};
-
-type InstallationAccess = {
-  installed: boolean;
-  repoSelected: boolean;
-  repositorySelection: 'all' | 'selected' | null;
-};
-
-export type RepoMetadata = {
+type RepoMetadata = {
   isPrivate: boolean | null;
   installed: boolean;
   repoSelected: boolean;
-  repositorySelection: 'all' | 'selected' | null;
   defaultBranch: string | null;
   rateLimited?: boolean;
   manageUrl?: string | null;
 };
 
-export async function getRepoMetadata(owner: string, repo: string): Promise<RepoMetadata> {
+async function getRepoMetadata(owner: string, repo: string): Promise<RepoMetadata> {
   let token = await ensureFreshAccessToken();
   let isPrivate: boolean | null = null;
   let defaultBranch: string | null = null;
   let repoSelected = false;
   let installed = false;
-  let repositorySelection: 'all' | 'selected' | null = null;
   let rateLimited = false;
   let userHasPush = false;
   let fetchedWithToken = false;
@@ -72,7 +60,6 @@ export async function getRepoMetadata(owner: string, repo: string): Promise<Repo
     try {
       const access = await resolveInstallationAccess(token, owner, repo);
       installed = access.installed;
-      repositorySelection = access.repositorySelection;
       if (access.repoSelected && userHasPush) {
         repoSelected = true;
       } else {
@@ -83,10 +70,10 @@ export async function getRepoMetadata(owner: string, repo: string): Promise<Repo
     }
   }
 
-  let shouldFetchPublic = !fetchedWithToken || isPrivate === null || defaultBranch === null;
-  if (shouldFetchPublic) {
+  if (!fetchedWithToken) {
     let publicInfo = await fetchPublicRepoInfo(owner, repo);
     if (publicInfo.ok) {
+      // will always be false for public API
       isPrivate = publicInfo.isPrivate ?? null;
       defaultBranch = publicInfo.defaultBranch ?? null;
     } else {
@@ -102,14 +89,14 @@ export async function getRepoMetadata(owner: string, repo: string): Promise<Repo
     isPrivate,
     installed,
     repoSelected,
-    repositorySelection,
     defaultBranch,
     rateLimited,
+    // TODO: construct manage URL from owner/repo
     manageUrl: null,
   };
 }
 
-export async function getInstallUrl(owner: string, repo: string, returnTo: string): Promise<string> {
+async function getInstallUrl(owner: string, repo: string, returnTo: string): Promise<string> {
   let base = getApiBase();
   let u = new URL(`${base}/v1/app/install-url`);
   u.searchParams.set('owner', owner);
@@ -130,31 +117,35 @@ async function githubGet(token: string, path: string): Promise<Response> {
   });
 }
 
-async function resolveInstallationAccess(token: string, owner: string, repo: string): Promise<InstallationAccess> {
-  const installations = await listUserInstallations(token);
-  if (installations.length === 0) {
-    return { installed: false, repoSelected: false, repositorySelection: null };
-  }
+async function resolveInstallationAccess(
+  token: string,
+  owner: string,
+  repo: string
+): Promise<{
+  installed: boolean;
+  repoSelected: boolean;
+}> {
+  let installations = await listUserInstallations(token);
+  // we only consider installations whose account login matches the repo owner
+  // (probably there is exactly one)
+  let ownerLower = owner.toLowerCase();
+  installations = installations.filter((inst) => inst.accountLogin?.toLowerCase() === ownerLower);
 
-  const ownerLower = owner.toLowerCase();
-  const repoLower = repo.toLowerCase();
+  // the owner does not match any installation account login
+  if (installations.length === 0) return { installed: false, repoSelected: false };
+
+  let repoLower = repo.toLowerCase();
   const targetFullName = `${ownerLower}/${repoLower}`;
 
-  // First pass: installations whose account login matches the repo owner
-  let matchedInstallation = false;
-  let matchedSelection: 'all' | 'selected' | null = null;
-  for (const inst of installations) {
-    if (!inst.accountLogin || inst.accountLogin.toLowerCase() !== ownerLower) continue;
+  for (let inst of installations) {
     if (!Number.isFinite(inst.id)) continue;
-    matchedInstallation = true;
-    matchedSelection = inst.repositorySelection;
     if (inst.repositorySelection === 'all') {
-      return { installed: true, repoSelected: true, repositorySelection: 'all' };
+      return { installed: true, repoSelected: true };
     }
     if (inst.repositorySelection === 'selected') {
       const hasRepo = await installationIncludesRepo(token, inst.id, targetFullName);
       if (hasRepo) {
-        return { installed: true, repoSelected: true, repositorySelection: 'selected' };
+        return { installed: true, repoSelected: true };
       }
       // keep checking other installations for the same owner before concluding
     } else {
@@ -162,22 +153,14 @@ async function resolveInstallationAccess(token: string, owner: string, repo: str
     }
   }
 
-  if (matchedInstallation) {
-    return { installed: true, repoSelected: false, repositorySelection: matchedSelection };
-  }
-
-  // Fallback: check other installations in case repo is granted across accounts (rare)
-  for (const inst of installations) {
-    if (!Number.isFinite(inst.id)) continue;
-    if (inst.repositorySelection !== 'selected') continue;
-    const hasRepo = await installationIncludesRepo(token, inst.id, targetFullName);
-    if (hasRepo) {
-      return { installed: true, repoSelected: true, repositorySelection: 'selected' };
-    }
-  }
-
-  return { installed: false, repoSelected: false, repositorySelection: null };
+  return { installed: true, repoSelected: false };
 }
+
+type InstallationSummary = {
+  id: number;
+  accountLogin: string | null;
+  repositorySelection: 'all' | 'selected' | null;
+};
 
 async function listUserInstallations(token: string): Promise<InstallationSummary[]> {
   const results: InstallationSummary[] = [];
@@ -205,7 +188,11 @@ async function listUserInstallations(token: string): Promise<InstallationSummary
   return results;
 }
 
-async function installationIncludesRepo(token: string, installationId: number, targetFullName: string): Promise<boolean> {
+async function installationIncludesRepo(
+  token: string,
+  installationId: number,
+  targetFullName: string
+): Promise<boolean> {
   let page = 1;
   while (page <= 10) {
     const res = await githubGet(
@@ -218,11 +205,12 @@ async function installationIncludesRepo(token: string, installationId: number, t
     const json = (await res.json()) as any;
     const repos = Array.isArray(json?.repositories) ? json.repositories : [];
     for (const repo of repos) {
-      const fullNameValue = typeof repo?.full_name === 'string'
-        ? repo.full_name
-        : repo?.owner && typeof repo.owner.login === 'string' && typeof repo?.name === 'string'
-        ? `${repo.owner.login}/${repo.name}`
-        : null;
+      const fullNameValue =
+        typeof repo?.full_name === 'string'
+          ? repo.full_name
+          : repo?.owner && typeof repo.owner.login === 'string' && typeof repo?.name === 'string'
+          ? `${repo.owner.login}/${repo.name}`
+          : null;
       if (!fullNameValue) continue;
       if (fullNameValue.toLowerCase() === targetFullName) {
         return true;

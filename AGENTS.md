@@ -1,8 +1,9 @@
-VibeNote – Agent Guide
+# VibeNote – Agent Guide
 
-Read both README.md and DESIGN.md for product and architecture context. This document captures developer‑focused setup, deployment, and conventions.
+Read both README.md and DESIGN.md for product and architecture context.
+This document captures developer‑focused setup, deployment, and conventions.
 
-Development Setup
+## Development Setup
 
 - Prereqs: Node 22+, npm
 - Install: `npm install`
@@ -11,48 +12,37 @@ Development Setup
 - Env: Human developer manually copies `.env.example` → `.env` and fills the GitHub App variables (`GITHUB_APP_SLUG`, `GITHUB_OAUTH_*`, `SESSION_JWT_SECRET`, `SESSION_ENCRYPTION_KEY`, `ALLOWED_ORIGINS`, etc.)
   - coding agents MUST NEVER read or write `.env`, actual secrets may be stored there, even in development
 
-Local dev
+## Local dev
 
 - Single command: `npm start`, starts the Vite dev server.
 - We usually set `VITE_VIBENOTE_API_BASE` to the _production backend_ when developing the frontend, so you don't have to start the backend. Only after backend changes, make sure that the backend is restarted.
 - Node runs TypeScript directly (2025+): use `node path/to/file.ts` for quick scripts; no ts-node/tsx needed.
 
-Local Auth (GitHub App)
-
-- “Connect GitHub” opens the GitHub App popup flow (`/v1/auth/github/*`).
-- The backend mints session JWTs and stores encrypted refresh tokens on disk; no GitHub tokens persist in localStorage beyond the short-lived access token.
-
-Commit & PR Conventions
-
-- Commit messages: short, high‑level, no function names.
-  - Aim for 50–65 chars in the subject.
-  - Summarize the user‑visible change or intent, not the mechanics.
-  - Avoid prefixes like `feat(...)` and internal details (e.g., file or function names).
-  - Examples:
-    - Good: "Shorten device flow and improve mobile modal"
-    - Good: "Sync removes deleted notes"
-    - Good: "Import notes from connected repo"
-    - Avoid: "Add deleteFiles() and use in App.tsx"
-    - Avoid: "Refactor RepoConfigModal.tsx for CTA"
-  - Body: not needed
-- Group related changes; avoid mega‑commits unless it’s a cohesive feature.
-
-UI/UX Conventions
+## UI/UX Conventions
 
 - Mobile-first: modals full-screen on small screens; convenient tap targets.
 - Visual direction: light GitHub-inspired shell. Use soft gray backgrounds, white surfaces, GitHub green for primary actions, and muted blue accents. Top bar mirrors GitHub repo view with circular sync icon, repo chip, and avatar. On small screens, repo name becomes the "title" (owner hidden <520px) and header stays within one row.
 
-Auth Mode
+## Frontend Architecture
 
-- GitHub App popup (per repo/owner install) issuing user-scoped OAuth tokens.
+- `src/ui/RepoView.tsx` is the primary workspace screen. It renders the navigation shell (header, repo switcher, file tree, editor) and only owns ephemeral UI state such as dropdown toggles, sidebar visibility, and keyboard shortcuts.
+- RepoView consumes `useRepoData` from `src/data.ts`. The hook centralises session/auth, local storage, autosync timers, and GitHub interactions. It exposes `{ state, actions }` to the UI.
+- Components must call the hook’s actions (e.g. `createNote`, `renameFolder`, `syncNow`) instead of talking to storage or sync modules directly. This keeps side effects in one layer and allows hooks/tests to mock behaviour easily.
+- `useRepoData` delegates to `LocalStore` for persistence and to the `src/sync/` modules for remote operations. When adding new capabilities, extend the hook first, then thread new state/actions down through RepoView.
 
-Security Notes
+## Auth
+
+- “Connect GitHub” opens the GitHub App popup flow (`/v1/auth/github/*`), issuing user-scoped OAuth tokens.
+- see `docs/AUTH.md` for details
+
+## Security Notes
 
 - Treat access tokens as secrets; never log them or send to third‑party services.
 
-Coding Guidelines
+## Coding Guidelines
 
-- Formatting: use Prettier (repo includes `.prettierrc`).
+- VERY IMPORTANT: don't make stylistic changes you were not asked for, and that are not listed in these guidelines. Don't remove comments or similar nonsense.
+- Formatting: we use Prettier (repo includes `.prettierrc`).
 - Variables: prefer `let` over `const`, except for global constants, functions, or other module‑level constant objects.
 - Types: use `type` aliases instead of `interface`.
 - Exports: collect all exports at the top of the file (named exports), avoid inline `export` sprinkled through the file. Good Example:
@@ -79,18 +69,34 @@ function mainMethod() { // ...
 - When writing shared modules, prefer placing exported/high-level APIs at the top of the file and push low-level helpers toward the bottom, so readers can grasp intent before implementation details.
 - Nullish values: In data types, prefer `undefined` (and `?` on object properties) to model inexistent values. Do not use `null` unless there is a specific strong reason. A valid reason to use `null` is if the data type needs to be JSON-stringified.
 
-Type Checking
+## Type Checking
 
-- Run `npm run check` to perform a full TypeScript type check. Ensure the codebase type checks cleanly after changes.
+- Run `npm run check` after edits to perform a full TypeScript type check. Ensure the codebase type checks cleanly after changes.
 
-Testing
+## Testing
 
-- Unit tests are stored next to the source code they are testing, in .test.ts files. No separate /tests folder.
+- Unit tests are stored next to the source code they are testing, in .test.ts files. No separate /tests folder. Run with `npm test`.
+- `src/test/setup.ts` loads automatically via Vitest to expose browser-like globals (localStorage, fetch, atob/btoa). Keep new hook/UI tests compatible with that environment instead of redefining globals in each file.
+- `src/test/mock-remote.ts` is a GitHub REST stub that powers sync-heavy tests (e.g. `useRepoData` flows). Prefer it when you need to exercise `syncBidirectional` without network calls.
 
-Agent Conventions
+## Commit Conventions
 
-- When you make a change that is simple enough and doesn't touch UI, try to confirm its correctness directly by running tests, and if successful, commit the change right away.
-- Do NOT commit UI changes until verified by the user
+- Do NOT commit untested changes. In particular, do not commit UI changes until verified by the user.
+- Commit messages: short, high‑level, no function names.
+  - Aim for 50–65 chars in the subject.
+  - Summarize the user‑visible change or intent, not the mechanics.
+  - Avoid prefixes like `feat(...)` and internal details (e.g., file or function names).
+  - Examples:
+    - Good: "Shorten device flow and improve mobile modal"
+    - Good: "Sync removes deleted notes"
+    - Good: "Import notes from connected repo"
+    - Avoid: "Add deleteFiles() and use in App.tsx"
+    - Avoid: "Refactor RepoConfigModal.tsx for CTA"
+  - Body: not needed
+- Group related changes; avoid mega‑commits unless it’s a cohesive feature.
+
+## Agent Conventions
+
 - When we introduce new conventions or useful workflows, record them in this AGENTS.md so future work is consistent.
 
 ## Backend Deployment (GitHub App)
