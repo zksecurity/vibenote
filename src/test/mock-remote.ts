@@ -129,7 +129,12 @@ class MockRemoteRepo {
       const record = this.treeRecords.get(`tree-${treeSegment}`) ?? this.treeRecords.get(treeSegment);
       if (!record) {
         const branchHead = this.headByBranch.get(treeSegment);
-        if (!branchHead) return this.makeResponse(404, { message: 'not found' });
+        if (!branchHead) {
+          return this.makeResponse(200, {
+            sha: `tree-empty-${treeSegment}`,
+            tree: [],
+          });
+        }
         const commit = this.commitRecords.get(branchHead);
         if (!commit) return this.makeResponse(404, { message: 'not found' });
         return this.makeResponse(200, {
@@ -158,6 +163,19 @@ class MockRemoteRepo {
         tree: { sha: record.treeSha },
         parents: record.parents.map((parentSha) => ({ sha: parentSha })),
       });
+    }
+
+    const createRefMatch = url.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/git\/refs$/);
+    if (createRefMatch && method === 'POST') {
+      const body = (await this.parseBody(request)) ?? {};
+      const ref = typeof body.ref === 'string' ? body.ref : '';
+      const sha = typeof body.sha === 'string' ? body.sha : '';
+      if (!ref.startsWith('refs/heads/') || !this.commitRecords.has(sha)) {
+        return this.makeResponse(422, { message: 'invalid ref' });
+      }
+      const branch = ref.replace('refs/heads/', '');
+      this.setHead(branch, sha);
+      return this.makeResponse(201, { ref, object: { sha, type: 'commit' } });
     }
 
     const createTreeMatch = url.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/git\/trees$/);
