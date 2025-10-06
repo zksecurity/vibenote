@@ -1,6 +1,7 @@
 // LEGACY FILE - device token flow is not currently used in the app
 
 /// <reference types="vite/client" />
+import { logError } from '../lib/logging';
 // GitHub OAuth device flow helper functions.
 // Calls Vercel serverless functions (api/github/*) to avoid browser CORS issues.
 
@@ -53,7 +54,7 @@ export async function connectToGitHub(): Promise<string | null> {
     if (token) localStorage.setItem(TOKEN_KEY, token);
     return token;
   } catch (err) {
-    console.error(err);
+    logError(err);
     return null;
   }
 }

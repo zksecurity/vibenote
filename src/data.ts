@@ -35,6 +35,7 @@ import {
   type RemoteConfig,
   type SyncSummary,
 } from './sync/git-sync';
+import { logError } from './lib/logging';
 import type { Route } from './ui/routing';
 
 export { useRepoData };
@@ -231,7 +232,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
         lastSyncedHash: hashText(remote.text),
       });
     } catch (error) {
-      console.error(error);
+      logError(error);
     }
   }
 
@@ -280,7 +281,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
         setLinked(true);
         setSyncMessage('Loaded repository');
       } catch (error) {
-        console.error(error);
+        logError(error);
       } finally {
         initialPullRef.current.done = true;
       }
@@ -339,7 +340,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
         }
         if (!cancelled) setReadOnlyLoading(false);
       } catch (error) {
-        console.error(error);
+        logError(error);
         if (!cancelled) setReadOnlyLoading(false);
       }
     })();
@@ -413,7 +414,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
         setUser(result.user);
       }
     } catch (error) {
-      console.error(error);
+      logError(error);
       setSyncMessage('Failed to sign in');
     }
   };
@@ -429,7 +430,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
       const url = await apiGetInstallUrl(route.owner, route.repo, window.location.href);
       window.open(url, '_blank', 'noopener');
     } catch (error) {
-      console.error(error);
+      logError(error);
       setSyncMessage('Failed to open GitHub');
     }
   };
@@ -472,7 +473,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
       if (summary?.deletedLocal) parts.push(`deleted local ${summary.deletedLocal}`);
       setSyncMessage(parts.length ? `Synced: ${parts.join(', ')}` : 'Up to date');
     } catch (error) {
-      console.error(error);
+      logError(error);
       setSyncMessage('Sync failed');
     }
   };
@@ -498,7 +499,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
       store.createFolder(parentDir, name);
       notifyStoreListeners();
     } catch (error) {
-      console.error(error);
+      logError(error);
       setSyncMessage('Invalid folder name.');
       return;
     }
@@ -512,7 +513,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
       notifyStoreListeners();
       scheduleAutoSync();
     } catch (error) {
-      console.error(error);
+      logError(error);
       setSyncMessage('Invalid title. Avoid / and control characters.');
     }
   };
@@ -537,7 +538,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
       notifyStoreListeners();
       scheduleAutoSync();
     } catch (error) {
-      console.error(error);
+      logError(error);
       setSyncMessage('Invalid folder name.');
     }
   };
@@ -750,7 +751,7 @@ function useRepoStore(store: LocalStore) {
       try {
         listener();
       } catch (error) {
-        console.error('vibenote: repo store listener failed', error);
+        logError('vibenote: repo store listener failed', error);
       }
     }
   }, [store]);
@@ -838,7 +839,7 @@ function useAutosync(params: AutosyncParams) {
         return summary;
       } catch (error) {
         if (options.silent) {
-          console.error(error);
+          logError(error);
           return null;
         }
         throw error;

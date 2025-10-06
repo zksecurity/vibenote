@@ -139,6 +139,8 @@ describe('useRepoData', () => {
     mockEnsureFreshAccessToken.mockResolvedValue('access-token');
     mockSignInWithGitHubApp.mockResolvedValue(null);
 
+    mockListNoteFiles.mockResolvedValue([]);
+
     mockBuildRemoteConfig.mockImplementation((slug: string) => {
       const [owner, repo] = slug.split('/', 2);
       return { owner: owner ?? '', repo: repo ?? '', branch: 'main' };
@@ -363,9 +365,9 @@ describe('useRepoData', () => {
     const slug = 'acme/docs';
     const onRecordRecent = vi.fn();
 
-    const uuidSpy = vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValueOnce(
-      '00000000-0000-0000-0000-000000000051'
-    );
+    const uuidSpy = vi
+      .spyOn(globalThis.crypto, 'randomUUID')
+      .mockReturnValueOnce('00000000-0000-0000-0000-000000000051');
     const store = new LocalStore(slug);
     const noteId = store.createNote('Seed', 'initial text');
     uuidSpy.mockRestore();
@@ -373,7 +375,11 @@ describe('useRepoData', () => {
     recordAutoSyncRun(slug, Date.now() - 120_000);
 
     mockGetSessionToken.mockReturnValue('session-token');
-    mockGetSessionUser.mockReturnValue({ login: 'mona', name: 'Mona', avatarUrl: 'https://example.com/mona.png' });
+    mockGetSessionUser.mockReturnValue({
+      login: 'mona',
+      name: 'Mona',
+      avatarUrl: 'https://example.com/mona.png',
+    });
     setRepoMetadata(writableMeta);
     mockSyncBidirectional.mockResolvedValue({
       pulled: 0,
@@ -442,7 +448,11 @@ describe('useRepoData', () => {
     markRepoLinked(slugB);
 
     mockGetSessionToken.mockReturnValue('session-token');
-    mockGetSessionUser.mockReturnValue({ login: 'mona', name: 'Mona', avatarUrl: 'https://example.com/mona.png' });
+    mockGetSessionUser.mockReturnValue({
+      login: 'mona',
+      name: 'Mona',
+      avatarUrl: 'https://example.com/mona.png',
+    });
 
     mockGetRepoMetadata.mockImplementation(async (_owner: string, repo: string) => {
       if (repo === 'docs') return { ...writableMeta };
@@ -497,7 +507,11 @@ describe('useRepoData', () => {
     markRepoLinked(slug);
 
     mockGetSessionToken.mockReturnValue('session-token');
-    mockGetSessionUser.mockReturnValue({ login: 'mona', name: 'Mona', avatarUrl: 'https://example.com/mona.png' });
+    mockGetSessionUser.mockReturnValue({
+      login: 'mona',
+      name: 'Mona',
+      avatarUrl: 'https://example.com/mona.png',
+    });
 
     const installMeta: RepoMetadata = {
       ...writableMeta,
@@ -508,12 +522,19 @@ describe('useRepoData', () => {
 
     const firstMeta = createDeferred<RepoMetadata>();
     mockGetRepoMetadata.mockImplementation(() => firstMeta.promise);
-    mockSignInWithGitHubApp.mockResolvedValue({ token: 'fresh-token', user: { login: 'mona', name: 'Mona', avatarUrl: '' } });
+    mockSignInWithGitHubApp.mockResolvedValue({
+      token: 'fresh-token',
+      user: { login: 'mona', name: 'Mona', avatarUrl: '' },
+    });
 
     const seenNeedsInstall: boolean[] = [];
 
     const { result } = renderHook(() => {
-      const value = useRepoData({ slug, route: { kind: 'repo', owner: 'acme', repo: 'private' }, onRecordRecent });
+      const value = useRepoData({
+        slug,
+        route: { kind: 'repo', owner: 'acme', repo: 'private' },
+        onRecordRecent,
+      });
       seenNeedsInstall.push(value.state.needsInstall);
       return value;
     });
@@ -562,7 +583,11 @@ describe('useRepoData', () => {
     const seenReadOnlyLoading: boolean[] = [];
 
     const { result } = renderHook(() => {
-      const value = useRepoData({ slug, route: { kind: 'repo', owner: 'octo', repo: 'wiki' }, onRecordRecent });
+      const value = useRepoData({
+        slug,
+        route: { kind: 'repo', owner: 'octo', repo: 'wiki' },
+        onRecordRecent,
+      });
       seenNeedsInstall.push(value.state.needsInstall);
       seenReadOnlyLoading.push(value.state.readOnlyLoading);
       return value;
@@ -593,7 +618,11 @@ describe('useRepoData', () => {
     markRepoLinked(slug);
 
     mockGetSessionToken.mockReturnValue('session-token');
-    mockGetSessionUser.mockReturnValue({ login: 'mona', name: 'Mona', avatarUrl: 'https://example.com/mona.png' });
+    mockGetSessionUser.mockReturnValue({
+      login: 'mona',
+      name: 'Mona',
+      avatarUrl: 'https://example.com/mona.png',
+    });
     setRepoMetadata(writableMeta);
     mockSignOutFromGitHubApp.mockResolvedValue(undefined);
 
@@ -621,5 +650,4 @@ describe('useRepoData', () => {
     expect(result.current.state.needsInstall).toBe(false);
     expect(new LocalStore(slug).listNotes()).toHaveLength(0);
   });
-
 });
