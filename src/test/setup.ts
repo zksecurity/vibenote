@@ -1,3 +1,8 @@
+/**
+ * Global Vitest setup that emulates browser APIs (localStorage, fetch, atob
+ * / btoa, window stubs). Tests import this via `vite.config.ts` so React hooks
+ * behave as they do in the app without requiring a real DOM/browser runtime.
+ */
 import { Buffer } from 'node:buffer';
 import { afterEach, beforeEach, vi } from 'vitest';
 

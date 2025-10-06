@@ -1,3 +1,9 @@
+/**
+ * In-memory GitHub API stub used by hook and sync tests. It records file/tree
+ * state, accepts authenticated REST calls, and responds like the minimal set of
+ * GitHub endpoints that `syncBidirectional` exercises so we can run full syncs
+ * without touching the network.
+ */
 import { Buffer } from 'node:buffer';
 
 type RemoteFile = { text: string; sha: string };
