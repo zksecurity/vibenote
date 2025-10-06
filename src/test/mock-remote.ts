@@ -213,7 +213,8 @@ class MockRemoteRepo {
     if (contentPutMatch && method === 'PUT') {
       const path = decodeURIComponent(contentPutMatch[3] ?? '');
       const body = (await this.parseBody(request)) ?? {};
-      const content = typeof body.content === 'string' ? Buffer.from(body.content, 'base64').toString('utf8') : '';
+      const content =
+        typeof body.content === 'string' ? Buffer.from(body.content, 'base64').toString('utf8') : '';
       if (!content) return this.makeResponse(400, { message: 'missing content' });
       const sha = this.computeSha(content);
       this.files.set(path, { text: content, sha });
@@ -240,8 +241,8 @@ class MockRemoteRepo {
     return new Request(String(input), init);
   }
 
-  private isAuthorized(headers: HeadersInit): boolean {
-    const token = typeof headers.get === 'function' ? headers.get('Authorization') : null;
+  private isAuthorized(headers: Headers): boolean {
+    const token = headers.get('Authorization');
     if (!token) return false;
     const match = token.match(/Bearer\s+(.*)$/);
     if (!match) return false;
