@@ -179,7 +179,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
   });
 
   // TODO why does this depend on _local notes_ rather than active notes?
-  const { activeId, setActiveId } = useActiveNote({ slug, store, notes: localNotes, canEdit });
+  const { activeId, setActiveId } = useActiveNote({ slug, notes: localNotes, canEdit });
 
   const localDoc = useMemo(() => {
     if (!canEdit) return null;
@@ -849,20 +849,12 @@ function useAutosync(params: AutosyncParams) {
   } as const;
 }
 
-type ActiveNoteParams = {
-  slug: string;
-  store: LocalStore;
-  notes: NoteMeta[];
-  canEdit: boolean;
-};
-
-function useActiveNote({ slug, store, notes, canEdit }: ActiveNoteParams) {
+function useActiveNote({ slug, notes, canEdit }: { slug: string; notes: NoteMeta[]; canEdit: boolean }) {
   // Track the currently focused note id for the editor and file tree.
   const [activeId, setActiveId] = useState<string | null>(() => {
     const stored = getLastActiveNoteId(slug);
     if (!stored) return null;
-    const available = store.listNotes();
-    return available.some((note) => note.id === stored) ? stored : null;
+    return notes.some((note) => note.id === stored) ? stored : null;
   });
 
   // Restore the last active note from storage when loading an existing repo.
