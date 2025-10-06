@@ -609,14 +609,6 @@ function encodeSlug(slug: string): string {
   return encodeURIComponent(slug);
 }
 
-function decodeSlug(encoded: string): string {
-  try {
-    return decodeURIComponent(encoded);
-  } catch {
-    return encoded;
-  }
-}
-
 function linkKey(slug: string): string {
   return `${LINK_PREFIX}:${encodeSlug(slug)}`;
 }
