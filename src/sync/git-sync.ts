@@ -554,6 +554,21 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         debugLog(slug, 'sync:tombstone:delete:remote-changed-keep-remote', { path: t.path });
       }
     } else if (t.type === 'rename') {
+      const targetLocal = findByPath(storeSlug, t.to);
+      const remoteTargetSha = remoteMap.get(t.to);
+      if (targetLocal && !remoteTargetSha) {
+        const { id, doc } = targetLocal;
+        const nextSha = await putFile(
+          config,
+          { path: doc.path, text: doc.text ?? '' },
+          'vibenote: update notes'
+        );
+        markSynced(storeSlug, id, { remoteSha: nextSha, syncedHash: hashText(doc.text ?? '') });
+        remoteMap.set(t.to, nextSha);
+        pushed++;
+        debugLog(slug, 'sync:tombstone:rename:ensure-target', { to: t.to });
+      }
+
       const remoteSha = remoteMap.get(t.from);
       if (!remoteSha && !t.lastRemoteSha) {
         // Nothing tracked for this rename: remote already missing

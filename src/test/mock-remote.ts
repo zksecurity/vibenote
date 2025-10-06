@@ -143,35 +143,60 @@ class MockRemoteRepo {
       });
     }
 
+    const commitGetMatch = url.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/git\/commits\/([^/]+)$/);
+    if (commitGetMatch && method === 'GET') {
+      const owner = commitGetMatch[1] ?? '';
+      const repo = commitGetMatch[2] ?? '';
+      if (!this.matchesRepo(owner, repo)) {
+        return this.makeResponse(404, { message: 'not found' });
+      }
+      const sha = commitGetMatch[3] ?? '';
+      const record = this.commitRecords.get(sha);
+      if (!record) return this.makeResponse(404, { message: 'not found' });
+      return this.makeResponse(200, {
+        sha,
+        tree: { sha: record.treeSha },
+        parents: record.parents.map((parentSha) => ({ sha: parentSha })),
+      });
+    }
+
     const createTreeMatch = url.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/git\/trees$/);
     if (createTreeMatch && method === 'POST') {
       const body = (await this.parseBody(request)) ?? {};
-      const entries: Array<{ path?: string; mode?: string; type?: string; content?: string; sha?: string }> =
-        Array.isArray(body.tree) ? body.tree : [];
-      const nextTree = new Map<string, RemoteFile>();
-      let base = this.files;
-      if (typeof body.base_tree === 'string') {
-        const baseTree = this.treeRecords.get(body.base_tree);
-        if (baseTree) base = this.cloneFiles(baseTree);
+    const entries: Array<{ path?: string; mode?: string; type?: string; content?: string; sha?: string | null }> =
+      Array.isArray(body.tree) ? body.tree : [];
+    const nextTree = new Map<string, RemoteFile>();
+    const deleted = new Set<string>();
+    let base = this.files;
+    if (typeof body.base_tree === 'string') {
+      const baseTree = this.treeRecords.get(body.base_tree);
+      if (baseTree) base = this.cloneFiles(baseTree);
+    }
+    for (const entry of entries) {
+      if (!entry.path) continue;
+      if (entry.sha === null) {
+        deleted.add(entry.path);
+        continue;
       }
-      for (const entry of entries) {
-        if (!entry.path) continue;
-        if (entry.type === 'blob' && typeof entry.content === 'string') {
-          const text = entry.content;
-          const sha = this.computeSha(text);
-          nextTree.set(entry.path, { text, sha });
-          this.blobs.set(sha, text);
-        } else if (entry.sha) {
-          const blob = this.blobs.get(entry.sha);
-          if (blob !== undefined) {
-            nextTree.set(entry.path, { text: blob, sha: entry.sha });
-          }
+      if (entry.type === 'blob' && typeof entry.content === 'string') {
+        const text = entry.content;
+        const sha = this.computeSha(text);
+        nextTree.set(entry.path, { text, sha });
+        this.blobs.set(sha, text);
+      } else if (entry.sha) {
+        const blob = this.blobs.get(entry.sha);
+        if (blob !== undefined) {
+          nextTree.set(entry.path, { text: blob, sha: entry.sha });
         }
       }
-      const combined = this.cloneFiles(base);
-      for (const [path, file] of nextTree.entries()) {
-        combined.set(path, file);
-      }
+    }
+    const combined = this.cloneFiles(base);
+    for (const [path, file] of nextTree.entries()) {
+      combined.set(path, file);
+    }
+    for (const path of deleted) {
+      combined.delete(path);
+    }
       const treeSha = this.nextTree();
       this.treeRecords.set(treeSha, combined);
       return this.makeResponse(201, { sha: treeSha, tree: this.formatTree(combined, true) });

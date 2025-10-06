@@ -633,6 +633,10 @@ describe('useRepoData', () => {
     remote.setFile('docs/Alpha.md', 'alpha text');
     remote.setFile('docs/Beta.md', 'beta text');
 
+    mockGetSessionToken.mockReturnValue('session-token');
+    mockGetSessionUser.mockReturnValue({ login: 'mona', name: 'Mona', avatarUrl: 'https://example.com/mona.png' });
+    setRepoMetadata(writableMeta);
+
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       return remote.handleFetch(input, init);
     });
@@ -646,6 +650,7 @@ describe('useRepoData', () => {
       const alphaId = store.createNote('Alpha', 'alpha text', 'docs');
       const betaId = store.createNote('Beta', 'beta text', 'docs');
       markRepoLinked(slug);
+      markRepoLinked(slug);
 
       await actualSync.syncBidirectional(store, slug);
 
@@ -654,10 +659,30 @@ describe('useRepoData', () => {
       );
 
       await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
+      expect(result.current.state.canEdit).toBe(true);
+
+      const foldersBefore = new LocalStore(slug).listFolders().sort();
+      expect(foldersBefore).toEqual(['docs']);
 
       await act(async () => {
         await result.current.actions.renameFolder('docs', 'guides');
       });
+
+      expect(result.current.state.statusMessage).toBeNull();
+      await waitFor(() => expect(result.current.state.activeFolders).toEqual(['guides']));
+
+      await waitFor(() => {
+        const localPaths = new LocalStore(slug)
+          .listNotes()
+          .map((n) => n.path)
+          .sort();
+        expect(localPaths).toEqual(['guides/Alpha.md', 'guides/Beta.md']);
+      });
+
+      const rawIndex = globalThis.localStorage?.getItem(
+        `vibenote:repo:${encodeURIComponent(slug)}:index`
+      );
+      expect(rawIndex).toContain('guides/Alpha.md');
 
       await act(async () => {
         await result.current.actions.syncNow();
