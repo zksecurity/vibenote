@@ -41,6 +41,24 @@ export type RepoAccessState = {
   isPrivate: boolean | null;
 };
 
+export type RepoDataStoreState = {
+  sessionToken: string | null;
+  user: AppUser | null;
+  canEdit: boolean;
+  canRead: boolean;
+  canSync: boolean;
+  repoQueryStatus: RepoQueryStatus;
+  needsInstall: boolean;
+  manageUrl: string | null;
+  readOnlyLoading: boolean;
+  readOnlyNotes: ReadOnlyNote[];
+  readOnlyDoc: NoteDoc | null;
+  activeId: string | null;
+  autosync: boolean;
+  syncing: boolean;
+  statusMessage: string | null;
+};
+
 export type RepoDataState = {
   sessionToken: string | null;
   user: AppUser | null;
@@ -81,9 +99,16 @@ export type RepoDataEvent =
   | { type: 'repo/accessChanged'; payload: RepoAccessState }
   | { type: 'notes/localChanged'; payload: { notes: NoteMeta[]; folders: string[] } }
   | { type: 'notes/readOnlyChanged'; payload: { notes: ReadOnlyNote[]; loading: boolean } }
+  | { type: 'notes/readOnlyDocLoaded'; payload: { doc: NoteDoc | null } }
   | { type: 'notes/activeChanged'; payload: { id: string | null } }
   | { type: 'sync/statusChanged'; payload: { syncing: boolean; summary?: SyncSummary | null } }
   | { type: 'status/message'; payload: { message: string | null } }
-  | { type: 'state/merge'; payload: Partial<RepoDataState> };
+  | { type: 'state/merge'; payload: Partial<RepoDataStoreState> };
 
-export type RepoStateReducer = (state: RepoDataState, event: RepoDataEvent) => RepoDataState;
+export type RepoStateReducer = (state: RepoDataStoreState, event: RepoDataEvent) => RepoDataStoreState;
+
+export type RepoDataIntent =
+  | { type: 'app/signOut' }
+  | { type: 'notes/readOnly/request'; payload: { branch: string | null } }
+  | { type: 'notes/readOnly/select'; payload: { id: string | null } }
+  | { type: 'notes/readOnly/clear' };

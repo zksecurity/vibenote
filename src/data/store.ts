@@ -1,25 +1,35 @@
-import { useMemo, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { getSessionToken as getAppSessionToken, getSessionUser as getAppSessionUser } from '../auth/app-auth';
-import type { RepoDataEvent, RepoDataState, RepoStateReducer } from './types';
+import type { RepoDataEvent, RepoDataIntent, RepoDataStoreState, RepoStateReducer } from './types';
 import { initialDataState, repoDataReducer } from './store-reducer';
 
-export { getRepoDataStore, useRepoDataStore, useRepoDataSnapshot, dispatchRepoEvent, resetRepoDataStore };
+export {
+  getRepoDataStore,
+  useRepoDataStore,
+  useRepoDataSnapshot,
+  useRepoIntentStream,
+  dispatchRepoEvent,
+  dispatchRepoIntent,
+  resetRepoDataStore,
+};
 
 type Listener = () => void;
+type IntentHandler = (intent: RepoDataIntent) => void;
 
 const storeCache = new Map<string, RepoDataStore>();
 
 class RepoDataStore {
   private listeners = new Set<Listener>();
-  private state: RepoDataState;
+  private intentHandlers = new Set<IntentHandler>();
+  private state: RepoDataStoreState;
   private reducer: RepoStateReducer;
 
-  constructor(initialState: RepoDataState, reducer: RepoStateReducer) {
+  constructor(initialState: RepoDataStoreState, reducer: RepoStateReducer) {
     this.state = initialState;
     this.reducer = reducer;
   }
 
-  getState(): RepoDataState {
+  getState(): RepoDataStoreState {
     return this.state;
   }
 
@@ -36,12 +46,23 @@ class RepoDataStore {
       this.listeners.delete(listener);
     };
   }
+
+  dispatchIntent(intent: RepoDataIntent) {
+    for (const handler of this.intentHandlers) handler(intent);
+  }
+
+  subscribeToIntents(handler: IntentHandler) {
+    this.intentHandlers.add(handler);
+    return () => {
+      this.intentHandlers.delete(handler);
+    };
+  }
 }
 
 function getRepoDataStore(slug: string): RepoDataStore {
   let store = storeCache.get(slug);
   if (!store) {
-    const hydratedState: RepoDataState = {
+    const hydratedState: RepoDataStoreState = {
       ...initialDataState,
       sessionToken: getAppSessionToken(),
       user: getAppSessionUser(),
@@ -56,7 +77,7 @@ function useRepoDataStore(slug: string) {
   return useMemo(() => getRepoDataStore(slug), [slug]);
 }
 
-function useRepoDataSnapshot(slug: string) {
+function useRepoDataSnapshot(slug: string): RepoDataStoreState {
   const store = useRepoDataStore(slug);
   return useSyncExternalStore(
     (listener) => store.subscribe(listener),
@@ -65,9 +86,32 @@ function useRepoDataSnapshot(slug: string) {
   );
 }
 
+function useRepoIntentStream(slug: string, handler: IntentHandler | null) {
+  const store = useRepoDataStore(slug);
+  const handlerRef = useRef(handler);
+
+  useEffect(() => {
+    handlerRef.current = handler;
+  }, [handler]);
+
+  useEffect(() => {
+    if (!handlerRef.current) return undefined;
+    return store.subscribeToIntents((intent) => {
+      const current = handlerRef.current;
+      if (!current) return;
+      current(intent);
+    });
+  }, [store]);
+}
+
 function dispatchRepoEvent(slug: string, event: RepoDataEvent) {
   const store = getRepoDataStore(slug);
   store.dispatch(event);
+}
+
+function dispatchRepoIntent(slug: string, intent: RepoDataIntent) {
+  const store = getRepoDataStore(slug);
+  store.dispatchIntent(intent);
 }
 
 function resetRepoDataStore(slug: string) {

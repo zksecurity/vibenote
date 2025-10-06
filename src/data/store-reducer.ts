@@ -1,6 +1,6 @@
-import type { RepoDataEvent, RepoDataState } from './types';
+import type { RepoDataEvent, RepoDataStoreState } from './types';
 
-export const initialDataState: RepoDataState = {
+export const initialDataState: RepoDataStoreState = {
   sessionToken: null,
   user: null,
   canEdit: false,
@@ -10,16 +10,15 @@ export const initialDataState: RepoDataState = {
   needsInstall: false,
   manageUrl: null,
   readOnlyLoading: false,
-  doc: null,
+  readOnlyNotes: [],
+  readOnlyDoc: null,
   activeId: null,
-  activeNotes: [],
-  activeFolders: [],
   autosync: false,
   syncing: false,
   statusMessage: null,
 };
 
-export function repoDataReducer(state: RepoDataState, event: RepoDataEvent): RepoDataState {
+export function repoDataReducer(state: RepoDataStoreState, event: RepoDataEvent): RepoDataStoreState {
   switch (event.type) {
     case 'auth/sessionUpdated': {
       if (state.sessionToken === event.payload.token && state.user === event.payload.user) {
@@ -30,6 +29,15 @@ export function repoDataReducer(state: RepoDataState, event: RepoDataEvent): Rep
     case 'sync/statusChanged': {
       if (state.syncing === event.payload.syncing) return state;
       return { ...state, syncing: event.payload.syncing };
+    }
+    case 'notes/readOnlyChanged': {
+      const { notes, loading } = event.payload;
+      if (state.readOnlyLoading === loading && state.readOnlyNotes === notes) return state;
+      return { ...state, readOnlyNotes: notes, readOnlyLoading: loading };
+    }
+    case 'notes/readOnlyDocLoaded': {
+      if (state.readOnlyDoc === event.payload.doc) return state;
+      return { ...state, readOnlyDoc: event.payload.doc };
     }
     case 'status/message': {
       if (state.statusMessage === event.payload.message) return state;

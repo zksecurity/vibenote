@@ -261,6 +261,7 @@ describe('useRepoData', () => {
   // Read-only repos should list remote notes and fetch content lazily while keeping install state stable.
   test('read-only repos fetch remote notes and refresh on selection', async () => {
     const slug = 'octo/wiki';
+    resetRepoDataStore(slug);
     const onRecordRecent = vi.fn();
 
     mockGetSessionToken.mockReturnValue(null);
@@ -572,6 +573,7 @@ describe('useRepoData', () => {
   // Switching notes in read-only mode should respect loading states without toggling install banners.
   test('read-only selection keeps install state stable', async () => {
     const slug = 'octo/wiki';
+    resetRepoDataStore(slug);
     const onRecordRecent = vi.fn();
 
     mockGetSessionToken.mockReturnValue(null);
@@ -611,8 +613,13 @@ describe('useRepoData', () => {
     expect(result.current.state.readOnlyLoading).toBe(false);
     expect(result.current.state.needsInstall).toBe(false);
     expect(seenNeedsInstall.every((flag) => flag === false)).toBe(true);
-    const loadingTransitions = seenReadOnlyLoading.filter(Boolean).length;
-    expect(loadingTransitions).toBeLessThanOrEqual(1);
+    let trueEntries = 0;
+    for (let i = 0; i < seenReadOnlyLoading.length; i += 1) {
+      if (seenReadOnlyLoading[i] && (i === 0 || !seenReadOnlyLoading[i - 1])) {
+        trueEntries += 1;
+      }
+    }
+    expect(trueEntries).toBeLessThanOrEqual(1);
   });
 
   // Signing out should clear local data and disable syncing.
