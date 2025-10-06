@@ -33,15 +33,17 @@ const WELCOME_NOTE = `# 👋 Welcome to VibeNote
 - 🔄 One-click sync keeps local edits and remote changes in step.
 
 ## Quick start
-1. Create or open a note in the list on the left.
-2. Hit the GitHub button to connect your account via the device flow.
-3. Choose the repository VibeNote should sync with (or let it create one).
-4. Use the circular sync icon whenever you want to pull and push changes.
+1. Hit the GitHub button to sign in via the GitHub App authorization flow.
+2. Pick the repository VibeNote should sync with.
+3. "Get Read/Write Access" to install the VibeNote app on that repo.
+4. Create or open a note in the list on the left, and edit it.
+5. Use the circular sync icon whenever you want to pull and push changes.
 
 ## Transparency for engineers
 - 🗃️ Notes live in your browser storage and inside your GitHub repo — we never copy them to our servers.
-- 🔐 The GitHub device-flow token stays in 'localStorage'; it is never sent to VibeNote infrastructure.
-- 🤝 Automatic conflict resolution handles Markdown merges for you, so you do not have to untangle git conflicts.
+- 🤝 Automatic conflict resolution handles Markdown merges for you, so you never have to untangle git conflicts.
+- 🔐 The VibeNote GitHub App has minimal authority: Read/write is only allowed when a user also has the same permission on GitHub,
+  AND only on repos where VibeNote was installed with at least the same permissions.
 
 ## Learn more
 - 📦 Source code: https://github.com/mitschabaude/vibenote
