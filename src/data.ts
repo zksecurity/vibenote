@@ -129,7 +129,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
     return new LocalStore(slug, { seedWelcome: true });
   }, [slug, route.kind]);
 
-  const { localNotes, localFolders, notifyStoreListeners } = useRepoStore(store);
+  const { notes: localNotes, folders: localFolders } = useLocalRepoSnapshot(store);
 
   // Hold the currently loaded read-only note so the editor can render remote content.
   const [readOnlyDoc, setReadOnlyDoc] = useState<NoteDoc | null>(null);
@@ -178,7 +178,6 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
     sessionToken,
     linked,
     canEdit,
-    notifyStoreListeners,
   });
 
   // TODO why does this depend on _local notes_ rather than active notes?
@@ -269,7 +268,6 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
           if (rf) files.push({ path: rf.path, text: rf.text, sha: rf.sha });
         }
         store.replaceWithRemote(files);
-        notifyStoreListeners();
         const synced = store.listNotes();
         setActiveId((prev) => {
           if (prev) return prev;
@@ -286,7 +284,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
         initialPullRef.current.done = true;
       }
     })();
-  }, [route, repoAccess.level, linked, slug, store, canEdit, repoAccess.defaultBranch, notifyStoreListeners]);
+  }, [route, repoAccess.level, linked, slug, store, canEdit, repoAccess.defaultBranch]);
 
   // Drop any cached read-only data once we gain write access.
   useEffect(() => {
@@ -444,7 +442,6 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
     }
     clearAllLocalData();
     store.replaceWithRemote([]);
-    notifyStoreListeners();
     setSessionToken(null);
     setUser(null);
     setLinked(false);
@@ -487,7 +484,6 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
   const createNote = (dir: string, name: string) => {
     if (!canEdit) return null;
     const id = store.createNote(name, '', dir);
-    notifyStoreListeners();
     setActiveId(id);
     scheduleAutoSync();
     return id;
@@ -497,7 +493,6 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
     if (!canEdit) return;
     try {
       store.createFolder(parentDir, name);
-      notifyStoreListeners();
     } catch (error) {
       logError(error);
       setSyncMessage('Invalid folder name.');
@@ -510,7 +505,6 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
     if (!canEdit) return;
     try {
       store.renameNote(id, title);
-      notifyStoreListeners();
       scheduleAutoSync();
     } catch (error) {
       logError(error);
@@ -521,7 +515,6 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
   const deleteNote = (id: string) => {
     if (!canEdit) return;
     store.deleteNote(id);
-    notifyStoreListeners();
     const list = store.listNotes();
     const nextId = list[0]?.id ?? null;
     setActiveId((prev) => {
@@ -535,7 +528,6 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
     if (!canEdit) return;
     try {
       store.renameFolder(dir, newName);
-      notifyStoreListeners();
       scheduleAutoSync();
     } catch (error) {
       logError(error);
@@ -552,7 +544,6 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
     });
     if (hasNotes && !window.confirm('Delete folder and all contained notes?')) return;
     store.deleteFolder(dir);
-    notifyStoreListeners();
     const list = store.listNotes();
     setActiveId((prev) => {
       if (!prev) return prev;
@@ -728,62 +719,14 @@ function deriveAccessFromMetadata(input: {
   };
 }
 
-type RepoStoreSnapshot = {
-  notes: NoteMeta[];
-  folders: string[];
-};
-
-function useRepoStore(store: LocalStore) {
-  const listenersRef = useRef(new Set<() => void>());
-  const snapshotRef = useRef<RepoStoreSnapshot | undefined>(undefined);
-  // set to initial state from localStorage on first render
-  if (snapshotRef.current === undefined) {
-    snapshotRef.current = readRepoSnapshot(store);
-  }
-  const storagePrefix = `vibenote:repo:${encodeURIComponent(store.slug)}:`;
-
-  const emit = useCallback(() => {
-    const current = snapshotRef.current!;
-    const next = readRepoSnapshot(store);
-    if (current && snapshotsEqual(current, next)) return;
-    snapshotRef.current = next;
-    for (const listener of listenersRef.current) {
-      try {
-        listener();
-      } catch (error) {
-        logError('vibenote: repo store listener failed', error);
-      }
-    }
-  }, [store]);
-
-  // React to storage events from other tabs so the tree stays in sync across windows.
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const handler = (event: StorageEvent) => {
-      if (event.storageArea !== window.localStorage) return;
-      if (!event.key || !event.key.startsWith(storagePrefix)) return;
-      emit();
-    };
-    window.addEventListener('storage', handler);
-    return () => window.removeEventListener('storage', handler);
-  }, [emit, storagePrefix]);
-
-  const subscribe = useCallback((listener: () => void) => {
-    listenersRef.current.add(listener);
-    return () => {
-      listenersRef.current.delete(listener);
-    };
-  }, []);
-
-  const getSnapshot = useCallback(() => snapshotRef.current!, []);
-
-  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-
-  return {
-    localNotes: snapshot.notes,
-    localFolders: snapshot.folders,
-    notifyStoreListeners: emit,
-  } as const;
+// Subscribe to the LocalStore's internal cache so React re-renders whenever
+// notes or folder lists change (including updates from other tabs).
+function useLocalRepoSnapshot(store: LocalStore) {
+  return useSyncExternalStore(
+    (listener) => store.subscribe(listener),
+    () => store.getSnapshot(),
+    () => store.getSnapshot()
+  );
 }
 
 type AutosyncParams = {
@@ -793,7 +736,6 @@ type AutosyncParams = {
   sessionToken: string | null;
   linked: boolean;
   canEdit: boolean;
-  notifyStoreListeners: () => void;
 };
 
 type PerformSyncOptions = {
@@ -801,7 +743,7 @@ type PerformSyncOptions = {
 };
 
 function useAutosync(params: AutosyncParams) {
-  const { slug, route, store, sessionToken, linked, canEdit, notifyStoreListeners } = params;
+  const { slug, route, store, sessionToken, linked, canEdit } = params;
   // Remember the user's autosync preference per repo slug.
   const [autosync, setAutosyncState] = useState<boolean>(() =>
     slug !== 'new' ? isAutosyncEnabled(slug) : false
@@ -835,7 +777,6 @@ function useAutosync(params: AutosyncParams) {
         if (!sessionToken || !linked || slug === 'new' || !canEdit) return null;
         const summary = await syncBidirectional(store, slug);
         recordAutoSyncRun(slug);
-        notifyStoreListeners();
         return summary;
       } catch (error) {
         if (options.silent) {
@@ -848,7 +789,7 @@ function useAutosync(params: AutosyncParams) {
         setSyncing(false);
       }
     },
-    [sessionToken, linked, slug, canEdit, store, notifyStoreListeners]
+    [sessionToken, linked, slug, canEdit, store]
   );
 
   const scheduleAutoSync = useCallback(
@@ -957,42 +898,6 @@ function remoteConfigForSlug(slug: string, branch: string | null): RemoteConfig 
   const cfg: RemoteConfig = buildRemoteConfig(slug);
   if (branch) cfg.branch = branch;
   return cfg;
-}
-
-function readRepoSnapshot(store: LocalStore): RepoStoreSnapshot {
-  return {
-    notes: store.listNotes(),
-    folders: store.listFolders(),
-  };
-}
-
-function snapshotsEqual(a: RepoStoreSnapshot, b: RepoStoreSnapshot): boolean {
-  return noteMetasEqual(a.notes, b.notes) && foldersEqual(a.folders, b.folders);
-}
-
-function noteMetasEqual(a: NoteMeta[], b: NoteMeta[]): boolean {
-  if (a === b) return true;
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    const left = a[i];
-    const right = b[i];
-    if (!left || !right) return false;
-    if (left.id !== right.id) return false;
-    if (left.path !== right.path) return false;
-    if (left.title !== right.title) return false;
-    if ((left.dir || '') !== (right.dir || '')) return false;
-    if (left.updatedAt !== right.updatedAt) return false;
-  }
-  return true;
-}
-
-function foldersEqual(a: string[], b: string[]): boolean {
-  if (a === b) return true;
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return false;
-  }
-  return true;
 }
 
 function areAccessStatesEqual(a: RepoAccessState, b: RepoAccessState): boolean {

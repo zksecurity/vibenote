@@ -1,3 +1,5 @@
+import { logError } from '../lib/logging';
+
 export type NoteMeta = {
   id: string;
   path: string;
@@ -51,6 +53,83 @@ const WELCOME_NOTE = `# 👋 Welcome to VibeNote
 
 Happy writing! ✍️`;
 
+function repoStoragePrefix(slug: string): string {
+  return `${REPO_PREFIX}:${encodeSlug(slug)}:`;
+}
+
+// Shared per-slug cache so every LocalStore instance observes the same state and
+// we only bind one storage listener for cross-tab updates.
+function ensureRepoSubscribers(slug: string): RepoSubscribers {
+  const normalized = normalizeSlug(slug);
+  let shared = repoSubscribers.get(normalized);
+  const currentStorage =
+    typeof window !== 'undefined' ? window.localStorage : (globalThis as { localStorage?: Storage }).localStorage;
+  if (!shared) {
+    shared = {
+      snapshot: readRepoSnapshot(normalized),
+      listeners: new Set(),
+      storageRef: currentStorage,
+    };
+    if (typeof window !== 'undefined') {
+      const prefix = repoStoragePrefix(normalized);
+      const handler = (event: StorageEvent) => {
+        if (event.storageArea !== window.localStorage) return;
+        if (!event.key || !event.key.startsWith(prefix)) return;
+        emitRepoChange(normalized);
+      };
+      window.addEventListener('storage', handler);
+      shared.storageListener = handler;
+    }
+    repoSubscribers.set(normalized, shared);
+  } else if (shared.storageRef !== currentStorage && currentStorage) {
+    shared.storageRef = currentStorage;
+    refreshRepoSnapshot(normalized, shared);
+  }
+  return shared;
+}
+
+function refreshRepoSnapshot(slug: string, shared = ensureRepoSubscribers(slug)) {
+  shared.snapshot = readRepoSnapshot(slug);
+}
+
+function emitRepoChange(slug: string) {
+  const shared = repoSubscribers.get(normalizeSlug(slug));
+  if (!shared) return;
+  refreshRepoSnapshot(slug, shared);
+  for (const listener of Array.from(shared.listeners)) {
+    try {
+      listener();
+    } catch (error) {
+      logError(error);
+    }
+  }
+}
+
+function readRepoSnapshot(slug: string): RepoStoreSnapshot {
+  const notes = loadIndexForSlug(slug)
+    .slice()
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+  const folders = loadFoldersForSlug(slug);
+  return {
+    notes: Object.freeze(notes) as NoteMeta[],
+    folders: Object.freeze(folders) as string[],
+  };
+}
+
+export type RepoStoreSnapshot = {
+  notes: NoteMeta[];
+  folders: string[];
+};
+
+type RepoSubscribers = {
+  snapshot: RepoStoreSnapshot;
+  listeners: Set<() => void>;
+  storageListener?: (event: StorageEvent) => void;
+  storageRef?: Storage;
+};
+
+const repoSubscribers = new Map<string, RepoSubscribers>();
+
 export class LocalStore {
   slug: string;
   private index: NoteMeta[];
@@ -73,13 +152,28 @@ export class LocalStore {
       this.createNote('Welcome', WELCOME_NOTE);
       this.index = this.loadIndex();
     }
+    ensureRepoSubscribers(this.slug);
+  }
+
+  getSnapshot(): RepoStoreSnapshot {
+    const shared = ensureRepoSubscribers(this.slug);
+    return shared.snapshot;
+  }
+
+  subscribe(listener: () => void): () => void {
+    const shared = ensureRepoSubscribers(this.slug);
+    shared.listeners.add(listener);
+    return () => {
+      shared.listeners.delete(listener);
+    };
   }
 
   listNotes(): NoteMeta[] {
     // Defensive: refresh from storage to avoid returning stale data across tabs
     // [VNDBG] This read is safe and avoids UI from showing entries that were removed elsewhere.
-    this.index = this.loadIndex();
-    return this.index.slice().sort((a, b) => b.updatedAt - a.updatedAt);
+    const snapshot = ensureRepoSubscribers(this.slug).snapshot;
+    this.index = snapshot.notes;
+    return snapshot.notes.slice();
   }
 
   loadNote(id: string): NoteDoc | null {
@@ -96,6 +190,7 @@ export class LocalStore {
     localStorage.setItem(this.noteKey(id), JSON.stringify(next));
     debugLog(this.slug, 'saveNote', { id, path: doc.path, updatedAt });
     this.touchIndex(id, { updatedAt });
+    emitRepoChange(this.slug);
   }
 
   createNote(title = 'Untitled', text = '', dir: string = ''): string {
@@ -113,6 +208,7 @@ export class LocalStore {
     this.index = idx;
     this.addFolder(normDir);
     debugLog(this.slug, 'createNote', { id, path, title: displayTitle });
+    emitRepoChange(this.slug);
     return id;
   }
 
@@ -141,6 +237,7 @@ export class LocalStore {
       });
     }
     debugLog(this.slug, 'renameNote', { id, fromPath, toPath: path, pathChanged });
+    emitRepoChange(this.slug);
   }
 
   deleteNote(id: string) {
@@ -157,6 +254,7 @@ export class LocalStore {
     localStorage.removeItem(this.noteKey(id));
     this.index = idx;
     debugLog(this.slug, 'deleteNote', { id, path: doc?.path });
+    emitRepoChange(this.slug);
   }
 
   resetToWelcome(): string {
@@ -170,6 +268,7 @@ export class LocalStore {
     for (let key of toRemove) localStorage.removeItem(key);
     let id = this.createNote('Welcome', WELCOME_NOTE);
     this.index = this.loadIndex();
+    emitRepoChange(this.slug);
     return id;
   }
 
@@ -200,19 +299,13 @@ export class LocalStore {
     localStorage.setItem(this.foldersKey, JSON.stringify(Array.from(folderSet).sort()));
     this.index = index;
     debugLog(this.slug, 'replaceWithRemote', { count: files.length });
+    emitRepoChange(this.slug);
   }
 
   // --- Folder APIs ---
   listFolders(): string[] {
-    let raw = localStorage.getItem(this.foldersKey);
-    if (!raw) return [];
-    try {
-      let arr = JSON.parse(raw) as string[];
-      if (!Array.isArray(arr)) return [];
-      return arr.filter((d) => typeof d === 'string');
-    } catch {
-      return [];
-    }
+    const snapshot = ensureRepoSubscribers(this.slug).snapshot;
+    return snapshot.folders.slice();
   }
 
   createFolder(parentDir: string, name: string) {
@@ -227,6 +320,7 @@ export class LocalStore {
     for (let p of ancestorsOf(target)) folders.add(p);
     localStorage.setItem(this.foldersKey, JSON.stringify(Array.from(folders).sort()));
     debugLog(this.slug, 'folder:create', { target });
+    emitRepoChange(this.slug);
   }
 
   renameFolder(oldDir: string, newName: string) {
@@ -268,6 +362,7 @@ export class LocalStore {
     }
     localStorage.setItem(this.foldersKey, JSON.stringify(Array.from(updated).sort()));
     debugLog(this.slug, 'folder:move', { from, to });
+    emitRepoChange(this.slug);
   }
 
   deleteFolder(dir: string) {
@@ -291,6 +386,7 @@ export class LocalStore {
       }
     }
     debugLog(this.slug, 'folder:delete', { dir: target });
+    emitRepoChange(this.slug);
   }
 
   moveNoteToDir(id: string, dir: string) {
@@ -498,6 +594,7 @@ export function markSynced(slug: string, id: string, patch: { remoteSha?: string
   if (patch.syncedHash !== undefined) next.lastSyncedHash = patch.syncedHash;
   localStorage.setItem(key, JSON.stringify(next));
   debugLog(slug, 'markSynced', { id, patch });
+  emitRepoChange(slug);
 }
 
 export function updateNoteText(slug: string, id: string, text: string) {
@@ -515,6 +612,7 @@ export function updateNoteText(slug: string, id: string, text: string) {
   localStorage.setItem(key, JSON.stringify(next));
   touchIndexUpdatedAt(slug, id, updatedAt);
   debugLog(slug, 'updateNoteText', { id, updatedAt });
+  emitRepoChange(slug);
 }
 
 export function findByPath(slug: string, path: string): { id: string; doc: NoteDoc } | null {
@@ -562,6 +660,7 @@ export function moveNotePath(slug: string, id: string, toPath: string) {
   }
   localStorage.setItem(repoKey(slug, 'index'), JSON.stringify(idx));
   debugLog(slug, 'moveNotePath', { id, toPath });
+  emitRepoChange(slug);
 }
 
 function loadIndexForSlug(slug: string): NoteMeta[] {
@@ -569,6 +668,18 @@ function loadIndexForSlug(slug: string): NoteMeta[] {
   if (!raw) return [];
   try {
     return JSON.parse(raw);
+  } catch {
+    return [];
+  }
+}
+
+function loadFoldersForSlug(slug: string): string[] {
+  let raw = localStorage.getItem(repoKey(slug, FOLDERS_SUFFIX));
+  if (!raw) return [];
+  try {
+    let parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((dir) => typeof dir === 'string');
   } catch {
     return [];
   }
