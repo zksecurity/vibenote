@@ -606,6 +606,21 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
   return { state, actions };
 }
 
+// Subscribe to the LocalStore's internal cache so React re-renders whenever
+// notes or folder lists change (including updates from other tabs).
+function useLocalRepoSnapshot(slug: string) {
+  const storeRef = useRef<ReturnType<typeof getRepoStore>>();
+  if (storeRef.current?.slug !== slug) {
+    storeRef.current = getRepoStore(slug);
+  }
+  const store = storeRef.current;
+  return useSyncExternalStore(
+    (listener) => store.subscribe(listener),
+    () => store.getSnapshot(),
+    () => store.getSnapshot()
+  );
+}
+
 type RepoAccessLevel = 'none' | 'read' | 'write';
 type RepoQueryStatus = 'idle' | 'checking' | 'ready' | 'rate-limited' | 'error';
 
@@ -712,21 +727,6 @@ function deriveAccessFromMetadata(input: {
     manageUrl: meta.manageUrl ?? null,
     isPrivate: meta.isPrivate,
   };
-}
-
-// Subscribe to the LocalStore's internal cache so React re-renders whenever
-// notes or folder lists change (including updates from other tabs).
-function useLocalRepoSnapshot(slug: string) {
-  const storeRef = useRef<ReturnType<typeof getRepoStore>>();
-  if (storeRef.current?.slug !== slug) {
-    storeRef.current = getRepoStore(slug);
-  }
-  const store = storeRef.current;
-  return useSyncExternalStore(
-    (listener) => store.subscribe(listener),
-    () => store.getSnapshot(),
-    () => store.getSnapshot()
-  );
 }
 
 function useAutosync(params: {
