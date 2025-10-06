@@ -23,6 +23,13 @@ This document captures developer‑focused setup, deployment, and conventions.
 - Mobile-first: modals full-screen on small screens; convenient tap targets.
 - Visual direction: light GitHub-inspired shell. Use soft gray backgrounds, white surfaces, GitHub green for primary actions, and muted blue accents. Top bar mirrors GitHub repo view with circular sync icon, repo chip, and avatar. On small screens, repo name becomes the "title" (owner hidden <520px) and header stays within one row.
 
+## Frontend Architecture
+
+- `src/ui/RepoView.tsx` is the primary workspace screen. It renders the navigation shell (header, repo switcher, file tree, editor) and only owns ephemeral UI state such as dropdown toggles, sidebar visibility, and keyboard shortcuts.
+- RepoView consumes `useRepoData` from `src/data.ts`. The hook centralises session/auth, local storage, autosync timers, and GitHub interactions. It exposes `{ state, actions }` to the UI.
+- Components must call the hook’s actions (e.g. `createNote`, `renameFolder`, `syncNow`) instead of talking to storage or sync modules directly. This keeps side effects in one layer and allows hooks/tests to mock behaviour easily.
+- `useRepoData` delegates to `LocalStore` for persistence and to the `src/sync/` modules for remote operations. When adding new capabilities, extend the hook first, then thread new state/actions down through RepoView.
+
 ## Auth
 
 - “Connect GitHub” opens the GitHub App popup flow (`/v1/auth/github/*`), issuing user-scoped OAuth tokens.
