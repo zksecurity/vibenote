@@ -15,7 +15,7 @@ export type NoteDoc = NoteMeta & {
 export { debugLog };
 
 // --- Debug logging ---
-const DEBUG_ENABLED = true;
+const DEBUG_ENABLED = false;
 
 const NS = 'vibenote';
 const REPO_PREFIX = `${NS}:repo`;

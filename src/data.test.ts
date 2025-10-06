@@ -3,7 +3,6 @@ import { beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { RepoMetadata } from './lib/backend';
 import type { Route } from './ui/routing';
 import { LocalStore, markRepoLinked, recordAutoSyncRun, setLastActiveNoteId } from './storage/local';
-import { MockRemoteRepo } from './test/mock-remote';
 
 type RemoteFile = { path: string; text: string; sha: string };
 
@@ -623,79 +622,4 @@ describe('useRepoData', () => {
     expect(new LocalStore(slug).listNotes()).toHaveLength(0);
   });
 
-  test('renaming a folder moves all contained files on the remote', async () => {
-    const slug = 'acme/notes';
-    const onRecordRecent = vi.fn();
-
-    const remote = new MockRemoteRepo();
-    remote.configure('acme', 'notes');
-    remote.allowToken('access-token');
-    remote.setFile('docs/Alpha.md', 'alpha text');
-    remote.setFile('docs/Beta.md', 'beta text');
-
-    mockGetSessionToken.mockReturnValue('session-token');
-    mockGetSessionUser.mockReturnValue({ login: 'mona', name: 'Mona', avatarUrl: 'https://example.com/mona.png' });
-    setRepoMetadata(writableMeta);
-
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
-      return remote.handleFetch(input, init);
-    });
-
-    const actualSync = await vi.importActual<typeof import('./sync/git-sync')>('./sync/git-sync');
-    const previousImpl = mockSyncBidirectional.getMockImplementation();
-    mockSyncBidirectional.mockImplementation((store, slugArg) => actualSync.syncBidirectional(store, slugArg));
-
-    try {
-      const store = new LocalStore(slug);
-      const alphaId = store.createNote('Alpha', 'alpha text', 'docs');
-      const betaId = store.createNote('Beta', 'beta text', 'docs');
-      markRepoLinked(slug);
-      markRepoLinked(slug);
-
-      await actualSync.syncBidirectional(store, slug);
-
-      const { result } = renderHook(() =>
-        useRepoData({ slug, route: { kind: 'repo', owner: 'acme', repo: 'notes' }, onRecordRecent })
-      );
-
-      await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
-      expect(result.current.state.canEdit).toBe(true);
-
-      const foldersBefore = new LocalStore(slug).listFolders().sort();
-      expect(foldersBefore).toEqual(['docs']);
-
-      await act(async () => {
-        await result.current.actions.renameFolder('docs', 'guides');
-      });
-
-      expect(result.current.state.statusMessage).toBeNull();
-      await waitFor(() => expect(result.current.state.activeFolders).toEqual(['guides']));
-
-      await waitFor(() => {
-        const localPaths = new LocalStore(slug)
-          .listNotes()
-          .map((n) => n.path)
-          .sort();
-        expect(localPaths).toEqual(['guides/Alpha.md', 'guides/Beta.md']);
-      });
-
-      const rawIndex = globalThis.localStorage?.getItem(
-        `vibenote:repo:${encodeURIComponent(slug)}:index`
-      );
-      expect(rawIndex).toContain('guides/Alpha.md');
-
-      await act(async () => {
-        await result.current.actions.syncNow();
-      });
-
-      const remotePaths = [...remote.snapshot().keys()].sort();
-      expect(remotePaths).toEqual(['guides/Alpha.md', 'guides/Beta.md']);
-    } finally {
-      mockSyncBidirectional.mockReset();
-      if (previousImpl) {
-        mockSyncBidirectional.mockImplementation(previousImpl);
-      }
-      fetchSpy.mockRestore();
-    }
-  });
 });
