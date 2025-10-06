@@ -6,14 +6,13 @@ import {
   setAutosyncEnabled,
   getLastAutoSyncAt,
   recordAutoSyncRun,
-  type NoteMeta,
-  type NoteDoc,
   clearAllLocalData,
   getLastActiveNoteId,
   setLastActiveNoteId,
   hashText,
   getRepoStore,
 } from './storage/local';
+import type { NoteDoc } from './storage/local';
 import {
   signInWithGitHubApp,
   getSessionToken as getAppSessionToken,
@@ -37,84 +36,21 @@ import {
 } from './sync/git-sync';
 import { logError } from './lib/logging';
 import type { Route } from './ui/routing';
-
-export { useRepoData };
-export type {
+import type {
   RepoAccessState,
   RepoDataInputs,
   RepoDataState,
   RepoDataActions,
   RepoNoteListItem,
   ReadOnlyNote,
-};
+  RepoQueryStatus,
+  RepoAccessLevel,
+} from './data/types';
+
+export { useRepoData };
 
 const AUTO_SYNC_MIN_INTERVAL_MS = 60_000;
 const AUTO_SYNC_DEBOUNCE_MS = 10_000;
-
-type RepoNoteListItem = NoteMeta | ReadOnlyNote;
-
-type RepoDataState = {
-  // session state
-  sessionToken: string | null;
-  user: AppUser | null;
-
-  // repo access state
-  canEdit: boolean;
-  canRead: boolean;
-  canSync: boolean;
-  needsInstall: boolean;
-  repoQueryStatus: RepoQueryStatus;
-  manageUrl: string | null;
-  readOnlyLoading: boolean; // TODO why don't we have a loading state when fetching writable notes?
-
-  // repo content
-  doc: NoteDoc | null;
-  activeId: string | null;
-  activeNotes: RepoNoteListItem[];
-  activeFolders: string[];
-
-  // sync state
-  autosync: boolean;
-  syncing: boolean;
-
-  // general info
-  statusMessage: string | null;
-};
-
-type RepoDataActions = {
-  // auth actions
-  signIn: () => Promise<void>;
-  signOut: () => Promise<void>;
-  openRepoAccess: () => Promise<void>;
-
-  // syncing actions
-  syncNow: () => Promise<void>;
-  setAutosync: (enabled: boolean) => void;
-
-  // edit notes/folders
-  selectNote: (id: string | null) => Promise<void>;
-  createNote: (dir: string, name: string) => string | null;
-  createFolder: (parentDir: string, name: string) => void;
-  renameNote: (id: string, title: string) => void;
-  deleteNote: (id: string) => void;
-  renameFolder: (dir: string, newName: string) => void;
-  deleteFolder: (dir: string) => void;
-  updateNoteText: (id: string, text: string) => void;
-};
-
-type ReadOnlyNote = { id: string; path: string; title: string; dir: string; sha?: string };
-
-type RepoDataInputs = {
-  slug: string;
-  route: Route;
-  onRecordRecent: (entry: {
-    slug: string;
-    owner?: string;
-    repo?: string;
-    title?: string;
-    connected?: boolean;
-  }) => void;
-};
 
 function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
   state: RepoDataState;
@@ -620,21 +556,6 @@ function useLocalRepoSnapshot(slug: string) {
     () => store.getSnapshot()
   );
 }
-
-type RepoAccessLevel = 'none' | 'read' | 'write';
-type RepoQueryStatus = 'idle' | 'checking' | 'ready' | 'rate-limited' | 'error';
-
-type RepoAccessState = {
-  level: RepoAccessLevel;
-  status: RepoQueryStatus;
-  metadata: RepoMetadata | null;
-  defaultBranch: string | null;
-  error: string | null;
-  rateLimited: boolean;
-  needsInstall: boolean;
-  manageUrl: string | null;
-  isPrivate: boolean | null;
-};
 
 const initialAccessState: RepoAccessState = {
   level: 'none',

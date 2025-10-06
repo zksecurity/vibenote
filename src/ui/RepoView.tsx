@@ -4,7 +4,8 @@ import { Editor } from './Editor';
 import { RepoSwitcher } from './RepoSwitcher';
 import { Toggle } from './Toggle';
 import { GitHubIcon, ExternalLinkIcon, NotesIcon, CloseIcon, SyncIcon } from './RepoIcons';
-import { useRepoData, type RepoNoteListItem } from '../data';
+import { useRepoData } from '../data';
+import type { RepoNoteListItem } from '../data/types';
 import { getExpandedFolders, setExpandedFolders } from '../storage/local';
 import type { Route } from './routing';
 
