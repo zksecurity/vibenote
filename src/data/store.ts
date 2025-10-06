@@ -1,6 +1,6 @@
+import { useMemo, useSyncExternalStore } from 'react';
 import type { RepoDataEvent, RepoDataInputs, RepoDataState, RepoStateReducer } from './types';
 import { initialDataState, repoDataReducer } from './store-reducer';
-import { useMemo } from 'react';
 
 const storeCache = new Map<string, RepoDataStore>();
 
@@ -44,6 +44,14 @@ export function getRepoDataStore(inputs: RepoDataInputs): RepoDataStore {
 }
 
 export function useRepoDataStore(inputs: RepoDataInputs) {
-  const store = useMemo(() => getRepoDataStore(inputs), [inputs.slug]);
-  return store;
+  return useMemo(() => getRepoDataStore(inputs), [inputs.slug]);
+}
+
+export function useRepoDataSnapshot(inputs: RepoDataInputs) {
+  const store = useRepoDataStore(inputs);
+  return useSyncExternalStore(
+    (listener) => store.subscribe(listener),
+    () => store.getState(),
+    () => store.getState()
+  );
 }
