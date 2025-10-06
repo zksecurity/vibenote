@@ -129,6 +129,41 @@ type RepoSubscribers = {
 };
 
 const repoSubscribers = new Map<string, RepoSubscribers>();
+const storeCache = new Map<string, LocalStore>();
+
+export type GetRepoStoreOptions = {
+  seedWelcome?: boolean;
+};
+
+export function getRepoStore(slug: string, options: GetRepoStoreOptions = {}): LocalStore {
+  const normalized = normalizeSlug(slug);
+  if (normalized === 'new') {
+    return new LocalStore(normalized, options);
+  }
+  let store = storeCache.get(normalized);
+  if (!store) {
+    store = new LocalStore(normalized, options);
+    storeCache.set(normalized, store);
+  }
+  return store;
+}
+
+export function resetRepoStore(slug: string) {
+  const normalized = normalizeSlug(slug);
+  const shared = repoSubscribers.get(normalized);
+  if (shared?.storageListener && typeof window !== 'undefined') {
+    window.removeEventListener('storage', shared.storageListener);
+  }
+  repoSubscribers.delete(normalized);
+  storeCache.delete(normalized);
+}
+
+function resetAllRepoStores() {
+  for (const key of repoSubscribers.keys()) {
+    resetRepoStore(key);
+  }
+  storeCache.clear();
+}
 
 export class LocalStore {
   slug: string;
@@ -820,6 +855,7 @@ export function clearAllLocalData() {
     if (key.startsWith(`${NS}:`)) remove.push(key);
   }
   for (const key of remove) localStorage.removeItem(key);
+  resetAllRepoStores();
 }
 
 // --- Per-repository preferences ---

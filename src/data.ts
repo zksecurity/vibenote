@@ -1,6 +1,5 @@
 import { useMemo, useState, useEffect, useRef, useCallback, useSyncExternalStore } from 'react';
 import {
-  LocalStore,
   isRepoLinked,
   markRepoLinked,
   isAutosyncEnabled,
@@ -13,6 +12,8 @@ import {
   getLastActiveNoteId,
   setLastActiveNoteId,
   hashText,
+  getRepoStore,
+  type GetRepoStoreOptions,
 } from './storage/local';
 import {
   signInWithGitHubApp,
@@ -122,12 +123,9 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
 } {
   // ORIGINAL STATE AND MAIN HOOKS
   // Local storage wrapper
-  const store = useMemo(
-    () => new LocalStore(slug, { seedWelcome: route.kind !== 'repo' }),
-    [slug, route.kind]
-  );
-
-  const { notes: localNotes, folders: localFolders } = useLocalRepoSnapshot(store);
+  const { notes: localNotes, folders: localFolders } = useLocalRepoSnapshot(slug, {
+    seedWelcome: route.kind !== 'repo',
+  });
 
   // Hold the currently loaded read-only note so the editor can render remote content.
   const [readOnlyDoc, setReadOnlyDoc] = useState<NoteDoc | null>(null);
@@ -172,7 +170,6 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
   const { autosync, setAutosync, scheduleAutoSync, performSync, syncing } = useAutosync({
     slug,
     route,
-    store,
     sessionToken,
     linked,
     canEdit,
@@ -185,8 +182,8 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
   const localDoc = useMemo(() => {
     if (!canEdit) return null;
     if (!activeId) return null;
-    return store.loadNote(activeId);
-  }, [canEdit, activeId, store, localNotes]);
+    return getRepoStore(slug).loadNote(activeId);
+  }, [canEdit, activeId, slug, localNotes]);
   const doc = canEdit ? localDoc : readOnlyDoc;
 
   // Derive the folder set from whichever source is powering the tree.
@@ -264,8 +261,9 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
           const rf = await pullNote(cfg, e.path);
           if (rf) files.push({ path: rf.path, text: rf.text, sha: rf.sha });
         }
-        store.replaceWithRemote(files);
-        const synced = store.listNotes();
+        const localStore = getRepoStore(slug);
+        localStore.replaceWithRemote(files);
+        const synced = localStore.listNotes();
         setActiveId((prev) => {
           if (prev) return prev;
           const stored = getLastActiveNoteId(slug);
@@ -281,7 +279,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
         initialPullRef.current.done = true;
       }
     })();
-  }, [route, repoAccess.level, linked, slug, store, canEdit, repoAccess.defaultBranch]);
+  }, [route, repoAccess.level, linked, slug, canEdit, repoAccess.defaultBranch]);
 
   // Drop any cached read-only data once we gain write access.
   useEffect(() => {
@@ -359,9 +357,10 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
         const accessToken = await ensureFreshAccessToken();
         if (!accessToken) return;
         const cfg = remoteConfigForSlug(slug, repoAccess.defaultBranch);
-        const pending = store
+        const localStore = getRepoStore(slug);
+        const pending = localStore
           .listNotes()
-          .map((meta) => store.loadNote(meta.id))
+          .map((meta) => localStore.loadNote(meta.id))
           .filter((note): note is NoteDoc => !!note)
           .filter((note) => note.lastSyncedHash !== hashText(note.text ?? ''))
           .map((note) => ({
@@ -396,7 +395,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
       window.removeEventListener('pagehide', onPageHide);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [route.kind, sessionToken, linked, slug, canEdit, store, repoAccess.defaultBranch]);
+  }, [route.kind, sessionToken, linked, slug, canEdit, repoAccess.defaultBranch]);
 
   // CLICK HANDLERS
 
@@ -438,7 +437,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
       console.warn('vibenote: failed to sign out cleanly', error);
     }
     clearAllLocalData();
-    store.replaceWithRemote([]);
+    getRepoStore(slug).replaceWithRemote([]);
     setSessionToken(null);
     setUser(null);
     setLinked(false);
@@ -474,13 +473,13 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
 
   const updateNoteText = (id: string, text: string) => {
     if (!canEdit) return;
-    store.saveNote(id, text);
+    getRepoStore(slug).saveNote(id, text);
     scheduleAutoSync();
   };
 
   const createNote = (dir: string, name: string) => {
     if (!canEdit) return null;
-    const id = store.createNote(name, '', dir);
+    const id = getRepoStore(slug).createNote(name, '', dir);
     setActiveId(id);
     scheduleAutoSync();
     return id;
@@ -489,7 +488,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
   const createFolder = (parentDir: string, name: string) => {
     if (!canEdit) return;
     try {
-      store.createFolder(parentDir, name);
+      getRepoStore(slug).createFolder(parentDir, name);
     } catch (error) {
       logError(error);
       setSyncMessage('Invalid folder name.');
@@ -501,7 +500,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
   const renameNote = (id: string, title: string) => {
     if (!canEdit) return;
     try {
-      store.renameNote(id, title);
+      getRepoStore(slug).renameNote(id, title);
       scheduleAutoSync();
     } catch (error) {
       logError(error);
@@ -511,8 +510,9 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
 
   const deleteNote = (id: string) => {
     if (!canEdit) return;
-    store.deleteNote(id);
-    const list = store.listNotes();
+    const localStore = getRepoStore(slug);
+    localStore.deleteNote(id);
+    const list = localStore.listNotes();
     const nextId = list[0]?.id ?? null;
     setActiveId((prev) => {
       if (prev && prev !== id) return prev;
@@ -524,7 +524,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
   const renameFolder = (dir: string, newName: string) => {
     if (!canEdit) return;
     try {
-      store.renameFolder(dir, newName);
+      getRepoStore(slug).renameFolder(dir, newName);
       scheduleAutoSync();
     } catch (error) {
       logError(error);
@@ -534,14 +534,15 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
 
   const deleteFolder = (dir: string) => {
     if (!canEdit) return;
-    const notes = store.listNotes();
+    const localStore = getRepoStore(slug);
+    const notes = localStore.listNotes();
     const hasNotes = notes.some((note) => {
       const directory = note.dir ?? '';
       return directory === dir || directory.startsWith(dir + '/');
     });
     if (hasNotes && !window.confirm('Delete folder and all contained notes?')) return;
-    store.deleteFolder(dir);
-    const list = store.listNotes();
+    localStore.deleteFolder(dir);
+    const list = localStore.listNotes();
     setActiveId((prev) => {
       if (!prev) return prev;
       return list.some((note) => note.id === prev) ? prev : list[0]?.id ?? null;
@@ -718,7 +719,14 @@ function deriveAccessFromMetadata(input: {
 
 // Subscribe to the LocalStore's internal cache so React re-renders whenever
 // notes or folder lists change (including updates from other tabs).
-function useLocalRepoSnapshot(store: LocalStore) {
+function useLocalRepoSnapshot(slug: string, options: GetRepoStoreOptions) {
+  const storeRef = useRef<ReturnType<typeof getRepoStore>>();
+  const slugRef = useRef<string>('');
+  if (!storeRef.current || slugRef.current !== slug) {
+    storeRef.current = getRepoStore(slug, options);
+    slugRef.current = slug;
+  }
+  const store = storeRef.current;
   return useSyncExternalStore(
     (listener) => store.subscribe(listener),
     () => store.getSnapshot(),
@@ -726,21 +734,14 @@ function useLocalRepoSnapshot(store: LocalStore) {
   );
 }
 
-type AutosyncParams = {
+function useAutosync(params: {
   slug: string;
   route: Route;
-  store: LocalStore;
   sessionToken: string | null;
   linked: boolean;
   canEdit: boolean;
-};
-
-type PerformSyncOptions = {
-  silent?: boolean;
-};
-
-function useAutosync(params: AutosyncParams) {
-  const { slug, route, store, sessionToken, linked, canEdit } = params;
+}) {
+  const { slug, route, sessionToken, linked, canEdit } = params;
   // Remember the user's autosync preference per repo slug.
   const [autosync, setAutosyncState] = useState<boolean>(() =>
     slug !== 'new' ? isAutosyncEnabled(slug) : false
@@ -766,12 +767,13 @@ function useAutosync(params: AutosyncParams) {
   }, []);
 
   const performSync = useCallback(
-    async (options: PerformSyncOptions = {}): Promise<SyncSummary | null> => {
+    async (options: { silent?: boolean } = {}): Promise<SyncSummary | null> => {
       if (inFlightRef.current) return null;
       inFlightRef.current = true;
       setSyncing(true);
       try {
         if (!sessionToken || !linked || slug === 'new' || !canEdit) return null;
+        const store = getRepoStore(slug);
         const summary = await syncBidirectional(store, slug);
         recordAutoSyncRun(slug);
         return summary;
@@ -786,7 +788,7 @@ function useAutosync(params: AutosyncParams) {
         setSyncing(false);
       }
     },
-    [sessionToken, linked, slug, canEdit, store]
+    [sessionToken, linked, slug, canEdit]
   );
 
   const scheduleAutoSync = useCallback(
