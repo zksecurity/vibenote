@@ -13,14 +13,7 @@ import {
   getRepoStore,
 } from './storage/local';
 import type { NoteDoc } from './storage/local';
-import {
-  signInWithGitHubApp,
-  getSessionToken as getAppSessionToken,
-  getSessionUser as getAppSessionUser,
-  ensureFreshAccessToken,
-  signOutFromGitHubApp,
-  type AppUser,
-} from './auth/app-auth';
+import { signInWithGitHubApp, ensureFreshAccessToken, signOutFromGitHubApp } from './auth/app-auth';
 import {
   getRepoMetadata as apiGetRepoMetadata,
   getInstallUrl as apiGetInstallUrl,
@@ -46,6 +39,7 @@ import type {
   RepoQueryStatus,
   RepoAccessLevel,
 } from './data/types';
+import { useRepoDataSnapshot, dispatchRepoEvent } from './data/store';
 
 export { useRepoData };
 
@@ -57,6 +51,12 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
   actions: RepoDataActions;
 } {
   // ORIGINAL STATE AND MAIN HOOKS
+  const { sessionToken, user, statusMessage, syncing } = useRepoDataSnapshot(slug);
+
+  function setStatusMessage(message: string | null) {
+    dispatchRepoEvent(slug, { type: 'status/message', payload: { message } });
+  }
+
   // Local storage wrapper
   const { notes: localNotes, folders: localFolders } = useLocalRepoSnapshot(slug);
 
@@ -69,18 +69,8 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
   // Indicate when remote read-only data is being fetched to show loading states.
   const [readOnlyLoading, setReadOnlyLoading] = useState(false);
 
-  // Store the current GitHub App session token to toggle authenticated features instantly.
-  const [sessionToken, setSessionToken] = useState(getAppSessionToken);
-
-  // Carry the latest sync status message shown across the workspace.
-  // TODO make this disappear after a timeout
-  const [statusMessage, setSyncMessage] = useState<string | null>(null);
-
   // Track whether this repo slug has already been linked to GitHub sync.
   const [linked, setLinked] = useState(() => isRepoLinked(slug));
-
-  // Keep the signed-in GitHub App user details for header UI.
-  const [user, setUser] = useState(getAppSessionUser);
 
   // Query GitHub for repo access state and other metadata.
   const repoAccess = useRepoAccess({ route, sessionToken, linked });
@@ -100,7 +90,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
     (!!sessionToken && (repoAccess.level === 'write' || (!accessStatusReady && linked)));
   const canRead = canEdit || isReadOnly;
 
-  const { autosync, setAutosync, scheduleAutoSync, performSync, syncing } = useAutosync({
+  const { autosync, setAutosync, scheduleAutoSync, performSync } = useAutosync({
     slug,
     route,
     sessionToken,
@@ -205,7 +195,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
         });
         markRepoLinked(slug);
         setLinked(true);
-        setSyncMessage('Loaded repository');
+        setStatusMessage('Loaded repository');
       } catch (error) {
         logError(error);
       } finally {
@@ -337,12 +327,14 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
     try {
       const result = await signInWithGitHubApp();
       if (result) {
-        setSessionToken(result.token);
-        setUser(result.user);
+        dispatchRepoEvent(slug, {
+          type: 'auth/sessionUpdated',
+          payload: { token: result.token, user: result.user },
+        });
       }
     } catch (error) {
       logError(error);
-      setSyncMessage('Failed to sign in');
+      setStatusMessage('Failed to sign in');
     }
   };
 
@@ -358,7 +350,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
       window.open(url, '_blank', 'noopener');
     } catch (error) {
       logError(error);
-      setSyncMessage('Failed to open GitHub');
+      setStatusMessage('Failed to open GitHub');
     }
   };
 
@@ -371,23 +363,25 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
     }
     clearAllLocalData();
     getRepoStore(slug).replaceWithRemote([]);
-    setSessionToken(null);
-    setUser(null);
+    dispatchRepoEvent(slug, {
+      type: 'auth/sessionUpdated',
+      payload: { token: null, user: null },
+    });
     setLinked(false);
     setAutosync(false);
     setReadOnlyNotes([]);
     setActiveId(null);
     setReadOnlyDoc(null);
     initialPullRef.current.done = false;
-    setSyncMessage('Signed out');
+    setStatusMessage('Signed out');
   };
 
   // "Sync" button in the header
   const syncNow = async () => {
     try {
-      setSyncMessage(null);
+      setStatusMessage(null);
       if (!sessionToken || !linked || slug === 'new' || !canEdit) {
-        setSyncMessage('Connect GitHub and configure repo first');
+        setStatusMessage('Connect GitHub and configure repo first');
         return;
       }
       const summary = await performSync();
@@ -397,10 +391,10 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
       if (summary?.pushed) parts.push(`pushed ${summary.pushed}`);
       if (summary?.deletedRemote) parts.push(`deleted remote ${summary.deletedRemote}`);
       if (summary?.deletedLocal) parts.push(`deleted local ${summary.deletedLocal}`);
-      setSyncMessage(parts.length ? `Synced: ${parts.join(', ')}` : 'Up to date');
+      setStatusMessage(parts.length ? `Synced: ${parts.join(', ')}` : 'Up to date');
     } catch (error) {
       logError(error);
-      setSyncMessage('Sync failed');
+      setStatusMessage('Sync failed');
     }
   };
 
@@ -424,7 +418,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
       getRepoStore(slug).createFolder(parentDir, name);
     } catch (error) {
       logError(error);
-      setSyncMessage('Invalid folder name.');
+      setStatusMessage('Invalid folder name.');
       return;
     }
     scheduleAutoSync();
@@ -437,7 +431,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
       scheduleAutoSync();
     } catch (error) {
       logError(error);
-      setSyncMessage('Invalid title. Avoid / and control characters.');
+      setStatusMessage('Invalid title. Avoid / and control characters.');
     }
   };
 
@@ -461,7 +455,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
       scheduleAutoSync();
     } catch (error) {
       logError(error);
-      setSyncMessage('Invalid folder name.');
+      setStatusMessage('Invalid folder name.');
     }
   };
 
@@ -662,8 +656,6 @@ function useAutosync(params: {
   const [autosync, setAutosyncState] = useState<boolean>(() =>
     slug !== 'new' ? isAutosyncEnabled(slug) : false
   );
-  // Indicate when a sync operation is currently running.
-  const [syncing, setSyncing] = useState(false);
   const timerRef = useRef<number | null>(null);
   const inFlightRef = useRef(false);
 
@@ -686,11 +678,12 @@ function useAutosync(params: {
     async (options: { silent?: boolean } = {}): Promise<SyncSummary | null> => {
       if (inFlightRef.current) return null;
       inFlightRef.current = true;
-      setSyncing(true);
+      dispatchRepoEvent(slug, { type: 'sync/statusChanged', payload: { syncing: true } });
+      let summary: SyncSummary | null = null;
       try {
         if (!sessionToken || !linked || slug === 'new' || !canEdit) return null;
         const store = getRepoStore(slug);
-        const summary = await syncBidirectional(store, slug);
+        summary = await syncBidirectional(store, slug);
         recordAutoSyncRun(slug);
         return summary;
       } catch (error) {
@@ -701,7 +694,7 @@ function useAutosync(params: {
         throw error;
       } finally {
         inFlightRef.current = false;
-        setSyncing(false);
+        dispatchRepoEvent(slug, { type: 'sync/statusChanged', payload: { syncing: false, summary } });
       }
     },
     [sessionToken, linked, slug, canEdit]
@@ -762,7 +755,6 @@ function useAutosync(params: {
     setAutosync,
     scheduleAutoSync,
     performSync,
-    syncing,
   } as const;
 }
 

@@ -70,9 +70,11 @@ vi.mock('./sync/git-sync', () => ({
 }));
 
 let useRepoData: typeof import('./data').useRepoData;
+let resetRepoDataStore: typeof import('./data/store').resetRepoDataStore;
 
 beforeAll(async () => {
   ({ useRepoData } = await import('./data'));
+  ({ resetRepoDataStore } = await import('./data/store'));
 });
 
 const mockSignInWithGitHubApp = authModule.signInWithGitHubApp;
@@ -173,6 +175,7 @@ describe('useRepoData', () => {
   // Writable repos should sync on demand and reflect updated auth/session state without losing edits.
   test('syncing a linked repo updates storage, reports status, and refreshes auth state', async () => {
     const slug = 'acme/docs';
+    resetRepoDataStore(slug);
     const onRecordRecent = vi.fn();
 
     const seededUuid = '00000000-0000-0000-0000-000000000001';
@@ -307,6 +310,7 @@ describe('useRepoData', () => {
   // During the repo access check, the active document should never flicker away in the UI.
   test('doc remains loaded while repo access resolves', async () => {
     const slug = 'acme/docs';
+    resetRepoDataStore(slug);
     const onRecordRecent = vi.fn();
 
     const seededUuid = '00000000-0000-0000-0000-000000000042';
@@ -363,6 +367,7 @@ describe('useRepoData', () => {
   // Autosync should run quietly in the background without flickering UI state.
   test('autosync schedules background sync without surfacing UI noise', async () => {
     const slug = 'acme/docs';
+    resetRepoDataStore(slug);
     const onRecordRecent = vi.fn();
 
     const uuidSpy = vi
@@ -427,7 +432,7 @@ describe('useRepoData', () => {
     await waitFor(() => expect(mockSyncBidirectional).toHaveBeenCalledWith(expect.any(LocalStore), slug));
     expect(result.current.state.autosync).toBe(true);
     expect(result.current.state.readOnlyLoading).toBe(false);
-    expect(result.current.state.statusMessage).toBe(null);
+    expect(result.current.state.statusMessage).toBeNull();
 
     setTimeoutSpy.mockRestore();
   });
@@ -438,6 +443,8 @@ describe('useRepoData', () => {
 
     const slugA = 'acme/docs';
     const slugB = 'acme/wiki';
+    resetRepoDataStore(slugA);
+    resetRepoDataStore(slugB);
 
     const storeA = new LocalStore(slugA);
     const noteA = storeA.createNote('A', 'text a');
@@ -611,6 +618,7 @@ describe('useRepoData', () => {
   // Signing out should clear local data and disable syncing.
   test('signing out clears local state and disables syncing', async () => {
     const slug = 'acme/docs';
+    resetRepoDataStore(slug);
     const onRecordRecent = vi.fn();
 
     const store = new LocalStore(slug);
