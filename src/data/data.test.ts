@@ -251,7 +251,7 @@ describe('useRepoData', () => {
     });
 
     expect(mockSignInWithGitHubApp).toHaveBeenCalledTimes(1);
-    expect(result.current.state.sessionToken).toBe('fresh-token');
+    expect(result.current.state.hasSession).toBe(true);
     expect(result.current.state.user).toEqual(expect.objectContaining({ login: 'hubot' }));
   });
 
@@ -644,7 +644,7 @@ describe('useRepoData', () => {
     });
 
     expect(mockSignOutFromGitHubApp).toHaveBeenCalledTimes(1);
-    expect(result.current.state.sessionToken).toBeUndefined();
+    expect(result.current.state.hasSession).toBe(false);
     expect(result.current.state.user).toBeUndefined();
     expect(result.current.state.doc).toBeUndefined();
     expect(result.current.state.canSync).toBe(false);

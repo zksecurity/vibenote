@@ -31,7 +31,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
   // Data layer exposes repo-backed state and the high-level actions the UI needs.
   const { state, actions } = useRepoData({ slug, route, onRecordRecent });
   const {
-    sessionToken,
+    hasSession,
     user,
 
     canEdit,
@@ -158,25 +158,27 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                 <ExternalLinkIcon />
               </a>
             </span>
-          ) : sessionToken !== undefined ? (
-            <span className="repo-anchor align-workspace">
-              <button
-                type="button"
-                className="btn ghost repo-btn repo-btn-empty"
-                onClick={() => setShowSwitcher(true)}
-                disabled={syncing}
-                title={repoButtonTitle}
-              >
-                <GitHubIcon />
-                <span className="repo-label">
-                  <span>Choose repository</span>
-                </span>
-              </button>
-            </span>
-          ) : null}
+          ) : (
+            hasSession && (
+              <span className="repo-anchor align-workspace">
+                <button
+                  type="button"
+                  className="btn ghost repo-btn repo-btn-empty"
+                  onClick={() => setShowSwitcher(true)}
+                  disabled={syncing}
+                  title={repoButtonTitle}
+                >
+                  <GitHubIcon />
+                  <span className="repo-label">
+                    <span>Choose repository</span>
+                  </span>
+                </button>
+              </span>
+            )
+          )}
         </div>
         <div className="topbar-actions">
-          {sessionToken === undefined ? (
+          {!hasSession ? (
             <button className="btn primary" onClick={actions.signIn}>
               Connect GitHub
             </button>
@@ -273,7 +275,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                   </code>
                   , or grant access to all repositories (not recommended).
                 </p>
-                {sessionToken !== undefined ? (
+                {hasSession ? (
                   <button className="btn primary" onClick={actions.openRepoAccess}>
                     Get Read/Write Access
                   </button>
@@ -303,11 +305,11 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                   <div className="alert">
                     <span className="badge">Read-only</span>
                     <span className="alert-text">You can view, but not edit files in this repository.</span>
-                    {sessionToken !== undefined ? (
+                    {hasSession && (
                       <button className="btn primary" onClick={actions.openRepoAccess}>
                         Get Write Access
                       </button>
-                    ) : null}
+                    )}
                   </div>
                 )}
                 {doc !== undefined ? (

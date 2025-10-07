@@ -19,9 +19,9 @@ import {
   signInWithGitHubApp,
   getSessionToken as getAppSessionToken,
   getSessionUser as getAppSessionUser,
-  ensureFreshAccessToken,
   signOutFromGitHubApp,
   type AppUser,
+  getAccessTokenRecord,
 } from './auth/app-auth';
 import {
   getRepoMetadata as apiGetRepoMetadata,
@@ -58,7 +58,7 @@ type RepoNoteListItem = NoteMeta | ReadOnlyNote;
 
 type RepoDataState = {
   // session state
-  sessionToken: string | undefined;
+  hasSession: boolean;
   user: AppUser | undefined;
 
   // repo access state
@@ -126,6 +126,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
 
   // Store the current GitHub App session token to toggle authenticated features instantly.
   let [sessionToken, setSessionToken] = useState<string | undefined>(() => getAppSessionToken() ?? undefined);
+  let hasSession = sessionToken !== undefined;
 
   // Carry the latest sync status message shown across the workspace.
   // TODO make this disappear after a timeout
@@ -160,8 +161,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
   // note that we are optimistic about write access until the access check completes,
   // to avoid flickering the UI when revisiting a known writable repo
   let canEdit =
-    route.kind === 'new' ||
-    (sessionToken !== undefined && (repoAccess.level === 'write' || (!accessStatusReady && linked)));
+    route.kind === 'new' || (hasSession && (repoAccess.level === 'write' || (!accessStatusReady && linked)));
 
   let { autosync, setAutosync, scheduleAutoSync, performSync, syncing } = useSync({
     slug,
@@ -239,7 +239,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
   // Attempt a last-minute sync via the Service Worker so pending edits survive tab closure.
   useEffect(() => {
     if (route.kind !== 'repo') return;
-    if (sessionToken === undefined || !linked || slug === 'new' || !canEdit) return;
+    if (!hasSession || !linked || slug === 'new' || !canEdit) return;
     if (!('serviceWorker' in navigator)) return;
 
     const flushViaServiceWorker = async () => {
@@ -247,8 +247,8 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
         let reg = await navigator.serviceWorker.ready;
         let ctrl = reg?.active;
         if (ctrl === null || ctrl === undefined) return;
-        let accessToken = await ensureFreshAccessToken();
-        if (accessToken === null || accessToken === undefined) return;
+        let accessToken = getAccessTokenRecord()?.token;
+        if (accessToken === undefined) return;
         let cfg = buildRemoteConfig(slug, defaultBranch);
         let localStore = getRepoStore(slug);
         let pending = localStore
@@ -288,7 +288,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
       window.removeEventListener('pagehide', onPageHide);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [route.kind, sessionToken, linked, slug, canEdit, defaultBranch]);
+  }, [route.kind, hasSession, linked, slug, canEdit, defaultBranch]);
 
   // CLICK HANDLERS
 
@@ -349,7 +349,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
   const syncNow = async () => {
     try {
       setSyncMessage(undefined);
-      if (sessionToken === undefined || !linked || slug === 'new' || !canEdit) {
+      if (!hasSession || !linked || slug === 'new' || !canEdit) {
         setSyncMessage('Connect GitHub and configure repo first');
         return;
       }
@@ -452,7 +452,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
   };
 
   let state: RepoDataState = {
-    sessionToken,
+    hasSession,
     user,
 
     canRead: canEdit || isReadOnly,
@@ -460,6 +460,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
     canSync: linked && canEdit,
     repoQueryStatus: repoAccess.status,
     needsInstall: repoAccess.needsInstall,
+    manageUrl,
 
     doc,
     activeId,
@@ -469,7 +470,6 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
     autosync,
     syncing,
     statusMessage,
-    manageUrl,
   };
 
   let actions: RepoDataActions = {
@@ -547,7 +547,7 @@ function useRepoAccess(params: { route: Route; sessionToken: string | undefined 
     (async () => {
       try {
         let meta = await apiGetRepoMetadata(owner, repo);
-        let next = deriveAccessFromMetadata({ meta, sessionToken });
+        let next = deriveAccessFromMetadata({ meta, hasSession: sessionToken !== undefined });
         if (!cancelled) {
           setState((prev) => (areAccessStatesEqual(prev, next) ? prev : next));
         }
@@ -574,13 +574,11 @@ function useRepoAccess(params: { route: Route; sessionToken: string | undefined 
 
 function deriveAccessFromMetadata({
   meta,
-  sessionToken,
+  hasSession,
 }: {
   meta: RepoMetadata;
-  sessionToken: string | undefined;
+  hasSession: boolean;
 }): RepoAccessState {
-  let hasSession = sessionToken !== undefined;
-
   let level: RepoAccessLevel = 'none';
   if (meta.repoSelected && hasSession) {
     level = 'write';
@@ -613,10 +611,14 @@ function useSync(params: {
   canEdit: boolean;
 }) {
   let { slug, route, sessionToken, linked, canEdit } = params;
+  let noSync = route.kind !== 'repo' || sessionToken === undefined || !linked || !canEdit;
+
   // Remember the user's autosync preference per repo slug.
   let [autosync, setAutosyncState] = useState<boolean>(() =>
     slug !== 'new' ? isAutosyncEnabled(slug) : false
   );
+  let noAutosync = !autosync || noSync;
+
   // Indicate when a sync operation is currently running.
   let [syncing, setSyncing] = useState(false);
   let timerRef = useRef<number | undefined>(undefined);
@@ -642,7 +644,7 @@ function useSync(params: {
     inFlightRef.current = true;
     setSyncing(true);
     try {
-      if (sessionToken === undefined || !linked || slug === 'new' || !canEdit) return undefined;
+      if (noSync) return undefined;
       let store = getRepoStore(slug);
       let summary = await syncBidirectional(store, slug);
       recordAutoSyncRun(slug);
@@ -658,8 +660,6 @@ function useSync(params: {
       setSyncing(false);
     }
   };
-
-  let noAutosync = !autosync || route.kind !== 'repo' || sessionToken === undefined || !linked || !canEdit;
 
   const scheduleAutoSync = (debounceMs: number = AUTO_SYNC_DEBOUNCE_MS) => {
     if (noAutosync) return;
