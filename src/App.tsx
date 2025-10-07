@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { useRoute } from './routing';
-import { RepoView } from './RepoView';
-import { HomeView } from './HomeView';
-import { listRecentRepos, recordRecentRepo, type RecentRepo } from '../storage/local';
+import { useRoute } from './ui/routing';
+import { RepoView } from './ui/RepoView';
+import { HomeView } from './ui/HomeView';
+import { listRecentRepos, recordRecentRepo, type RecentRepo } from './storage/local';
 
 export function App() {
   const { route, navigate } = useRoute();
