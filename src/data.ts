@@ -51,6 +51,7 @@ export type {
 
 const AUTO_SYNC_MIN_INTERVAL_MS = 60_000;
 const AUTO_SYNC_DEBOUNCE_MS = 10_000;
+const AUTO_SYNC_POLL_INTERVALL = 180_000;
 
 type RepoNoteListItem = NoteMeta | ReadOnlyNote;
 
@@ -713,7 +714,7 @@ function useAutosync(params: {
   useEffect(() => {
     if (route.kind !== 'repo') return;
     if (!autosync || !sessionToken || !linked || slug === 'new' || !canEdit) return;
-    const id = window.setInterval(() => scheduleAutoSync(0), 180_000);
+    const id = window.setInterval(() => scheduleAutoSync(0), AUTO_SYNC_POLL_INTERVALL);
     return () => window.clearInterval(id);
   }, [route.kind, autosync, sessionToken, linked, slug, canEdit, scheduleAutoSync]);
 
