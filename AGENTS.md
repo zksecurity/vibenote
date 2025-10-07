@@ -63,6 +63,7 @@ This document captures developer‑focused setup, technical architecture and IMP
 - When writing shared modules, prefer placing exported/high-level APIs at the top of the file and push low-level helpers toward the bottom, so readers can grasp intent before implementation details.
 - Nullish values: In data types, prefer `undefined` (and `?` on object properties) to model inexistent values. Do NOT use `null`, unless there is a specific strong reason. A valid reason to use `null` is if the data type needs to be JSON-stringified.
 - React: Don't memoize everything. Only use `useMemo()` for expensive computations, not for trivial stuff like ternary operators. Do not use `useCallback()` unless asked or you have a strong reason. Just recreating callbacks on every render is usually fast, and will ensure they are never stale.
+- Prefer putting dense logic into simple top-level `function`s, instead of creating spaghetti of inline declared callbacks that implicitly depend on in-scope variables.
 
 ## Type Checking
 
