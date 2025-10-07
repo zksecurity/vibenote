@@ -42,6 +42,7 @@ This document captures developer‑focused setup, technical architecture and IMP
 
 - Don't make stylistic changes you were not asked for, and that are not listed in these guidelines.
 - VERY IMPORTANT: Don't remove comments. When moving code around, keep the comments 1:1.
+- When asked to refactor stuff, don't change any logic that doesn't need changing. Instead, propose tangential changes to the user, to be done as a second step of the refactor.
 - Sprinkle small comments throughout your code, that explain dense logic at a high level. Add a comment at the top of a file explaining its purpose.
 - Formatting: we use Prettier (repo includes `.prettierrc`).
 - Filenames use kebab case, like my-lib.ts. Except for React component files with the typical PascalCase.
@@ -61,6 +62,7 @@ This document captures developer‑focused setup, technical architecture and IMP
 - Function arguments: Use an inline type instead of a separate type alias for types that are only used once.
 - When writing shared modules, prefer placing exported/high-level APIs at the top of the file and push low-level helpers toward the bottom, so readers can grasp intent before implementation details.
 - Nullish values: In data types, prefer `undefined` (and `?` on object properties) to model inexistent values. Do NOT use `null`, unless there is a specific strong reason. A valid reason to use `null` is if the data type needs to be JSON-stringified.
+- React: Don't memoize everything. Only use `useMemo()` for expensive computations, not for trivial stuff like ternary operators. Do not use `useCallback()` unless asked or you have a strong reason. Just recreating callbacks on every render is usually fast, and will ensure they are never stale.
 
 ## Type Checking
 
