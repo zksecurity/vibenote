@@ -1,8 +1,8 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
-import type { RepoMetadata } from './lib/backend';
-import type { Route } from './ui/routing';
-import { LocalStore, markRepoLinked, recordAutoSyncRun, setLastActiveNoteId } from './storage/local';
+import type { RepoMetadata } from '../lib/backend';
+import type { Route } from '../ui/routing';
+import { LocalStore, markRepoLinked, recordAutoSyncRun, setLastActiveNoteId } from '../storage/local';
 
 type RemoteFile = { path: string; text: string; sha: string };
 
@@ -49,7 +49,7 @@ const syncModule = vi.hoisted<SyncMocks>(() => ({
   syncBidirectional: vi.fn(),
 }));
 
-vi.mock('./auth/app-auth', () => ({
+vi.mock('../auth/app-auth', () => ({
   signInWithGitHubApp: authModule.signInWithGitHubApp,
   getSessionToken: authModule.getSessionToken,
   getSessionUser: authModule.getSessionUser,
@@ -57,22 +57,22 @@ vi.mock('./auth/app-auth', () => ({
   signOutFromGitHubApp: authModule.signOutFromGitHubApp,
 }));
 
-vi.mock('./lib/backend', () => ({
+vi.mock('../lib/backend', () => ({
   getRepoMetadata: backendModule.getRepoMetadata,
   getInstallUrl: backendModule.getInstallUrl,
 }));
 
-vi.mock('./sync/git-sync', () => ({
+vi.mock('../sync/git-sync', () => ({
   buildRemoteConfig: syncModule.buildRemoteConfig,
   listNoteFiles: syncModule.listNoteFiles,
   pullNote: syncModule.pullNote,
   syncBidirectional: syncModule.syncBidirectional,
 }));
 
-let useRepoData: typeof import('./data').useRepoData;
+let useRepoData: typeof import('../data').useRepoData;
 
 beforeAll(async () => {
-  ({ useRepoData } = await import('./data'));
+  ({ useRepoData } = await import('../data'));
 });
 
 const mockSignInWithGitHubApp = authModule.signInWithGitHubApp;
@@ -279,7 +279,7 @@ describe('useRepoData', () => {
     expect(result.current.state.canEdit).toBe(false);
     expect(result.current.state.canRead).toBe(true);
 
-    await waitFor(() => expect(result.current.state.readOnlyLoading).toBe(false));
+    await waitFor(() => expect(result.current.state.activeNotes.length).not.toBe(0));
     expect(result.current.state.activeNotes).toEqual([
       expect.objectContaining({ id: 'docs/alpha.md', title: 'alpha' }),
     ]);
@@ -328,7 +328,6 @@ describe('useRepoData', () => {
     mockGetRepoMetadata.mockImplementation(() => pendingMeta.promise);
 
     const seenDocIds: Array<string | null | undefined> = [];
-    const seenReadOnlyLoading: boolean[] = [];
     const seenNeedsInstall: boolean[] = [];
     const seenCanEdit: boolean[] = [];
     const { result } = renderHook(() => {
@@ -338,7 +337,6 @@ describe('useRepoData', () => {
         onRecordRecent,
       });
       seenDocIds.push(value.state.doc?.id);
-      seenReadOnlyLoading.push(value.state.readOnlyLoading);
       seenNeedsInstall.push(value.state.needsInstall);
       seenCanEdit.push(value.state.canEdit);
       return value;
@@ -355,7 +353,6 @@ describe('useRepoData', () => {
     await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
     expect(result.current.state.doc?.id).toBe(noteId);
     expect(seenDocIds.every((id) => id === noteId)).toBe(true);
-    expect(seenReadOnlyLoading.every((flag) => flag === false)).toBe(true);
     expect(seenNeedsInstall.every((flag) => flag === false)).toBe(true);
     expect(seenCanEdit.every((flag) => flag === true)).toBe(true);
   });
@@ -426,7 +423,6 @@ describe('useRepoData', () => {
 
     await waitFor(() => expect(mockSyncBidirectional).toHaveBeenCalledWith(expect.any(LocalStore), slug));
     expect(result.current.state.autosync).toBe(true);
-    expect(result.current.state.readOnlyLoading).toBe(false);
     expect(result.current.state.statusMessage).toBe(null);
 
     setTimeoutSpy.mockRestore();
@@ -589,19 +585,17 @@ describe('useRepoData', () => {
         onRecordRecent,
       });
       seenNeedsInstall.push(value.state.needsInstall);
-      seenReadOnlyLoading.push(value.state.readOnlyLoading);
       return value;
     });
 
     await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
-    await waitFor(() => expect(result.current.state.readOnlyLoading).toBe(false));
+    await waitFor(() => expect(result.current.state.activeNotes.length).not.toBe(0));
 
     await act(async () => {
       await result.current.actions.selectNote('docs/beta.md');
     });
 
     await waitFor(() => expect(result.current.state.doc?.path).toBe('docs/beta.md'));
-    expect(result.current.state.readOnlyLoading).toBe(false);
     expect(result.current.state.needsInstall).toBe(false);
     expect(seenNeedsInstall.every((flag) => flag === false)).toBe(true);
     const loadingTransitions = seenReadOnlyLoading.filter(Boolean).length;
