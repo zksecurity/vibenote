@@ -30,7 +30,7 @@ function useReadOnlyNotes(params: { slug: string; isReadOnly: boolean; defaultBr
       try {
         let cfg = buildRemoteConfig(slug, defaultBranch);
         let entries = await listNoteFiles(cfg);
-        let mapped: ReadOnlyNote[] = entries.map((entry) => toNote(entry.path, entry.sha));
+        let mapped = entries.map(toNote);
         if (cancelled) return;
         setNotes(mapped);
       } catch (error) {
@@ -100,7 +100,7 @@ function useReadOnlyNotes(params: { slug: string; isReadOnly: boolean; defaultBr
   };
 }
 
-function toNote(path: string, sha?: string): ReadOnlyNote {
+function toNote({ path, sha }: { path: string; sha?: string }): ReadOnlyNote {
   const title = path.slice(path.lastIndexOf('/') + 1).replace(/\.md$/i, '');
   const dir = (() => {
     const idx = path.lastIndexOf('/');
