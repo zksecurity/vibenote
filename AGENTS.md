@@ -1,21 +1,21 @@
 # VibeNote – Agent Guide
 
 Read both README.md and DESIGN.md for product and architecture context.
-This document captures developer‑focused setup, deployment, and conventions.
+This document captures developer‑focused setup, technical architecture and IMPORTANT code conventions.
 
 ## Development Setup
 
-- Prereqs: Node 22+, npm
-- Install: `npm install`
+- Node 22+, npm
+- Test: `npm test`
+- TypeScript type check: `npm run check`
+
+### Setup details you might not need
+
 - Run the frontend: `npm start` (Vite on `http://localhost:3000`)
-- (Typically not needed) Run the backend: `npm run server:start` (Express on `http://localhost:8787` by default)
-- Env: Human developer manually copies `.env.example` → `.env` and fills the GitHub App variables (`GITHUB_APP_SLUG`, `GITHUB_OAUTH_*`, `SESSION_JWT_SECRET`, `SESSION_ENCRYPTION_KEY`, `ALLOWED_ORIGINS`, etc.)
-  - coding agents MUST NEVER read or write `.env`, actual secrets may be stored there, even in development
-
-## Local dev
-
-- Single command: `npm start`, starts the Vite dev server.
-- We usually set `VITE_VIBENOTE_API_BASE` to the _production backend_ when developing the frontend, so you don't have to start the backend. Only after backend changes, make sure that the backend is restarted.
+  - Human developer will have this running. He can provide feedback on UI changes and test changes manually if necessary.
+- (Typically not needed) Run the backend: `npm run server:start`
+  - We usually set `VITE_VIBENOTE_API_BASE` to the _production backend_ when developing the frontend, so we don't have to start the backend.
+- Env: Human developer manually fills `.env` with GitHub App variables. Coding agents MUST NEVER read or write `.env`, actual secrets may be stored there, even in development.
 - Node runs TypeScript directly (2025+): use `node path/to/file.ts` for quick scripts; no ts-node/tsx needed.
 
 ## UI/UX Conventions
@@ -28,9 +28,8 @@ This document captures developer‑focused setup, deployment, and conventions.
 - `src/ui/RepoView.tsx` is the primary workspace screen. It renders the navigation shell (header, repo switcher, file tree, editor) and only owns ephemeral UI state such as dropdown toggles, sidebar visibility, and keyboard shortcuts.
 - RepoView consumes `useRepoData` from `src/data.ts`. The hook centralises session/auth, local storage, autosync timers, and GitHub interactions. It exposes `{ state, actions }` to the UI.
 - Components must call the hook’s actions (e.g. `createNote`, `renameFolder`, `syncNow`) instead of talking to storage or sync modules directly. This keeps side effects in one layer and allows hooks/tests to mock behaviour easily.
-- `useRepoData` delegates to `LocalStore` for persistence and to the `src/sync/` modules for remote operations. When adding new capabilities, extend the hook first, then thread new state/actions down through RepoView.
 
-## Auth
+## Auth (GitHub App)
 
 - “Connect GitHub” opens the GitHub App popup flow (`/v1/auth/github/*`), issuing user-scoped OAuth tokens.
 - see `docs/AUTH.md` for details
@@ -41,20 +40,14 @@ This document captures developer‑focused setup, deployment, and conventions.
 
 ## Coding Guidelines
 
-- VERY IMPORTANT: don't make stylistic changes you were not asked for, and that are not listed in these guidelines. Don't remove comments or similar nonsense.
+- Don't make stylistic changes you were not asked for, and that are not listed in these guidelines.
+- VERY IMPORTANT: Don't remove comments. When moving code around, keep the comments 1:1.
+- Sprinkle small comments throughout your code, that explain dense logic at a high level. Add a comment at the top of a file explaining its purpose.
 - Formatting: we use Prettier (repo includes `.prettierrc`).
-- Variables: prefer `let` over `const`, except for global constants, functions, or other module‑level constant objects.
+- Filenames use kebab case, like my-lib.ts. Except for React component files with the typical PascalCase.
+- Variables: prefer `let` over `const`. Except for global constants, functions, or other module‑level constant objects.
 - Types: use `type` aliases instead of `interface`.
-- Exports: collect all exports at the top of the file (named exports), avoid inline `export` sprinkled through the file. Good Example:
-
-```ts
-import { helper } from  "stuff"
-
-export { mainMethod, anotherMethod }
-
-function mainMethod() { // ...
-```
-
+- Exports: collect all exports at the top of the file with named exports. Avoid inline `export` sprinkled through the file.
 - Export types using the `type` qualifier: `export type { MyType }` or `export { type MyType }`
 - Type safety: use strong types
   - do not use `any`
@@ -67,7 +60,7 @@ function mainMethod() { // ...
   - `number !== 0 && array.includes(number)` rather than `number && array.includes(number)`
 - Function arguments: Use an inline type instead of a separate type alias for types that are only used once.
 - When writing shared modules, prefer placing exported/high-level APIs at the top of the file and push low-level helpers toward the bottom, so readers can grasp intent before implementation details.
-- Nullish values: In data types, prefer `undefined` (and `?` on object properties) to model inexistent values. Do not use `null` unless there is a specific strong reason. A valid reason to use `null` is if the data type needs to be JSON-stringified.
+- Nullish values: In data types, prefer `undefined` (and `?` on object properties) to model inexistent values. Do NOT use `null`, unless there is a specific strong reason. A valid reason to use `null` is if the data type needs to be JSON-stringified.
 
 ## Type Checking
 
@@ -81,7 +74,7 @@ function mainMethod() { // ...
 
 ## Commit Conventions
 
-- Do NOT commit untested changes. In particular, do not commit UI changes until verified by the user.
+- Do NOT commit unless asked. Even if you were asked to commit within a session, don't commit more changes in the same session without being asked.
 - Commit messages: short, high‑level, no function names.
   - Aim for 50–65 chars in the subject.
   - Summarize the user‑visible change or intent, not the mechanics.
@@ -99,32 +92,10 @@ function mainMethod() { // ...
 
 - When we introduce new conventions or useful workflows, record them in this AGENTS.md so future work is consistent.
 
-## Backend Deployment (GitHub App)
+## Backend Deployment
 
-The Express backend lives in `server/src/index.ts`. Deploy it on a VPS (PM2 + NGINX) as described in `docs/DEPLOYMENT.md`. The frontend talks to it via `VIBENOTE_API_BASE` / `VITE_VIBENOTE_API_BASE`.
+The Express backend lives in `server/src/index.ts`. Deployed on a VPS (PM2 + NGINX) as described in `docs/DEPLOYMENT.md`. The frontend talks to it via `VITE_VIBENOTE_API_BASE`.
 
-### API surface (common routes)
-
-- `GET /v1/healthz`
-- `GET /v1/auth/github/start`
-- `GET /v1/auth/github/callback`
-- `GET /v1/app/install-url`
-- `GET /v1/app/setup`
-- `POST /v1/auth/github/refresh`
-- `POST /v1/auth/github/logout`
-- `POST /v1/webhooks/github` (placeholder)
-
-All repository reads and writes now happen directly from the client using the user-scoped GitHub App OAuth token. The backend no longer proxies Git operations.
-
-### Environment variables
+All repository reads and writes happen directly from the client using the user-scoped GitHub App OAuth token. The backend no longer proxies Git operations.
 
 See `.env.example` and `docs/AUTH.md` for a detailed breakdown of variables and the auth flow.
-
-### Security & Ops quick notes
-
-- The backend no longer stores a GitHub App private key. Only the OAuth client id/secret and the encrypted session store live on the server.
-- Ensure frontend origins are exactly listed in `ALLOWED_ORIGINS`.
-- Session refresh tokens are encrypted at rest inside `SESSION_STORE_FILE`. Rotate `SESSION_ENCRYPTION_KEY` if compromised (this invalidates all stored refresh tokens).
-- Rotate `SESSION_JWT_SECRET` if compromised (all sessions invalidate).
-
-Future improvements: webhook validation/handling, request logging, smarter caching.
