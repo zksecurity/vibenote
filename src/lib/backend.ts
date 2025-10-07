@@ -1,3 +1,4 @@
+// Backend adapter that resolves GitHub repo metadata and installation state.
 import { ensureFreshAccessToken, refreshAccessTokenNow, getApiBase } from '../auth/app-auth';
 import { fetchPublicRepoInfo } from './github-public';
 
@@ -11,6 +12,7 @@ type RepoMetadata = {
   repoSelected: boolean;
   defaultBranch: string | null;
   rateLimited?: boolean;
+  // Manage URL deep-links into the GitHub App installation settings when known.
   manageUrl?: string | null;
 };
 
@@ -23,6 +25,7 @@ async function getRepoMetadata(owner: string, repo: string): Promise<RepoMetadat
   let rateLimited = false;
   let userHasPush = false;
   let fetchedWithToken = false;
+  let manageUrl: string | undefined;
 
   if (token) {
     try {
@@ -59,7 +62,7 @@ async function getRepoMetadata(owner: string, repo: string): Promise<RepoMetadat
   if (token) {
     try {
       const access = await resolveInstallationAccess(token, owner, repo);
-      installed = access.installed;
+      ({ installed, manageUrl } = access);
       if (access.repoSelected && userHasPush) {
         repoSelected = true;
       } else {
@@ -85,15 +88,7 @@ async function getRepoMetadata(owner: string, repo: string): Promise<RepoMetadat
     }
   }
 
-  return {
-    isPrivate,
-    installed,
-    repoSelected,
-    defaultBranch,
-    rateLimited,
-    // TODO: construct manage URL from owner/repo
-    manageUrl: null,
-  };
+  return { isPrivate, installed, repoSelected, defaultBranch, rateLimited, manageUrl };
 }
 
 async function getInstallUrl(owner: string, repo: string, returnTo: string): Promise<string> {
@@ -124,6 +119,7 @@ async function resolveInstallationAccess(
 ): Promise<{
   installed: boolean;
   repoSelected: boolean;
+  manageUrl?: string;
 }> {
   let installations = await listUserInstallations(token);
   // we only consider installations whose account login matches the repo owner
@@ -136,16 +132,19 @@ async function resolveInstallationAccess(
 
   let repoLower = repo.toLowerCase();
   const targetFullName = `${ownerLower}/${repoLower}`;
+  let manageUrl: string | undefined;
 
   for (let inst of installations) {
     if (!Number.isFinite(inst.id)) continue;
     if (inst.repositorySelection === 'all') {
-      return { installed: true, repoSelected: true };
+      let manageUrl = buildInstallationManageUrl(owner, inst);
+      return { installed: true, repoSelected: true, manageUrl };
     }
     if (inst.repositorySelection === 'selected') {
+      manageUrl = buildInstallationManageUrl(owner, inst);
       const hasRepo = await installationIncludesRepo(token, inst.id, targetFullName);
       if (hasRepo) {
-        return { installed: true, repoSelected: true };
+        return { installed: true, repoSelected: true, manageUrl };
       }
       // keep checking other installations for the same owner before concluding
     } else {
@@ -153,12 +152,15 @@ async function resolveInstallationAccess(
     }
   }
 
-  return { installed: true, repoSelected: false };
+  manageUrl ??= buildInstallationManageUrl(owner, installations[0]);
+
+  return { installed: true, repoSelected: false, manageUrl };
 }
 
 type InstallationSummary = {
   id: number;
   accountLogin: string | null;
+  accountType: string | null;
   repositorySelection: 'all' | 'selected' | null;
 };
 
@@ -176,9 +178,10 @@ async function listUserInstallations(token: string): Promise<InstallationSummary
       const idValue = typeof raw?.id === 'number' ? raw.id : Number(raw?.id);
       if (!Number.isFinite(idValue)) continue;
       const accountLogin = raw?.account && typeof raw.account.login === 'string' ? raw.account.login : null;
+      const accountType = raw?.account && typeof raw.account.type === 'string' ? raw.account.type : null;
       const selectionValue = raw?.repository_selection;
       const selection = selectionValue === 'all' ? 'all' : selectionValue === 'selected' ? 'selected' : null;
-      results.push({ id: idValue, accountLogin, repositorySelection: selection });
+      results.push({ id: idValue, accountLogin, accountType, repositorySelection: selection });
     }
     const totalCount = typeof json?.total_count === 'number' ? json.total_count : undefined;
     if (installations.length < 100) break;
@@ -222,6 +225,20 @@ async function installationIncludesRepo(
     page += 1;
   }
   return false;
+}
+
+function buildInstallationManageUrl(
+  owner: string,
+  summary: InstallationSummary | undefined
+): string | undefined {
+  if (!summary) return undefined;
+  if (!Number.isFinite(summary.id)) return undefined;
+  let idPart = String(summary.id);
+  if (summary.accountType && summary.accountType.toLowerCase() === 'organization') {
+    let login = summary.accountLogin ?? owner;
+    return `https://github.com/organizations/${encodeURIComponent(login)}/settings/installations/${idPart}`;
+  }
+  return `https://github.com/settings/installations/${idPart}`;
 }
 
 async function safeJson(res: Response): Promise<Record<string, unknown> | null> {
