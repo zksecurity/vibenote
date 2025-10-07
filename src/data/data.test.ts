@@ -346,7 +346,6 @@ describe('useRepoData', () => {
       return value;
     });
 
-    await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('checking'));
     expect(result.current.state.doc?.id).toBe(noteId);
 
     await act(async () => {
@@ -539,7 +538,6 @@ describe('useRepoData', () => {
       return value;
     });
 
-    await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('checking'));
     act(() => {
       firstMeta.resolve(installMeta);
     });

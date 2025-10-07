@@ -137,7 +137,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
   const [user, setUser] = useState(getAppSessionUser);
 
   // Query GitHub for repo access state and other metadata.
-  const repoAccess = useRepoAccess({ route, sessionToken, linked });
+  const repoAccess = useRepoAccess({ route, sessionToken });
 
   // DERIVED STATE (and hooks that depend on it)
 
@@ -161,9 +161,8 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
   const canEdit =
     route.kind === 'new' ||
     (!!sessionToken && (repoAccess.level === 'write' || (!accessStatusReady && linked)));
-  const canRead = canEdit || isReadOnly;
 
-  const { autosync, setAutosync, scheduleAutoSync, performSync, syncing } = useAutosync({
+  const { autosync, setAutosync, scheduleAutoSync, performSync, syncing } = useSync({
     slug,
     route,
     sessionToken,
@@ -330,8 +329,11 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
     } catch (error) {
       console.warn('vibenote: failed to sign out cleanly', error);
     }
+    // reset local storage
     clearAllLocalData();
     getRepoStore(slug).replaceWithRemote([]);
+
+    // reset hook state
     setSessionToken(null);
     setUser(null);
     setLinked(false);
@@ -339,6 +341,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
     resetReadOnlyState();
     setActiveId(null);
     initialPullRef.current.done = false;
+
     setSyncMessage('Signed out');
   };
 
@@ -448,17 +451,11 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
     await selectReadOnlyDoc(id);
   };
 
-  // Persist the active note id so future visits resume on the same file (when permitted).
-  useEffect(() => {
-    if (!canEdit) return;
-    setLastActiveNoteId(slug, activeId ?? null);
-  }, [activeId, slug, canEdit]);
-
   const state: RepoDataState = {
     sessionToken,
     user,
 
-    canRead,
+    canRead: canEdit || isReadOnly,
     canEdit,
     canSync: linked && canEdit,
     repoQueryStatus: repoAccess.status,
@@ -511,7 +508,7 @@ function useLocalRepoSnapshot(slug: string) {
 }
 
 type RepoAccessLevel = 'none' | 'read' | 'write';
-type RepoQueryStatus = 'idle' | 'checking' | 'ready' | 'rate-limited' | 'error';
+type RepoQueryStatus = 'unknown' | 'ready' | 'rate-limited' | 'error';
 
 type RepoAccessState = {
   level: RepoAccessLevel;
@@ -527,7 +524,7 @@ type RepoAccessState = {
 
 const initialAccessState: RepoAccessState = {
   level: 'none',
-  status: 'idle',
+  status: 'unknown',
   metadata: null,
   defaultBranch: undefined,
   error: null,
@@ -537,25 +534,18 @@ const initialAccessState: RepoAccessState = {
   isPrivate: null,
 };
 
-type RepoAccessParams = {
-  route: Route;
-  sessionToken: string | null;
-  linked: boolean;
-};
-
-function useRepoAccess({ route, sessionToken, linked }: RepoAccessParams): RepoAccessState {
-  const owner = route.kind === 'repo' ? route.owner : null;
-  const repo = route.kind === 'repo' ? route.repo : null;
+function useRepoAccess(params: { route: Route; sessionToken: string | null }): RepoAccessState {
+  let { route, sessionToken } = params;
+  let owner = route.kind === 'repo' ? route.owner : null;
+  let repo = route.kind === 'repo' ? route.repo : null;
 
   // Track the evolving access status/metadata for the active repository target.
-  const [state, setState] = useState<RepoAccessState>({ ...initialAccessState, status: 'checking' });
+  let [state, setState] = useState<RepoAccessState>(initialAccessState);
 
   // Query GitHub (and the public fallback) whenever the targeted repo changes.
   useEffect(() => {
     if (!owner || !repo) return;
     let cancelled = false;
-    const checkingState: RepoAccessState = { ...initialAccessState, status: 'checking' };
-    setState((prev) => (areAccessStatesEqual(prev, checkingState) ? prev : checkingState));
     (async () => {
       try {
         const meta = await apiGetRepoMetadata(owner, repo);
@@ -578,18 +568,20 @@ function useRepoAccess({ route, sessionToken, linked }: RepoAccessParams): RepoA
     return () => {
       cancelled = true;
     };
-  }, [owner, repo, sessionToken, linked]);
+  }, [owner, repo, sessionToken]);
 
   if (!owner || !repo) return initialAccessState;
   return state;
 }
 
-function deriveAccessFromMetadata(input: {
+function deriveAccessFromMetadata({
+  meta,
+  sessionToken,
+}: {
   meta: RepoMetadata;
   sessionToken: string | null;
 }): RepoAccessState {
-  const { meta, sessionToken } = input;
-  const hasSession = !!sessionToken;
+  let hasSession = !!sessionToken;
 
   let level: RepoAccessLevel = 'none';
   if (meta.repoSelected && hasSession) {
@@ -602,23 +594,20 @@ function deriveAccessFromMetadata(input: {
     level = 'none';
   }
 
-  const status: RepoQueryStatus = meta.rateLimited ? 'rate-limited' : 'ready';
-  const needsInstall = hasSession && level === 'none';
-
   return {
     level,
-    status,
+    status: meta.rateLimited ? 'rate-limited' : 'ready',
     metadata: meta,
     defaultBranch: meta.defaultBranch ?? undefined,
     error: null,
     rateLimited: meta.rateLimited === true,
-    needsInstall,
+    needsInstall: hasSession && level === 'none',
     manageUrl: meta.manageUrl ?? null,
     isPrivate: meta.isPrivate,
   };
 }
 
-function useAutosync(params: {
+function useSync(params: {
   slug: string;
   route: Route;
   sessionToken: string | null;
@@ -725,13 +714,7 @@ function useAutosync(params: {
     [scheduleAutoSync, slug]
   );
 
-  return {
-    autosync,
-    setAutosync,
-    scheduleAutoSync,
-    performSync,
-    syncing,
-  } as const;
+  return { autosync, setAutosync, scheduleAutoSync, performSync, syncing };
 }
 
 function useActiveNote({
