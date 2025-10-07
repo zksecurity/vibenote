@@ -1,10 +1,11 @@
+// SPA routing helpers for parsing and updating the current location
 import { useCallback, useEffect, useState } from 'react';
 
 export type Route =
   | { kind: 'home' }
   | { kind: 'new' }
   | { kind: 'start' }
-  | { kind: 'repo'; owner: string; repo: string };
+  | { kind: 'repo'; owner: string; repo: string; notePath?: string };
 
 type NavigateOptions = {
   replace?: boolean;
@@ -29,7 +30,9 @@ export function parseRoute(pathname: string): Route {
     let owner = decodeURIComponent(segments[0] ?? '');
     let repo = decodeURIComponent(segments[1] ?? '');
     if (owner && repo) {
-      return { kind: 'repo', owner, repo };
+      let noteSegments = segments.slice(2).map((segment) => decodeURIComponent(segment ?? ''));
+      let notePath = noteSegments.length > 0 ? noteSegments.join('/') : undefined;
+      return { kind: 'repo', owner, repo, notePath };
     }
   }
   return HOME_ROUTE;
@@ -39,7 +42,19 @@ export function routeToPath(route: Route): string {
   if (route.kind === 'home') return '/';
   if (route.kind === 'new') return '/new';
   if (route.kind === 'start') return '/start';
-  return `/${encodeURIComponent(route.owner)}/${encodeURIComponent(route.repo)}`;
+  let owner = encodeURIComponent(route.owner);
+  let repo = encodeURIComponent(route.repo);
+  if (!route.notePath) {
+    return `/${owner}/${repo}`;
+  }
+  let segments = route.notePath
+    .split('/')
+    .filter((segment) => segment !== '')
+    .map((segment) => encodeURIComponent(segment));
+  if (segments.length === 0) {
+    return `/${owner}/${repo}`;
+  }
+  return `/${owner}/${repo}/${segments.join('/')}`;
 }
 
 export function useRoute() {

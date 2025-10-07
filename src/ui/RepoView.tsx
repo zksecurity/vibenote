@@ -1,4 +1,5 @@
-import { useMemo, useState, useEffect } from 'react';
+// Primary workspace view combining repo chrome, file tree, and editor panels.
+import { useMemo, useState, useEffect, useCallback } from 'react';
 import { FileTree, type FileEntry } from './FileTree';
 import { Editor } from './Editor';
 import { RepoSwitcher } from './RepoSwitcher';
@@ -29,7 +30,14 @@ export function RepoView(props: RepoViewProps) {
 
 function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps) {
   // Data layer exposes repo-backed state and the high-level actions the UI needs.
-  const { state, actions } = useRepoData({ slug, route, onRecordRecent });
+  const onActiveNotePathChange = useCallback((nextPath: string | undefined) => {
+    if (route.kind !== 'repo') return;
+    const { owner, repo, notePath } = route;
+    if (pathsEqual(notePath, nextPath)) return;
+    navigate({ kind: 'repo', owner, repo, notePath: nextPath }, { replace: true });
+  }, []);
+
+  const { state, actions } = useRepoData({ slug, route, onRecordRecent, onActiveNotePathChange });
   const {
     hasSession,
     user,
@@ -73,7 +81,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
 
   const [showSwitcher, setShowSwitcher] = useState(false);
 
-  // Keyboard shortcuts: Cmd/Ctrl+K and "g" then "r" open the repo switcher.
+  // Keyboard shortcuts: Cmd/Ctrl+K and "g","r" open the repo switcher even when the tree is focused.
   const repoShortcutLabel = primaryModifier === 'meta' ? '⌘K' : 'Ctrl+K';
   const repoButtonBaseTitle = route.kind === 'repo' ? 'Change repository' : 'Choose repository';
   const repoButtonTitle = `${repoButtonBaseTitle} (${repoShortcutLabel})`;
@@ -113,6 +121,20 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+
+  const onSelect = async (id: string) => {
+    await actions.selectNote(id);
+    if (route.kind !== 'repo') {
+      setSidebarOpen(false);
+      return;
+    }
+    const { owner, repo, notePath } = route;
+    const selected = notes.find((note) => note.id === id);
+    if (selected && !pathsEqual(notePath, selected.path)) {
+      navigate({ kind: 'repo', owner, repo, notePath: selected.path }, { replace: false });
+    }
+    setSidebarOpen(false);
+  };
 
   return (
     <div className="app-shell">
@@ -238,10 +260,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
               canEdit={canEdit}
               slug={slug}
               activeId={activeId}
-              onSelect={async (id: string) => {
-                await actions.selectNote(id);
-                setSidebarOpen(false);
-              }}
+              onSelect={onSelect}
               onCreateNote={actions.createNote}
               onCreateFolder={actions.createFolder}
               onRenameNote={actions.renameNote}
@@ -611,4 +630,14 @@ function detectPrimaryShortcut(): 'meta' | 'ctrl' {
   const APPLE_PLATFORM_PATTERN = /mac|iphone|ipad|ipod/i;
   if (APPLE_PLATFORM_PATTERN.test(platform)) return 'meta';
   return 'ctrl';
+}
+
+function pathsEqual(a: string | undefined, b: string | undefined): boolean {
+  if (a === b) return true;
+  return normalizePath(a) === normalizePath(b);
+}
+
+function normalizePath(path: string | undefined): string | undefined {
+  if (path === undefined) return undefined;
+  return path.replace(/^\/+/, '').replace(/\/+$/, '');
 }

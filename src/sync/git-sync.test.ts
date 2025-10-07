@@ -144,7 +144,7 @@ describe('syncBidirectional', () => {
     expect(paths).toEqual(['nested/Nested.md']);
   });
 
-  test('excludes README.md regardless of directory', async () => {
+  test('includes README.md files from the repository', async () => {
     remote.setFile('README.md', 'root readme');
     remote.setFile('sub/README.md', 'sub readme');
     await syncBidirectional(store, 'user/repo');
@@ -152,7 +152,7 @@ describe('syncBidirectional', () => {
       .listNotes()
       .map((n) => n.path)
       .sort();
-    expect(paths).toEqual([]);
+    expect(paths).toEqual(['README.md', 'sub/README.md']);
   });
 });
 

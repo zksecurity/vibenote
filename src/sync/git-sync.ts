@@ -129,13 +129,11 @@ export async function listNoteFiles(config: RemoteConfig): Promise<{ path: strin
   const filterEntries = (entries: Array<{ path?: string; sha?: string; type?: string }>) => {
     const results: { path: string; sha: string }[] = [];
     for (const e of entries) {
-      const type = e.type;
-      const path = e.path;
-      const sha = e.sha;
+      let type = e.type;
+      let path = e.path;
+      let sha = e.sha;
       if (type !== 'blob' || !path || !sha) continue;
       if (!/\.md$/i.test(path)) continue;
-      const name = path.slice(path.lastIndexOf('/') + 1);
-      if (name.toLowerCase() === 'readme.md') continue;
       results.push({ path, sha });
     }
     return results;

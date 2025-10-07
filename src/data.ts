@@ -114,9 +114,10 @@ type RepoDataInputs = {
     title?: string;
     connected?: boolean;
   }) => void;
+  onActiveNotePathChange?: (notePath: string | undefined) => void;
 };
 
-function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
+function useRepoData({ slug, route, onRecordRecent, onActiveNotePathChange }: RepoDataInputs): {
   state: RepoDataState;
   actions: RepoDataActions;
 } {
@@ -175,7 +176,8 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
   let notes = isReadOnly ? readOnlyNotes : localNotes;
   let folders = isReadOnly ? readOnlyFolders : localFolders;
 
-  let { activeId, setActiveId } = useActiveNote({ slug, notes, canEdit });
+  let desiredNotePath = route.kind === 'repo' ? route.notePath : undefined;
+  let { activeId, setActiveId } = useActiveNote({ slug, notes, canEdit, desiredNotePath });
 
   let localDoc = useMemo(() => {
     if (!canEdit || !activeId) return undefined;
@@ -184,7 +186,40 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
 
   let doc = canEdit ? localDoc : readOnlyDoc;
 
+  let activeNotePath = useMemo(() => {
+    if (doc?.path !== undefined) return doc.path;
+    // we fall back to have the path even when the doc is not loaded yet
+    return notes.find((note) => note.id === activeId)?.path;
+  }, [doc?.path, notes, activeId]);
+
   // EFFECTS
+  // please avoid adding more effects here, keep logic clean/separated
+
+  useEffect(() => {
+    if (!onActiveNotePathChange) return;
+    if (route.kind !== 'repo') {
+      onActiveNotePathChange(undefined);
+      return;
+    }
+    if (activeNotePath === undefined) {
+      if (desiredNotePath !== undefined) return;
+      onActiveNotePathChange(undefined);
+      return;
+    }
+    onActiveNotePathChange(activeNotePath);
+  }, [onActiveNotePathChange, route, activeNotePath, desiredNotePath]);
+
+  // Fetch read-only note content whenever the selection changes.
+  useEffect(() => {
+    if (!isReadOnly) return;
+    if (activeId === undefined) {
+      if (readOnlyDoc === undefined) return;
+      void selectReadOnlyDoc(undefined);
+      return;
+    }
+    if (readOnlyDoc?.id === activeId) return;
+    void selectReadOnlyDoc(activeId);
+  }, [isReadOnly, activeId, readOnlyDoc, selectReadOnlyDoc]);
 
   // Remember recently opened repos once we know the current repo is reachable.
   useEffect(() => {
@@ -219,10 +254,13 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
         let localStore = getRepoStore(slug);
         localStore.replaceWithRemote(files);
         let synced = localStore.listNotes();
+        let readme = synced.find((note) => note.path.toLowerCase() === 'readme.md');
         setActiveId((prev) => {
           if (prev) return prev;
+          if (desiredNotePath !== undefined) return prev;
           let stored = getLastActiveNoteId(slug);
           if (stored && synced.some((n) => n.id === stored)) return stored;
+          if (readme) return readme.id;
           return undefined;
         });
         markRepoLinked(slug);
@@ -234,7 +272,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
         initialPullRef.current.done = true;
       }
     })();
-  }, [route, repoAccess.level, linked, slug, canEdit, defaultBranch]);
+  }, [route, repoAccess.level, linked, slug, canEdit, defaultBranch, desiredNotePath]);
 
   // Attempt a last-minute sync via the Service Worker so pending edits survive tab closure.
   useEffect(() => {
@@ -707,25 +745,41 @@ function useActiveNote({
   slug,
   notes,
   canEdit,
+  desiredNotePath,
 }: {
   slug: string;
-  notes: { id: string }[];
+  notes: { id: string; path: string }[];
   canEdit: boolean;
+  desiredNotePath?: string;
 }) {
   // Track the currently focused note id for the editor and file tree.
   let [activeId, setActiveId] = useState<string | undefined>(() => {
+    if (desiredNotePath !== undefined) {
+      let initial = findByPath(notes, desiredNotePath);
+      if (initial !== undefined) return initial.id;
+    }
     let stored = getLastActiveNoteId(slug);
-    if (stored === null) return undefined;
-    return notes.some((note) => note.id === stored) ? stored : undefined;
+    if (stored !== undefined && notes.some((note) => note.id === stored)) return stored;
+    return undefined;
   });
 
-  // Restore the last active note from storage when loading an existing repo.
   useEffect(() => {
-    if (activeId !== undefined) return;
-    let stored = getLastActiveNoteId(slug);
-    if (stored === null) return;
-    if (notes.some((note) => note.id === stored)) setActiveId(stored);
-  }, [slug, activeId, notes]);
+    if (desiredNotePath === undefined) return;
+    let match = findByPath(notes, desiredNotePath);
+    if (!match) return;
+    setActiveId((prev) => (prev === match.id ? prev : match.id));
+  }, [desiredNotePath, notes]);
+
+  // Keep active note stable when notes update and clear selection if it disappears.
+  useEffect(() => {
+    if (desiredNotePath !== undefined) return;
+    setActiveId((prev) => {
+      if (prev !== undefined && notes.some((note) => note.id === prev)) return prev;
+      let stored = getLastActiveNoteId(slug);
+      if (stored !== undefined && notes.some((note) => note.id === stored)) return stored;
+      return undefined;
+    });
+  }, [notes, slug, desiredNotePath]);
 
   // Persist the active note id so future visits resume on the same file (when permitted).
   useEffect(() => {
@@ -733,15 +787,16 @@ function useActiveNote({
     setLastActiveNoteId(slug, activeId ?? null);
   }, [activeId, slug, canEdit]);
 
-  // Remove selection when the activeId disappears from the list.
-  useEffect(() => {
-    setActiveId((prev) => {
-      if (prev !== undefined && notes.some((note) => note.id === prev)) return prev;
-      return undefined;
-    });
-  }, [notes]);
-
   return { activeId, setActiveId };
+}
+
+function findByPath<T extends { id: string; path: string }>(notes: T[], targetPath: string): T | undefined {
+  let normalized = normalizePath(targetPath);
+  return notes.find((note) => normalizePath(note.path) === normalized);
+}
+
+function normalizePath(path: string): string {
+  return path.replace(/^\/+/, '').replace(/\/+$/, '');
 }
 
 function areAccessStatesEqual(a: RepoAccessState, b: RepoAccessState): boolean {

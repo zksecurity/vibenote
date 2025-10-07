@@ -122,6 +122,8 @@ function createDeferred<T>() {
 
 describe('useRepoData', () => {
   beforeEach(() => {
+    localStorage.clear();
+
     mockSignInWithGitHubApp.mockReset();
     mockGetSessionToken.mockReset();
     mockGetSessionUser.mockReset();
@@ -168,6 +170,50 @@ describe('useRepoData', () => {
     await waitFor(() => expect(result.current.state.doc?.id).toBe(welcomeId));
     expect(result.current.state.doc?.text).toContain('Welcome to VibeNote');
     expect(onRecordRecent).not.toHaveBeenCalled();
+  });
+
+  test('activates the route note path when the file exists locally', async () => {
+    const slug = 'acme/docs';
+    const store = new LocalStore(slug);
+    store.createNote('Alpha', '# Alpha');
+    const targetId = store.createNote('Beta', '# Beta');
+    const target = store.loadNote(targetId);
+    if (target === null) throw new Error('Failed to load newly created note');
+    markRepoLinked(slug);
+
+    mockGetSessionToken.mockReturnValue('session-token');
+    mockGetSessionUser.mockReturnValue({
+      login: 'mona',
+      name: 'Mona',
+      avatarUrl: 'https://example.com/mona.png',
+    });
+    setRepoMetadata(writableMeta);
+
+    const onRecordRecent = vi.fn();
+    const route: Route = { kind: 'repo', owner: 'acme', repo: 'docs', notePath: target.path };
+    const { result } = renderHook(() => useRepoData({ slug, route, onRecordRecent }));
+
+    await waitFor(() => expect(result.current.state.activeId).toBe(targetId));
+    expect(result.current.state.doc?.path).toBe(target.path);
+  });
+
+  test('loads a read-only note that matches the route note path', async () => {
+    const slug = 'acme/docs';
+    setRepoMetadata(readOnlyMeta);
+    mockListNoteFiles.mockResolvedValue([{ path: 'guides/Intro.md', sha: 'sha-intro' }]);
+    mockPullNote.mockResolvedValue({
+      path: 'guides/Intro.md',
+      text: '# Intro',
+      sha: 'sha-intro',
+    });
+
+    const onRecordRecent = vi.fn();
+    const route: Route = { kind: 'repo', owner: 'acme', repo: 'docs', notePath: 'guides/Intro.md' };
+    const { result } = renderHook(() => useRepoData({ slug, route, onRecordRecent }));
+
+    await waitFor(() => expect(result.current.state.activeId).toBe('guides/Intro.md'));
+    await waitFor(() => expect(result.current.state.doc?.text).toBe('# Intro'));
+    expect(mockPullNote).toHaveBeenCalledWith(expect.anything(), 'guides/Intro.md');
   });
 
   // Writable repos should sync on demand and reflect updated auth/session state without losing edits.
@@ -255,8 +301,8 @@ describe('useRepoData', () => {
     expect(result.current.state.user).toEqual(expect.objectContaining({ login: 'hubot' }));
   });
 
-  // Read-only repos should list remote notes and fetch content lazily while keeping install state stable.
-  test('read-only repos fetch remote notes and refresh on selection', async () => {
+  // Read-only repos should list remote notes and refresh on selection.
+  test('read-only repos surface notes and refresh on selection', async () => {
     const slug = 'octo/wiki';
     const onRecordRecent = vi.fn();
 
@@ -283,15 +329,19 @@ describe('useRepoData', () => {
     expect(result.current.state.notes).toEqual([
       expect.objectContaining({ id: 'docs/alpha.md', title: 'alpha' }),
     ]);
+    expect(result.current.state.activeId).toBeUndefined();
     expect(result.current.state.doc).toBeUndefined();
-    await act(async () => {
-      await result.current.actions.selectNote('docs/alpha.md');
-    });
-    await waitFor(() => expect(result.current.state.doc?.text).toBe('# docs/alpha.md'));
 
     await waitFor(() =>
       expect(onRecordRecent).toHaveBeenCalledWith(expect.objectContaining({ slug, connected: false }))
     );
+
+    await act(async () => {
+      await result.current.actions.selectNote('docs/alpha.md');
+    });
+
+    await waitFor(() => expect(result.current.state.doc?.text).toBe('# docs/alpha.md'));
+    expect(mockPullNote).toHaveBeenCalledTimes(1);
 
     mockPullNote.mockClear();
     mockPullNote.mockResolvedValue({
@@ -306,6 +356,81 @@ describe('useRepoData', () => {
 
     await waitFor(() => expect(result.current.state.doc?.text).toBe('# updated remote'));
     expect(mockPullNote).toHaveBeenCalledTimes(1);
+  });
+
+  test('read-only repos list README without auto-selecting it', async () => {
+    const slug = 'octo/wiki';
+    const onRecordRecent = vi.fn();
+
+    mockGetSessionToken.mockReturnValue(null);
+    setRepoMetadata(readOnlyMeta);
+    mockListNoteFiles.mockResolvedValue([
+      { path: 'docs/alpha.md', sha: 'sha-alpha' },
+      { path: 'README.md', sha: 'sha-readme' },
+    ]);
+    mockPullNote.mockImplementation(
+      async (_config, path: string): Promise<RemoteFile> => ({
+        path,
+        text: `# ${path}`,
+        sha: `sha-${path}`,
+      })
+    );
+
+    const { result } = renderHook(() =>
+      useRepoData({ slug, route: { kind: 'repo', owner: 'octo', repo: 'wiki' }, onRecordRecent })
+    );
+
+    await waitFor(() => expect(result.current.state.notes.length).toBe(2));
+    expect(result.current.state.activeId).toBeUndefined();
+    expect(result.current.state.doc).toBeUndefined();
+
+    await act(async () => {
+      await result.current.actions.selectNote('README.md');
+    });
+
+    await waitFor(() => expect(result.current.state.doc?.path).toBe('README.md'));
+    expect(mockPullNote).toHaveBeenCalledWith(expect.anything(), 'README.md');
+  });
+
+  test('linked repos focus README after initial import', async () => {
+    const slug = 'acme/docs';
+    const onRecordRecent = vi.fn();
+
+    mockGetSessionToken.mockReturnValue('session-token');
+    mockGetSessionUser.mockReturnValue({
+      login: 'hubot',
+      name: 'Hubot',
+      avatarUrl: 'https://example.com/hubot.png',
+    });
+    setRepoMetadata(writableMeta);
+    mockListNoteFiles.mockResolvedValue([
+      { path: 'notes/first.md', sha: 'sha-first' },
+      { path: 'README.md', sha: 'sha-readme' },
+    ]);
+    mockPullNote.mockImplementation(
+      async (_config, path: string): Promise<RemoteFile> => ({
+        path,
+        text: `# ${path}`,
+        sha: `sha-${path}`,
+      })
+    );
+
+    const uuidSpy = vi
+      .spyOn(globalThis.crypto, 'randomUUID')
+      .mockReturnValueOnce('00000000-0000-0000-0000-000000000111')
+      .mockReturnValueOnce('00000000-0000-0000-0000-000000000222');
+
+    const { result } = renderHook(() =>
+      useRepoData({ slug, route: { kind: 'repo', owner: 'acme', repo: 'docs' }, onRecordRecent })
+    );
+
+    await waitFor(() => expect(result.current.state.notes.length).toBe(2));
+    const readmeEntry = result.current.state.notes.find((note) => note.path === 'README.md');
+    await waitFor(() => expect(result.current.state.activeId).toBe('00000000-0000-0000-0000-000000000222'));
+    await waitFor(() => expect(result.current.state.doc?.path).toBe('README.md'));
+    expect(readmeEntry?.id).toBe('00000000-0000-0000-0000-000000000222');
+
+    uuidSpy.mockRestore();
   });
 
   // During the repo access check, the active document should never flicker away in the UI.
@@ -573,12 +698,15 @@ describe('useRepoData', () => {
       { path: 'docs/beta.md', sha: 'sha-beta' },
     ]);
 
-    mockPullNote
-      .mockResolvedValueOnce({ path: 'docs/alpha.md', text: '# docs/alpha.md', sha: 'sha-alpha' })
-      .mockResolvedValueOnce({ path: 'docs/beta.md', text: '# docs/beta.md', sha: 'sha-beta' });
+    mockPullNote.mockImplementation(
+      async (_config, path: string): Promise<RemoteFile> => ({
+        path,
+        text: `# ${path}`,
+        sha: `sha-${path}`,
+      })
+    );
 
     const seenNeedsInstall: boolean[] = [];
-    const seenReadOnlyLoading: boolean[] = [];
 
     const { result } = renderHook(() => {
       const value = useRepoData({
@@ -592,12 +720,11 @@ describe('useRepoData', () => {
 
     await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
     await waitFor(() => expect(result.current.state.notes.length).not.toBe(0));
-
+    expect(result.current.state.activeId).toBeUndefined();
     await act(async () => {
       await result.current.actions.selectNote('docs/alpha.md');
     });
     await waitFor(() => expect(result.current.state.doc?.path).toBe('docs/alpha.md'));
-
     await act(async () => {
       await result.current.actions.selectNote('docs/beta.md');
     });
@@ -605,8 +732,6 @@ describe('useRepoData', () => {
     await waitFor(() => expect(result.current.state.doc?.path).toBe('docs/beta.md'));
     expect(result.current.state.needsInstall).toBe(false);
     expect(seenNeedsInstall.every((flag) => flag === false)).toBe(true);
-    const loadingTransitions = seenReadOnlyLoading.filter(Boolean).length;
-    expect(loadingTransitions).toBeLessThanOrEqual(1);
   });
 
   // Signing out should clear local data and disable syncing.
