@@ -42,8 +42,8 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
 
     doc,
     activeId,
-    activeNotes,
-    activeFolders,
+    notes,
+    folders,
 
     autosync,
     syncing,
@@ -219,7 +219,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
               <div className="sidebar-title">
                 <div className="sidebar-title-main">
                   <span>Notes</span>
-                  <span className="note-count">{activeNotes.length}</span>
+                  <span className="note-count">{notes.length}</span>
                 </div>
                 <button
                   className="btn icon only-mobile"
@@ -231,8 +231,8 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
               </div>
             </div>
             <FileSidebar
-              notes={activeNotes}
-              folders={activeFolders}
+              notes={notes}
+              folders={folders}
               canEdit={canEdit}
               slug={slug}
               activeId={activeId}

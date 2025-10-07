@@ -156,9 +156,9 @@ describe('useRepoData', () => {
 
     expect(result.current.state.canEdit).toBe(true);
     expect(result.current.state.canSync).toBe(false);
-    expect(result.current.state.activeNotes).toHaveLength(1);
-    expect(result.current.state.activeNotes[0]?.title).toBe('Welcome');
-    const welcomeId = result.current.state.activeNotes[0]?.id;
+    expect(result.current.state.notes).toHaveLength(1);
+    expect(result.current.state.notes[0]?.title).toBe('Welcome');
+    const welcomeId = result.current.state.notes[0]?.id;
     expect(welcomeId).toBeDefined();
 
     act(() => {
@@ -206,7 +206,7 @@ describe('useRepoData', () => {
     );
 
     await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
-    await waitFor(() => expect(result.current.state.activeNotes).toHaveLength(1));
+    await waitFor(() => expect(result.current.state.notes).toHaveLength(1));
 
     expect(result.current.state.canEdit).toBe(true);
     expect(result.current.state.canSync).toBe(true);
@@ -279,8 +279,8 @@ describe('useRepoData', () => {
     expect(result.current.state.canEdit).toBe(false);
     expect(result.current.state.canRead).toBe(true);
 
-    await waitFor(() => expect(result.current.state.activeNotes.length).not.toBe(0));
-    expect(result.current.state.activeNotes).toEqual([
+    await waitFor(() => expect(result.current.state.notes.length).not.toBe(0));
+    expect(result.current.state.notes).toEqual([
       expect.objectContaining({ id: 'docs/alpha.md', title: 'alpha' }),
     ]);
     expect(result.current.state.doc).toBe(null);
@@ -593,7 +593,7 @@ describe('useRepoData', () => {
     });
 
     await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
-    await waitFor(() => expect(result.current.state.activeNotes.length).not.toBe(0));
+    await waitFor(() => expect(result.current.state.notes.length).not.toBe(0));
 
     await act(async () => {
       await result.current.actions.selectNote('docs/alpha.md');

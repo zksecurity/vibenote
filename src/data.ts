@@ -71,8 +71,8 @@ type RepoDataState = {
   // repo content
   doc: NoteDoc | null;
   activeId: string | null;
-  activeNotes: RepoNoteListItem[];
-  activeFolders: string[];
+  notes: RepoNoteListItem[];
+  folders: string[];
 
   // sync state
   autosync: boolean;
@@ -144,7 +144,16 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
   const { defaultBranch, manageUrl } = repoAccess;
   const accessStatusReady =
     repoAccess.status === 'ready' || repoAccess.status === 'rate-limited' || repoAccess.status === 'error';
+
+  // in readonly mode, we store nothing locally and just fetch content from github no demand
   const isReadOnly = repoAccess.level === 'read';
+  const {
+    notes: readOnlyNotes,
+    doc: readOnlyDoc,
+    folders: readOnlyFolders,
+    selectDoc: selectReadOnlyDoc,
+    reset: resetReadOnlyState,
+  } = useReadOnlyNotes({ slug, isReadOnly, defaultBranch });
 
   // whether we treat the repo as locally writable
   // note that we are optimistic about write access until the access check completes,
@@ -154,14 +163,6 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
     (!!sessionToken && (repoAccess.level === 'write' || (!accessStatusReady && linked)));
   const canRead = canEdit || isReadOnly;
 
-  const {
-    notes: readOnlyNotes,
-    doc: readOnlyDoc,
-    folders: readOnlyFolders,
-    selectDoc: selectReadOnlyDoc,
-    reset: resetReadOnlyState,
-  } = useReadOnlyNotes({ slug, isReadOnly, defaultBranch });
-
   const { autosync, setAutosync, scheduleAutoSync, performSync, syncing } = useAutosync({
     slug,
     route,
@@ -170,22 +171,19 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
     canEdit,
   });
 
-  const activeNotes = isReadOnly ? readOnlyNotes : localNotes;
+  // Derive the notes/folders from whichever source is powering the tree.
+  const notes = isReadOnly ? readOnlyNotes : localNotes;
+  const folders = isReadOnly ? readOnlyFolders : localFolders;
 
-  const { activeId, setActiveId } = useActiveNote({ slug, notes: activeNotes, canEdit });
+  const { activeId, setActiveId } = useActiveNote({ slug, notes, canEdit });
 
   const localDoc = useMemo(() => {
     if (!canEdit) return null;
     if (!activeId) return null;
     return getRepoStore(slug).loadNote(activeId);
   }, [canEdit, activeId, slug, localNotes]);
-  const doc = canEdit ? localDoc : readOnlyDoc;
 
-  // Derive the folder set from whichever source is powering the tree.
-  const activeFolders = useMemo(
-    () => (isReadOnly ? readOnlyFolders : localFolders),
-    [localFolders, isReadOnly, readOnlyFolders]
-  );
+  const doc = canEdit ? localDoc : readOnlyDoc;
 
   // EFFECTS
 
@@ -468,8 +466,8 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
 
     doc,
     activeId,
-    activeNotes,
-    activeFolders,
+    notes,
+    folders,
 
     autosync,
     syncing,
