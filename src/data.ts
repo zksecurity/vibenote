@@ -36,6 +36,7 @@ import {
   type SyncSummary,
 } from './sync/git-sync';
 import { logError } from './lib/logging';
+import { useReadOnlyNotes, type ReadOnlyNote } from './data/readonly-notes';
 import type { Route } from './ui/routing';
 
 export { useRepoData };
@@ -65,7 +66,6 @@ type RepoDataState = {
   needsInstall: boolean;
   repoQueryStatus: RepoQueryStatus;
   manageUrl: string | null;
-  readOnlyLoading: boolean; // TODO why don't we have a loading state when fetching writable notes?
 
   // repo content
   doc: NoteDoc | null;
@@ -102,8 +102,6 @@ type RepoDataActions = {
   updateNoteText: (id: string, text: string) => void;
 };
 
-type ReadOnlyNote = { id: string; path: string; title: string; dir: string; sha?: string };
-
 type RepoDataInputs = {
   slug: string;
   route: Route;
@@ -124,15 +122,6 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
   // Local storage wrapper
   const { notes: localNotes, folders: localFolders } = useLocalRepoSnapshot(slug);
 
-  // Hold the currently loaded read-only note so the editor can render remote content.
-  const [readOnlyDoc, setReadOnlyDoc] = useState<NoteDoc | null>(null);
-
-  // Cache read-only note metadata fetched straight from GitHub when in view-only mode.
-  const [readOnlyNotes, setReadOnlyNotes] = useState<ReadOnlyNote[]>([]);
-
-  // Indicate when remote read-only data is being fetched to show loading states.
-  const [readOnlyLoading, setReadOnlyLoading] = useState(false);
-
   // Store the current GitHub App session token to toggle authenticated features instantly.
   const [sessionToken, setSessionToken] = useState(getAppSessionToken);
 
@@ -151,7 +140,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
 
   // DERIVED STATE (and hooks that depend on it)
 
-  const manageUrl = repoAccess.manageUrl;
+  const { defaultBranch, manageUrl } = repoAccess;
   const accessStatusReady =
     repoAccess.status === 'ready' || repoAccess.status === 'rate-limited' || repoAccess.status === 'error';
   const isReadOnly = repoAccess.level === 'read';
@@ -163,6 +152,15 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
     route.kind === 'new' ||
     (!!sessionToken && (repoAccess.level === 'write' || (!accessStatusReady && linked)));
   const canRead = canEdit || isReadOnly;
+
+  const {
+    notes: readOnlyNotes,
+    doc: readOnlyDoc,
+    folders: readOnlyFolders,
+    loadNote: loadReadOnlyNote,
+    clearDoc: clearReadOnlyDoc,
+    reset: resetReadOnlyState,
+  } = useReadOnlyNotes({ slug, isReadOnly, defaultBranch });
 
   const { autosync, setAutosync, scheduleAutoSync, performSync, syncing } = useAutosync({
     slug,
@@ -184,47 +182,10 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
   const doc = canEdit ? localDoc : readOnlyDoc;
 
   // Derive the folder set from whichever source is powering the tree.
-  const activeFolders = useMemo(() => {
-    if (isReadOnly) {
-      const set = new Set<string>();
-      for (const note of readOnlyNotes) {
-        if (!note.dir) continue;
-        let current = note.dir.replace(/(^\/+|\/+?$)/g, '');
-        while (current) {
-          set.add(current);
-          const idx = current.lastIndexOf('/');
-          current = idx >= 0 ? current.slice(0, idx) : '';
-        }
-      }
-      return Array.from(set).sort();
-    }
-    return localFolders;
-  }, [localFolders, isReadOnly, readOnlyNotes]);
-
-  // CALLBACKS / HELPERS
-
-  // Fetch the latest contents when a read-only file is selected from the tree.
-  async function loadReadOnlyNote(id: string) {
-    const entry = readOnlyNotes.find((n) => n.id === id);
-    if (!entry) return;
-    const cfg = remoteConfigForSlug(slug, repoAccess.defaultBranch);
-    try {
-      const remote = await pullNote(cfg, entry.path);
-      if (!remote) return;
-      setReadOnlyDoc({
-        id: entry.id,
-        path: entry.path,
-        title: entry.title,
-        dir: entry.dir,
-        text: remote.text,
-        updatedAt: Date.now(),
-        lastRemoteSha: remote.sha,
-        lastSyncedHash: hashText(remote.text),
-      });
-    } catch (error) {
-      logError(error);
-    }
-  }
+  const activeFolders = useMemo(
+    () => (isReadOnly ? readOnlyFolders : localFolders),
+    [localFolders, isReadOnly, readOnlyFolders]
+  );
 
   // EFFECTS
 
@@ -251,7 +212,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
       if (linked) return;
       if (initialPullRef.current.done) return;
       try {
-        const cfg: RemoteConfig = remoteConfigForSlug(slug, repoAccess.defaultBranch);
+        const cfg: RemoteConfig = buildRemoteConfig(slug, repoAccess.defaultBranch);
         const entries = await listNoteFiles(cfg);
         const files: { path: string; text: string; sha?: string }[] = [];
         for (const e of entries) {
@@ -276,69 +237,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
         initialPullRef.current.done = true;
       }
     })();
-  }, [route, repoAccess.level, linked, slug, canEdit, repoAccess.defaultBranch]);
-
-  // Drop any cached read-only data once we gain write access.
-  useEffect(() => {
-    if (isReadOnly) return;
-    setReadOnlyNotes((prev) => (prev.length === 0 ? prev : []));
-    setReadOnlyDoc((prev) => (prev === null ? prev : null));
-    setReadOnlyLoading(false);
-  }, [isReadOnly]);
-
-  // Populate the read-only note list straight from GitHub when we lack write access.
-  useEffect(() => {
-    if (!isReadOnly) return;
-    let cancelled = false;
-    setReadOnlyLoading(true);
-    (async () => {
-      try {
-        const cfg = remoteConfigForSlug(slug, repoAccess.defaultBranch);
-        const entries = await listNoteFiles(cfg);
-        const toTitle = (path: string) => {
-          const base = path.slice(path.lastIndexOf('/') + 1);
-          return base.replace(/\.md$/i, '');
-        };
-        const mapped: ReadOnlyNote[] = entries.map((entry) => {
-          const title = toTitle(entry.path);
-          const dir = (() => {
-            const idx = entry.path.lastIndexOf('/');
-            return idx >= 0 ? entry.path.slice(0, idx) : '';
-          })();
-          return { id: entry.path, path: entry.path, title, dir, sha: entry.sha };
-        });
-        if (cancelled) return;
-        setReadOnlyNotes(mapped);
-        if (mapped.length > 0) {
-          const first = mapped[0]!;
-          setActiveId(first.id);
-          const remote = await pullNote(cfg, first.path);
-          if (!remote || cancelled) return;
-          setReadOnlyDoc({
-            id: first.id,
-            path: first.path,
-            title: first.title,
-            dir: first.dir,
-            text: remote.text,
-            updatedAt: Date.now(),
-            lastRemoteSha: remote.sha,
-            lastSyncedHash: hashText(remote.text),
-          });
-        } else {
-          setReadOnlyDoc(null);
-          setActiveId(null);
-        }
-        if (!cancelled) setReadOnlyLoading(false);
-      } catch (error) {
-        logError(error);
-        if (!cancelled) setReadOnlyLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-      setReadOnlyLoading(false);
-    };
-  }, [isReadOnly, slug, repoAccess.defaultBranch]);
+  }, [route, repoAccess.level, linked, slug, canEdit, defaultBranch]);
 
   // Attempt a last-minute sync via the Service Worker so pending edits survive tab closure.
   useEffect(() => {
@@ -353,7 +252,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
         if (!ctrl) return;
         const accessToken = await ensureFreshAccessToken();
         if (!accessToken) return;
-        const cfg = remoteConfigForSlug(slug, repoAccess.defaultBranch);
+        const cfg = buildRemoteConfig(slug, defaultBranch);
         const localStore = getRepoStore(slug);
         const pending = localStore
           .listNotes()
@@ -392,7 +291,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
       window.removeEventListener('pagehide', onPageHide);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [route.kind, sessionToken, linked, slug, canEdit, repoAccess.defaultBranch]);
+  }, [route.kind, sessionToken, linked, slug, canEdit, defaultBranch]);
 
   // CLICK HANDLERS
 
@@ -439,9 +338,8 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
     setUser(null);
     setLinked(false);
     setAutosync(false);
-    setReadOnlyNotes([]);
+    resetReadOnlyState();
     setActiveId(null);
-    setReadOnlyDoc(null);
     initialPullRef.current.done = false;
     setSyncMessage('Signed out');
   };
@@ -550,7 +448,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
   const selectNote = async (id: string | null) => {
     setActiveId(id);
     if (!id) {
-      if (!canEdit) setReadOnlyDoc(null);
+      if (!canEdit) clearReadOnlyDoc();
       return;
     }
     if (!canEdit) {
@@ -573,7 +471,6 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
     canSync: linked && canEdit,
     repoQueryStatus: repoAccess.status,
     needsInstall: repoAccess.needsInstall,
-    readOnlyLoading,
 
     doc,
     activeId,
@@ -628,7 +525,7 @@ type RepoAccessState = {
   level: RepoAccessLevel;
   status: RepoQueryStatus;
   metadata: RepoMetadata | null;
-  defaultBranch: string | null;
+  defaultBranch?: string;
   error: string | null;
   rateLimited: boolean;
   needsInstall: boolean;
@@ -640,7 +537,7 @@ const initialAccessState: RepoAccessState = {
   level: 'none',
   status: 'idle',
   metadata: null,
-  defaultBranch: null,
+  defaultBranch: undefined,
   error: null,
   rateLimited: false,
   needsInstall: false,
@@ -720,7 +617,7 @@ function deriveAccessFromMetadata(input: {
     level,
     status,
     metadata: meta,
-    defaultBranch: meta.defaultBranch,
+    defaultBranch: meta.defaultBranch ?? undefined,
     error: null,
     rateLimited: meta.rateLimited === true,
     needsInstall,
@@ -884,12 +781,6 @@ function useActiveNote({
   }, [notes]);
 
   return { activeId, setActiveId };
-}
-
-function remoteConfigForSlug(slug: string, branch: string | null): RemoteConfig {
-  const cfg: RemoteConfig = buildRemoteConfig(slug);
-  if (branch) cfg.branch = branch;
-  return cfg;
 }
 
 function areAccessStatesEqual(a: RepoAccessState, b: RepoAccessState): boolean {

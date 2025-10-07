@@ -37,10 +37,10 @@ type CommitResponse = { commitSha: string; blobShas: Record<string, string> };
 
 const GITHUB_API_BASE = 'https://api.github.com';
 
-export function buildRemoteConfig(slug: string): RemoteConfig {
-  const [owner, repo] = slug.split('/', 2);
-  if (!owner || !repo) throw new Error('Invalid repository slug');
-  return { owner, repo, branch: 'main' };
+export function buildRemoteConfig(slug: string, branch?: string): RemoteConfig {
+  let [owner, repo] = slug.split('/', 2);
+  if (!owner || !repo) throw Error('Invalid repository slug');
+  return { owner, repo, branch: branch ?? 'main' };
 }
 
 export async function repoExists(owner: string, repo: string): Promise<boolean> {

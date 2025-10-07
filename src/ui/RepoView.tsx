@@ -39,7 +39,6 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     canSync,
     repoQueryStatus,
     needsInstall,
-    readOnlyLoading,
 
     doc,
     activeId,
@@ -262,12 +261,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
         )}
         <section className="workspace">
           <div className="workspace-body">
-            {readOnlyLoading ? (
-              <div className="empty-state">
-                <h2>Loading repository…</h2>
-                <p>Fetching files from GitHub. Hang tight.</p>
-              </div>
-            ) : route.kind === 'repo' && needsInstall ? (
+            {route.kind === 'repo' && needsInstall ? (
               <div className="empty-state">
                 <h2>Can't access this repository</h2>
                 <p>This repository is private or not yet enabled for the VibeNote GitHub App.</p>
