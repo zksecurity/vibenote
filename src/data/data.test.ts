@@ -283,7 +283,11 @@ describe('useRepoData', () => {
     expect(result.current.state.activeNotes).toEqual([
       expect.objectContaining({ id: 'docs/alpha.md', title: 'alpha' }),
     ]);
-    expect(result.current.state.doc?.text).toBe('# docs/alpha.md');
+    expect(result.current.state.doc).toBe(null);
+    await act(async () => {
+      await result.current.actions.selectNote('docs/alpha.md');
+    });
+    await waitFor(() => expect(result.current.state.doc?.text).toBe('# docs/alpha.md'));
 
     await waitFor(() =>
       expect(onRecordRecent).toHaveBeenCalledWith(expect.objectContaining({ slug, connected: false }))
@@ -590,6 +594,11 @@ describe('useRepoData', () => {
 
     await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
     await waitFor(() => expect(result.current.state.activeNotes.length).not.toBe(0));
+
+    await act(async () => {
+      await result.current.actions.selectNote('docs/alpha.md');
+    });
+    await waitFor(() => expect(result.current.state.doc?.path).toBe('docs/alpha.md'));
 
     await act(async () => {
       await result.current.actions.selectNote('docs/beta.md');
