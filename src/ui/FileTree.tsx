@@ -14,7 +14,7 @@ type NewEntry = { kind: 'file' | 'folder'; parentDir: string; key: number } | nu
 type FileTreeProps = {
   files: FileEntry[];
   folders: string[];
-  activeId: string | null;
+  activeId: string | undefined;
   collapsed: Record<string, boolean>;
   onCollapsedChange: (next: Record<string, boolean>) => void;
   onSelectionChange?: (sel: Selection) => void;
@@ -68,7 +68,7 @@ export function FileTree(props: FileTreeProps) {
 
   // Sync selection to active file
   useEffect(() => {
-    if (props.activeId) setSelected({ kind: 'file', id: props.activeId });
+    if (props.activeId !== undefined) setSelected({ kind: 'file', id: props.activeId });
   }, [props.activeId]);
 
   // Inline create handling
@@ -169,7 +169,7 @@ export function FileTree(props: FileTreeProps) {
   };
 
   useEffect(() => {
-    if (!props.activeId) return;
+    if (props.activeId === undefined) return;
     let file = props.files.find((f) => f.id === props.activeId);
     if (!file) return;
     let dirs = ancestorsOf(file.dir);
@@ -318,7 +318,7 @@ function Row(props: {
   node: FolderNode | FileNode;
   depth: number;
   collapsed: Record<string, boolean>;
-  activeId: string | null;
+  activeId: string | undefined;
   selected: Selection;
   menuSel: Selection;
   editing: Selection;

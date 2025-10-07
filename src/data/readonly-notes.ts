@@ -13,13 +13,13 @@ type ReadOnlyNote = { id: string; path: string; title: string; dir: string; sha?
 function useReadOnlyNotes(params: { slug: string; isReadOnly: boolean; defaultBranch?: string }) {
   let { slug, isReadOnly, defaultBranch } = params;
   let [notes, setNotes] = useState<ReadOnlyNote[]>([]);
-  let [doc, setDoc] = useState<NoteDoc | null>(null);
+  let [doc, setDoc] = useState<NoteDoc | undefined>(undefined);
 
   // Drop read-only data once we gain write access or lose read access.
   useEffect(() => {
     if (isReadOnly) return;
     setNotes((prev) => (prev.length === 0 ? prev : []));
-    setDoc(null);
+    setDoc(undefined);
   }, [isReadOnly]);
 
   // Populate the read-only note list straight from GitHub when we lack write access.
@@ -67,9 +67,9 @@ function useReadOnlyNotes(params: { slug: string; isReadOnly: boolean; defaultBr
     /**
      * Fetch the latest contents when a read-only file is selected from the tree.
      */
-    async selectDoc(id: string | null) {
-      if (id === null) {
-        setDoc(null);
+    async selectDoc(id: string | undefined) {
+      if (id === undefined) {
+        setDoc(undefined);
         return;
       }
       if (!isReadOnly) return;
@@ -96,7 +96,7 @@ function useReadOnlyNotes(params: { slug: string; isReadOnly: boolean; defaultBr
 
     reset() {
       setNotes([]);
-      setDoc(null);
+      setDoc(undefined);
     },
   };
 }

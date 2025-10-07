@@ -46,7 +46,7 @@ This document captures developer‑focused setup, technical architecture and IMP
 - Sprinkle small comments throughout your code, that explain dense logic at a high level. Add a comment at the top of a file explaining its purpose.
 - Formatting: we use Prettier (repo includes `.prettierrc`).
 - Filenames use kebab case, like my-lib.ts. Except for React component files with the typical PascalCase.
-- Variables: prefer `let` over `const`. Except for global constants, functions, or other module‑level constant objects.
+- Variables: prefer `let` over `const`. Except for functions, global constants, or other module‑level constant objects.
 - Types: use `type` aliases instead of `interface`.
 - Exports: collect all exports at the top of the file with named exports. Avoid inline `export` sprinkled through the file.
 - Export types using the `type` qualifier: `export type { MyType }` or `export { type MyType }`

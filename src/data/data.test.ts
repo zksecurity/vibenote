@@ -162,7 +162,7 @@ describe('useRepoData', () => {
     expect(welcomeId).toBeDefined();
 
     act(() => {
-      result.current.actions.selectNote(welcomeId ?? null);
+      result.current.actions.selectNote(welcomeId);
     });
 
     await waitFor(() => expect(result.current.state.doc?.id).toBe(welcomeId));
@@ -283,7 +283,7 @@ describe('useRepoData', () => {
     expect(result.current.state.notes).toEqual([
       expect.objectContaining({ id: 'docs/alpha.md', title: 'alpha' }),
     ]);
-    expect(result.current.state.doc).toBe(null);
+    expect(result.current.state.doc).toBeUndefined();
     await act(async () => {
       await result.current.actions.selectNote('docs/alpha.md');
     });
@@ -331,7 +331,7 @@ describe('useRepoData', () => {
     const pendingMeta = createDeferred<RepoMetadata>();
     mockGetRepoMetadata.mockImplementation(() => pendingMeta.promise);
 
-    const seenDocIds: Array<string | null | undefined> = [];
+    const seenDocIds: Array<string | undefined> = [];
     const seenNeedsInstall: boolean[] = [];
     const seenCanEdit: boolean[] = [];
     const { result } = renderHook(() => {
@@ -426,7 +426,7 @@ describe('useRepoData', () => {
 
     await waitFor(() => expect(mockSyncBidirectional).toHaveBeenCalledWith(expect.any(LocalStore), slug));
     expect(result.current.state.autosync).toBe(true);
-    expect(result.current.state.statusMessage).toBe(null);
+    expect(result.current.state.statusMessage).toBeUndefined();
 
     setTimeoutSpy.mockRestore();
   });
@@ -459,7 +459,7 @@ describe('useRepoData', () => {
       throw new Error(`unexpected repo ${repo}`);
     });
 
-    const seenDocIds: Array<string | null | undefined> = [];
+    const seenDocIds: Array<string | undefined> = [];
     const seenNeedsInstall: boolean[] = [];
 
     const { result, rerender } = renderHook(
@@ -644,9 +644,9 @@ describe('useRepoData', () => {
     });
 
     expect(mockSignOutFromGitHubApp).toHaveBeenCalledTimes(1);
-    expect(result.current.state.sessionToken).toBeNull();
-    expect(result.current.state.user).toBeNull();
-    expect(result.current.state.doc).toBeNull();
+    expect(result.current.state.sessionToken).toBeUndefined();
+    expect(result.current.state.user).toBeUndefined();
+    expect(result.current.state.doc).toBeUndefined();
     expect(result.current.state.canSync).toBe(false);
     expect(result.current.state.needsInstall).toBe(false);
     expect(new LocalStore(slug).listNotes()).toHaveLength(0);

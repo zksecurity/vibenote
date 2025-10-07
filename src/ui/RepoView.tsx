@@ -158,7 +158,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                 <ExternalLinkIcon />
               </a>
             </span>
-          ) : sessionToken ? (
+          ) : sessionToken !== undefined ? (
             <span className="repo-anchor align-workspace">
               <button
                 type="button"
@@ -176,7 +176,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
           ) : null}
         </div>
         <div className="topbar-actions">
-          {!sessionToken ? (
+          {sessionToken === undefined ? (
             <button className="btn primary" onClick={actions.signIn}>
               Connect GitHub
             </button>
@@ -193,7 +193,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                   <SyncIcon spinning={syncing} />
                 </button>
               )}
-              {user && (
+              {user !== undefined && (
                 <button
                   className="btn ghost account-btn"
                   onClick={() => setMenuOpen((v) => !v)}
@@ -273,7 +273,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                   </code>
                   , or grant access to all repositories (not recommended).
                 </p>
-                {sessionToken ? (
+                {sessionToken !== undefined ? (
                   <button className="btn primary" onClick={actions.openRepoAccess}>
                     Get Read/Write Access
                   </button>
@@ -303,14 +303,14 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                   <div className="alert">
                     <span className="badge">Read-only</span>
                     <span className="alert-text">You can view, but not edit files in this repository.</span>
-                    {sessionToken ? (
+                    {sessionToken !== undefined ? (
                       <button className="btn primary" onClick={actions.openRepoAccess}>
                         Get Write Access
                       </button>
                     ) : null}
                   </div>
                 )}
-                {doc ? (
+                {doc !== undefined ? (
                   <div className="workspace-panels">
                     <Editor
                       key={doc.id}
@@ -334,7 +334,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
               </>
             )}
           </div>
-          {statusMessage && (
+          {statusMessage !== undefined && (
             <div className="status-banner">
               <span>Status</span>
               <span>{statusMessage}</span>
@@ -344,7 +344,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
       </div>
       {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
 
-      {menuOpen && user && (
+      {menuOpen && user !== undefined && (
         <div className="account-menu">
           <div className="account-menu-header">
             <div className="account-menu-avatar" aria-hidden>
@@ -388,9 +388,9 @@ type FileSidebarProps = {
   folders: string[];
   canEdit: boolean;
   slug: string;
-  activeId: string | null;
+  activeId: string | undefined;
   onSelect: (id: string) => void;
-  onCreateNote: (dir: string, name: string) => string | null;
+  onCreateNote: (dir: string, name: string) => string | undefined;
   onCreateFolder: (parentDir: string, name: string) => void;
   onRenameNote: (id: string, title: string) => void;
   onDeleteNote: (id: string) => void;
