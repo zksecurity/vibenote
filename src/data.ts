@@ -158,8 +158,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
     notes: readOnlyNotes,
     doc: readOnlyDoc,
     folders: readOnlyFolders,
-    loadNote: loadReadOnlyNote,
-    clearDoc: clearReadOnlyDoc,
+    selectDoc: selectReadOnlyDoc,
     reset: resetReadOnlyState,
   } = useReadOnlyNotes({ slug, isReadOnly, defaultBranch });
 
@@ -448,13 +447,7 @@ function useRepoData({ slug, route, onRecordRecent }: RepoDataInputs): {
 
   const selectNote = async (id: string | null) => {
     setActiveId(id);
-    if (!id) {
-      if (!canEdit) clearReadOnlyDoc();
-      return;
-    }
-    if (!canEdit) {
-      await loadReadOnlyNote(id);
-    }
+    await selectReadOnlyDoc(id);
   };
 
   // Persist the active note id so future visits resume on the same file (when permitted).

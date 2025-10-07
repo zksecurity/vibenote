@@ -67,7 +67,12 @@ function useReadOnlyNotes(params: { slug: string; isReadOnly: boolean; defaultBr
     /**
      * Fetch the latest contents when a read-only file is selected from the tree.
      */
-    async loadNote(id: string) {
+    async selectDoc(id: string | null) {
+      if (id === null) {
+        setDoc(null);
+        return;
+      }
+      if (!isReadOnly) return;
       let entry = notes.find((note) => note.id === id);
       if (!entry) return;
       let cfg = buildRemoteConfig(slug, defaultBranch);
@@ -87,10 +92,6 @@ function useReadOnlyNotes(params: { slug: string; isReadOnly: boolean; defaultBr
       } catch (error) {
         logError(error);
       }
-    },
-
-    clearDoc() {
-      setDoc(null);
     },
 
     reset() {
