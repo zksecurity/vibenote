@@ -34,7 +34,10 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
     (nextPath: string | undefined) => {
       if (route.kind === 'repo') {
         if (pathsEqual(route.notePath, nextPath)) return;
-        navigate({ kind: 'repo', owner: route.owner, repo: route.repo, notePath: nextPath }, { replace: true });
+        navigate(
+          { kind: 'repo', owner: route.owner, repo: route.repo, notePath: nextPath },
+          { replace: true }
+        );
         return;
       }
       if (route.kind === 'new') {
@@ -56,6 +59,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
     canSync,
     repoQueryStatus,
     needsInstall,
+    manageUrl,
 
     doc,
     activePath,
@@ -68,6 +72,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
   } = state;
 
   const userAvatarSrc = user?.avatarDataUrl ?? user?.avatarUrl ?? undefined;
+  let repoOwner = route.kind === 'repo' ? route.owner : undefined;
   const showSidebar = canRead;
   const isReadOnly = !canEdit && canRead;
   const layoutClass = showSidebar ? '' : 'single';
@@ -389,6 +394,11 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
           >
             Sign out
           </button>
+          {manageUrl !== undefined && repoOwner !== undefined && (
+            <a className="btn subtle full-width" href={manageUrl} target="_blank" rel="noreferrer">
+              Manage VibeNote installation for {repoOwner}
+            </a>
+          )}
         </div>
       )}
       {showSwitcher && (
