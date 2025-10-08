@@ -1,30 +1,29 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 export type FileEntry = {
-  id: string;
   name: string; // filename without directory
   path: string; // dir + name
   dir: string; // '' for root
 };
 
-type Selection = { kind: 'folder'; dir: string } | { kind: 'file'; id: string } | null;
+type Selection = { kind: 'folder' | 'file'; path: string } | null;
 
 type NewEntry = { kind: 'file' | 'folder'; parentDir: string; key: number } | null;
 
 type FileTreeProps = {
   files: FileEntry[];
   folders: string[];
-  activeId: string | undefined;
+  activePath: string | undefined;
   collapsed: Record<string, boolean>;
   onCollapsedChange: (next: Record<string, boolean>) => void;
   onSelectionChange?: (sel: Selection) => void;
-  onSelectFile: (id: string) => void;
-  onRenameFile: (id: string, newName: string) => void;
-  onDeleteFile: (id: string) => void;
+  onSelectFile: (path: string) => void;
+  onRenameFile: (path: string, newName: string) => void;
+  onDeleteFile: (path: string) => void;
   onCreateFile: (dir: string, name: string) => void;
   onCreateFolder: (parentDir: string, name: string) => void;
   onRenameFolder: (dir: string, newName: string) => void;
-  onDeleteFolder: (dir: string) => void;
+  onDeleteFolder: (path: string) => void;
   newEntry?: NewEntry; // request inline create under parent dir
   onFinishCreate?: () => void;
 };
@@ -35,7 +34,7 @@ type FolderNode = {
   name: string;
   children: (FolderNode | FileNode)[];
 };
-type FileNode = { kind: 'file'; id: string; name: string; dir: string; path: string };
+type FileNode = { kind: 'file'; name: string; dir: string; path: string };
 
 export function FileTree(props: FileTreeProps) {
   let tree = useMemo(() => buildTree(props.files, props.folders), [props.files, props.folders]);
@@ -45,21 +44,19 @@ export function FileTree(props: FileTreeProps) {
   let containerRef = useRef<HTMLDivElement | null>(null);
   let [menuSel, setMenuSel] = useState<Selection>(null);
 
-  type FlatItem =
-    | { kind: 'folder'; dir: string; depth: number }
-    | { kind: 'file'; id: string; depth: number };
+  type FlatItem = { kind: 'folder' | 'file'; path: string; depth: number };
   const visibleItems = useMemo<FlatItem[]>(() => {
     const list: FlatItem[] = [];
     const walk = (node: FolderNode, depth: number) => {
       if (node.dir !== '' || depth === 0) {
         // root folder entry is not clickable label; still include for navigation to root folder
-        list.push({ kind: 'folder', dir: node.dir, depth });
+        list.push({ kind: 'folder', path: node.dir, depth });
       }
       const isCollapsed = node.dir !== '' && props.collapsed[node.dir] !== false;
       if (isCollapsed) return;
       for (const c of node.children) {
         if (c.kind === 'folder') walk(c, depth + 1);
-        else list.push({ kind: 'file', id: c.id, depth: depth + 1 });
+        else list.push({ kind: 'file', path: c.path, depth: depth + 1 });
       }
     };
     walk(tree, 0);
@@ -68,15 +65,19 @@ export function FileTree(props: FileTreeProps) {
 
   // Sync selection to active file
   useEffect(() => {
-    if (props.activeId !== undefined) setSelected({ kind: 'file', id: props.activeId });
-  }, [props.activeId]);
+    if (props.activePath !== undefined) setSelected({ kind: 'file', path: props.activePath });
+  }, [props.activePath]);
 
   // Inline create handling
   let [createKey, setCreateKey] = useState<number | null>(null);
   useEffect(() => {
     if (!props.newEntry) return;
     setCreateKey(props.newEntry.key);
-    setEditing({ kind: props.newEntry.kind === 'file' ? 'file' : 'folder', id: '' } as any);
+    setEditing(
+      props.newEntry.kind === 'file'
+        ? { kind: 'file', path: '' }
+        : { kind: 'folder', path: props.newEntry.parentDir }
+    );
     setEditText('');
     // Expand parent folder
     if (props.newEntry.parentDir) {
@@ -100,8 +101,12 @@ export function FileTree(props: FileTreeProps) {
       if (selected) {
         index = visibleItems.findIndex(
           (it) =>
-            (it.kind === 'folder' && selected.kind === 'folder' && it.dir === selected.dir) ||
-            (it.kind === 'file' && selected.kind === 'file' && it.id === selected.id)
+            (it.kind === 'folder' &&
+              selected.kind === 'folder' &&
+              normalizePath(it.path) === normalizePath(selected.path)) ||
+            (it.kind === 'file' &&
+              selected.kind === 'file' &&
+              normalizePath(it.path) === normalizePath(selected.path))
         );
       }
       if (index < 0) index = 0;
@@ -110,39 +115,39 @@ export function FileTree(props: FileTreeProps) {
       if (index >= visibleItems.length) index = visibleItems.length - 1;
       const it = visibleItems[index];
       if (!it) return;
-      if (it.kind === 'folder') setSelected({ kind: 'folder', dir: (it as any).dir });
-      else setSelected({ kind: 'file', id: (it as any).id });
+      if (it.kind === 'folder') setSelected({ kind: 'folder', path: it.path });
+      else setSelected({ kind: 'file', path: it.path });
       return;
     }
     if (!selected) return;
     if (e.key === 'F2') {
       e.preventDefault();
       if (selected.kind === 'file') {
-        const f = props.files.find((x) => x.id === selected.id);
+        const f = props.files.find((x) => normalizePath(x.path) === normalizePath(selected.path));
         if (!f) return;
-        setEditing(selected);
+        setEditing({ kind: 'file', path: f.path });
         setEditText(f.name);
       } else {
-        const name = selected.dir.slice(selected.dir.lastIndexOf('/') + 1);
+        const name = selected.path.slice(selected.path.lastIndexOf('/') + 1);
         setEditing(selected);
         setEditText(name || '');
       }
     } else if (e.key === 'Delete') {
       e.preventDefault();
-      if (selected.kind === 'file') props.onDeleteFile(selected.id);
-      else if (selected.dir !== '') props.onDeleteFolder(selected.dir);
+      if (selected.kind === 'file') props.onDeleteFile(selected.path);
+      else if (selected.path !== '') props.onDeleteFolder(selected.path);
     } else if (e.key === 'Enter') {
-      if (selected.kind === 'file') props.onSelectFile(selected.id);
-      else toggleCollapse(selected.dir);
+      if (selected.kind === 'file') props.onSelectFile(selected.path);
+      else toggleCollapse(selected.path);
     } else if (e.key === 'ArrowLeft') {
       if (selected.kind === 'folder') {
         e.preventDefault();
-        collapse(selected.dir);
+        collapse(selected.path);
       }
     } else if (e.key === 'ArrowRight') {
       if (selected.kind === 'folder') {
         e.preventDefault();
-        expand(selected.dir);
+        expand(selected.path);
       }
     }
   };
@@ -169,8 +174,8 @@ export function FileTree(props: FileTreeProps) {
   };
 
   useEffect(() => {
-    if (props.activeId === undefined) return;
-    let file = props.files.find((f) => f.id === props.activeId);
+    if (props.activePath === undefined) return;
+    let file = props.files.find((f) => normalizePath(f.path) === normalizePath(props.activePath));
     if (!file) return;
     let dirs = ancestorsOf(file.dir);
     if (dirs.length === 0) return;
@@ -184,11 +189,9 @@ export function FileTree(props: FileTreeProps) {
       }
     }
     if (changed) props.onCollapsedChange(next);
-  }, [props.activeId, props.files, props.collapsed, props.onCollapsedChange]);
+  }, [props.activePath, props.files, props.collapsed, props.onCollapsedChange]);
 
-  const submitEdit = (
-    context: { kind: 'file'; id?: string; dir?: string } | { kind: 'folder'; dir?: string }
-  ) => {
+  const submitEdit = (context: { kind: 'file' | 'folder'; path?: string }) => {
     const name = editText.trim();
     if (name === '') {
       setEditing(null);
@@ -205,8 +208,8 @@ export function FileTree(props: FileTreeProps) {
       setEditText('');
       return;
     }
-    if (context.kind === 'file' && context.id) props.onRenameFile(context.id, name);
-    else if (context.kind === 'folder' && context.dir) props.onRenameFolder(context.dir, name);
+    if (context.kind === 'file' && context.path) props.onRenameFile(context.path, name);
+    else if (context.kind === 'folder' && context.path) props.onRenameFolder(context.path, name);
     setEditing(null);
     setEditText('');
   };
@@ -277,23 +280,23 @@ export function FileTree(props: FileTreeProps) {
       )}
       {tree.children.map((n) => (
         <Row
-          key={n.kind === 'folder' ? 'd:' + n.dir : 'f:' + n.id}
+          key={n.kind === 'folder' ? 'd:' + n.dir : 'f:' + n.path}
           node={n}
           depth={0}
           collapsed={props.collapsed}
-          activeId={props.activeId}
+          activePath={props.activePath}
           selected={selected}
           menuSel={menuSel}
           editing={editing}
           editText={editText}
           onSelectFolder={(dir) => {
             setMenuSel(null);
-            setSelected({ kind: 'folder', dir });
+            setSelected({ kind: 'folder', path: dir });
           }}
-          onSelectFile={(id) => {
+          onSelectFile={(path) => {
             setMenuSel(null);
-            setSelected({ kind: 'file', id });
-            props.onSelectFile(id);
+            setSelected({ kind: 'file', path });
+            props.onSelectFile(path);
           }}
           onToggleFolder={toggleCollapse}
           onStartEdit={(sel, text) => {
@@ -318,29 +321,33 @@ function Row(props: {
   node: FolderNode | FileNode;
   depth: number;
   collapsed: Record<string, boolean>;
-  activeId: string | undefined;
+  activePath: string | undefined;
   selected: Selection;
   menuSel: Selection;
   editing: Selection;
   editText: string;
   onSelectFolder: (dir: string) => void;
-  onSelectFile: (id: string) => void;
+  onSelectFile: (path: string) => void;
   onToggleFolder: (dir: string) => void;
   onStartEdit: (sel: Selection, text: string) => void;
   onEditTextChange: (t: string) => void;
-  onSubmitEdit: (ctx: { kind: 'file'; id?: string; dir?: string } | { kind: 'folder'; dir?: string }) => void;
+  onSubmitEdit: (ctx: { kind: 'file' | 'folder'; path?: string }) => void;
   newEntry: NewEntry | null;
   onCancelEditing: () => void;
   onRequestMenu: (sel: Selection) => void;
   onCloseMenu: () => void;
-  onDeleteFile: (id: string) => void;
-  onDeleteFolder: (dir: string) => void;
+  onDeleteFile: (path: string) => void;
+  onDeleteFolder: (path: string) => void;
 }) {
   const { node, depth } = props;
   const isMenuHere =
     props.menuSel &&
-    ((props.menuSel.kind === 'folder' && node.kind === 'folder' && props.menuSel.dir === node.dir) ||
-      (props.menuSel.kind === 'file' && node.kind === 'file' && props.menuSel.id === node.id));
+    ((props.menuSel.kind === 'folder' &&
+      node.kind === 'folder' &&
+      normalizePath(props.menuSel.path) === normalizePath(node.dir)) ||
+      (props.menuSel.kind === 'file' &&
+        node.kind === 'file' &&
+        normalizePath(props.menuSel.path) === normalizePath(node.path)));
 
   const startLongPress = (e: React.PointerEvent, sel: Selection) => {
     if (e.pointerType !== 'touch') return; // mobile gesture
@@ -381,8 +388,10 @@ function Row(props: {
   };
   if (node.kind === 'folder') {
     const isCollapsed = node.dir !== '' && props.collapsed[node.dir] !== false;
-    const isActive = props.selected?.kind === 'folder' && props.selected.dir === node.dir;
-    const isEditing = props.editing?.kind === 'folder' && props.editing.dir === node.dir;
+    const isActive =
+      props.selected?.kind === 'folder' && normalizePath(props.selected.path) === normalizePath(node.dir);
+    const isEditing =
+      props.editing?.kind === 'folder' && normalizePath(props.editing.path) === normalizePath(node.dir);
     return (
       <div className="tree-folder">
         <div
@@ -391,9 +400,9 @@ function Row(props: {
           onClick={() => props.onSelectFolder(node.dir)}
           onContextMenu={(e) => {
             e.preventDefault();
-            props.onRequestMenu({ kind: 'folder', dir: node.dir });
+            props.onRequestMenu({ kind: 'folder', path: node.dir });
           }}
-          onPointerDown={(e) => startLongPress(e, { kind: 'folder', dir: node.dir })}
+          onPointerDown={(e) => startLongPress(e, { kind: 'folder', path: node.dir })}
         >
           <button
             className="tree-disclosure"
@@ -412,7 +421,7 @@ function Row(props: {
               onClick={(e) => e.stopPropagation()}
               onSubmit={(e) => {
                 e.preventDefault();
-                props.onSubmitEdit({ kind: 'folder', dir: node.dir });
+                props.onSubmitEdit({ kind: 'folder', path: node.dir });
               }}
             >
               <input
@@ -438,7 +447,7 @@ function Row(props: {
                 className="btn small subtle"
                 onClick={() => {
                   const name = node.name || '';
-                  props.onStartEdit({ kind: 'folder', dir: node.dir }, name);
+                  props.onStartEdit({ kind: 'folder', path: node.dir }, name);
                   props.onCloseMenu();
                 }}
               >
@@ -469,7 +478,7 @@ function Row(props: {
                 e.preventDefault();
                 props.onSubmitEdit({
                   kind: props.newEntry!.kind === 'file' ? 'file' : 'folder',
-                  dir: node.dir,
+                  path: node.dir,
                 });
               }}
             >
@@ -493,11 +502,11 @@ function Row(props: {
         {!isCollapsed &&
           node.children.map((c) => (
             <Row
-              key={c.kind === 'folder' ? 'd:' + c.dir : 'f:' + c.id}
+              key={c.kind === 'folder' ? 'd:' + c.dir : 'f:' + c.path}
               node={c}
               depth={depth + 1}
               collapsed={props.collapsed}
-              activeId={props.activeId}
+              activePath={props.activePath}
               selected={props.selected}
               menuSel={props.menuSel}
               editing={props.editing}
@@ -519,20 +528,25 @@ function Row(props: {
       </div>
     );
   }
-  const isActive = props.activeId === node.id;
-  const isSelected = props.selected?.kind === 'file' && props.selected.id === node.id;
-  const isEditing = props.editing?.kind === 'file' && props.editing.id === node.id;
+  const isActive =
+    props.activePath !== undefined &&
+    node.kind === 'file' &&
+    normalizePath(props.activePath) === normalizePath(node.path);
+  const isSelected =
+    props.selected?.kind === 'file' && normalizePath(props.selected.path) === normalizePath(node.path);
+  const isEditing =
+    props.editing?.kind === 'file' && normalizePath(props.editing.path) === normalizePath(node.path);
   return (
     <div
       className={`tree-row ${isActive || isSelected ? 'is-active' : ''}`}
       style={{ paddingLeft: 6 + depth * 10 }}
-      onClick={() => props.onSelectFile(node.id)}
+      onClick={() => props.onSelectFile(node.path)}
       onContextMenu={(e) => {
         e.preventDefault();
-        props.onRequestMenu({ kind: 'file', id: node.id });
+        props.onRequestMenu({ kind: 'file', path: node.path });
       }}
-      onPointerDown={(e) => startLongPress(e, { kind: 'file', id: node.id })}
-      onDoubleClick={() => props.onSelectFile(node.id)}
+      onPointerDown={(e) => startLongPress(e, { kind: 'file', path: node.path })}
+      onDoubleClick={() => props.onSelectFile(node.path)}
     >
       <span className="tree-disclosure-spacer" />
       <Icon kind="file" />
@@ -542,7 +556,7 @@ function Row(props: {
           onClick={(e) => e.stopPropagation()}
           onSubmit={(e) => {
             e.preventDefault();
-            props.onSubmitEdit({ kind: 'file', id: node.id });
+            props.onSubmitEdit({ kind: 'file', path: node.path });
           }}
         >
           <input
@@ -567,7 +581,7 @@ function Row(props: {
           <button
             className="btn small subtle"
             onClick={() => {
-              props.onStartEdit({ kind: 'file', id: node.id }, node.name);
+              props.onStartEdit({ kind: 'file', path: node.path }, node.name);
               props.onCloseMenu();
             }}
           >
@@ -576,7 +590,7 @@ function Row(props: {
           <button
             className="btn small subtle danger"
             onClick={() => {
-              props.onDeleteFile(node.id);
+              props.onDeleteFile(node.path);
               props.onCloseMenu();
             }}
           >
@@ -632,6 +646,11 @@ function ancestorsOf(dir: string): string[] {
   return list;
 }
 
+function normalizePath(path: string | undefined): string {
+  if (path === undefined) return '';
+  return path.replace(/^\/+/, '').replace(/\+$/, '');
+}
+
 function buildTree(files: FileEntry[], folders: string[]): FolderNode {
   let root: FolderNode = { kind: 'folder', dir: '', name: '', children: [] };
   let folderMap = new Map<string, FolderNode>();
@@ -654,7 +673,7 @@ function buildTree(files: FileEntry[], folders: string[]): FolderNode {
   for (let d of folders) addFolder(d);
   for (let f of files) {
     const parent = addFolder(f.dir);
-    parent.children.push({ kind: 'file', id: f.id, name: f.name, dir: f.dir, path: f.path });
+    parent.children.push({ kind: 'file', name: f.name, dir: f.dir, path: f.path });
   }
   // Sort like GitHub: folders A→Z, then files A→Z
   const sortNode = (n: FolderNode) => {

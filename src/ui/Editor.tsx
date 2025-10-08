@@ -8,9 +8,9 @@ import type { NoteDoc } from '../storage/local';
 
 type Props = {
   doc: NoteDoc;
-  // Pass id explicitly to eliminate any chance of routing a change
+  // Pass path explicitly to eliminate any chance of routing a change
   // to the wrong note due to stale closures higher up the tree.
-  onChange: (id: string, text: string) => void;
+  onChange: (path: string, text: string) => void;
   readOnly?: boolean;
 };
 
@@ -30,7 +30,7 @@ export function Editor({ doc, onChange, readOnly = false }: Props) {
   const onInput = (val: string) => {
     if (readOnly) return;
     setText(val);
-    onChange(doc.id, val);
+    onChange(doc.path, val);
   };
 
   const html = useMemo(() => {

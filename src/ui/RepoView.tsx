@@ -49,7 +49,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
     needsInstall,
 
     doc,
-    activeId,
+    activePath,
     notes,
     folders,
 
@@ -122,17 +122,8 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const onSelect = async (id: string) => {
-    await actions.selectNote(id);
-    if (route.kind !== 'repo') {
-      setSidebarOpen(false);
-      return;
-    }
-    const { owner, repo, notePath } = route;
-    const selected = notes.find((note) => note.id === id);
-    if (selected && !pathsEqual(notePath, selected.path)) {
-      navigate({ kind: 'repo', owner, repo, notePath: selected.path }, { replace: false });
-    }
+  const onSelect = async (path: string | undefined) => {
+    await actions.selectNote(path);
     setSidebarOpen(false);
   };
 
@@ -259,7 +250,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
               folders={folders}
               canEdit={canEdit}
               slug={slug}
-              activeId={activeId}
+              activePath={activePath}
               onSelect={onSelect}
               onCreateNote={actions.createNote}
               onCreateFolder={actions.createFolder}
@@ -337,8 +328,8 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
                       key={doc.id}
                       doc={doc}
                       readOnly={!canEdit}
-                      onChange={(id, text) => {
-                        actions.updateNoteText(id, text);
+                      onChange={(path, text) => {
+                        actions.updateNoteText(path, text);
                       }}
                     />
                   </div>
@@ -409,12 +400,12 @@ type FileSidebarProps = {
   folders: string[];
   canEdit: boolean;
   slug: string;
-  activeId: string | undefined;
-  onSelect: (id: string) => void;
+  activePath: string | undefined;
+  onSelect: (path: string | undefined) => void;
   onCreateNote: (dir: string, name: string) => string | undefined;
   onCreateFolder: (parentDir: string, name: string) => void;
-  onRenameNote: (id: string, title: string) => void;
-  onDeleteNote: (id: string) => void;
+  onRenameNote: (path: string, title: string) => void;
+  onDeleteNote: (path: string) => void;
   onRenameFolder: (dir: string, newName: string) => void;
   onDeleteFolder: (dir: string) => void;
 };
@@ -425,7 +416,7 @@ function FileSidebar(props: FileSidebarProps) {
     notes,
     slug,
     folders,
-    activeId,
+    activePath,
     onSelect,
     onCreateNote,
     onCreateFolder,
@@ -437,7 +428,7 @@ function FileSidebar(props: FileSidebarProps) {
 
   // Derive file entries for the tree component from the provided notes list.
   let files = useMemo<FileEntry[]>(
-    () => notes.map((note) => ({ id: note.id, name: note.title, path: note.path, dir: note.dir })),
+    () => notes.map((note) => ({ name: note.title, path: note.path, dir: note.dir })),
     [notes]
   );
 
@@ -461,7 +452,7 @@ function FileSidebar(props: FileSidebarProps) {
 
   // Track which item is highlighted so new actions know their context.
   let [selection, setSelection] = useState<
-    { kind: 'folder'; dir: string } | { kind: 'file'; id: string } | null
+    { kind: 'folder'; path: string } | { kind: 'file'; path: string } | null
   >(null);
 
   // Drive inline creation rows in the tree with a deterministic key.
@@ -478,9 +469,9 @@ function FileSidebar(props: FileSidebarProps) {
 
   // helper to get the correct parent directory for new notes/folders
   function selectedDir() {
-    if (selection?.kind === 'folder') return selection.dir;
+    if (selection?.kind === 'folder') return selection.path;
     if (selection?.kind === 'file') {
-      return files.find((f) => f.id === selection.id)?.dir ?? '';
+      return files.find((f) => normalizePath(f.path) === normalizePath(selection.path))?.dir ?? '';
     }
     return '';
   }
@@ -511,14 +502,17 @@ function FileSidebar(props: FileSidebarProps) {
         <FileTree
           files={files}
           folders={folders}
-          activeId={activeId}
+          activePath={activePath}
           collapsed={collapsed}
           onCollapsedChange={setCollapsedMap}
           onSelectionChange={setSelection}
           onSelectFile={onSelect}
           onRenameFile={onRenameNote}
           onDeleteFile={onDeleteNote}
-          onCreateFile={onCreateNote}
+          onCreateFile={(dir, name) => {
+            const createdPath = onCreateNote(dir, name);
+            if (createdPath !== undefined) onSelect(createdPath);
+          }}
           onCreateFolder={onCreateFolder}
           onRenameFolder={onRenameFolder}
           onDeleteFolder={onDeleteFolder}
