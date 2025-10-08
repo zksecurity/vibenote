@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import type { NoteDoc } from '../storage/local';
+import { normalizePath } from '../lib/util';
 import { hashText } from '../storage/local';
 import { logError } from '../lib/logging';
 import { buildRemoteConfig, listNoteFiles, pullNote } from '../sync/git-sync';
@@ -126,10 +127,6 @@ function useReadOnlyNotes(params: {
       setDoc(undefined);
     },
   };
-}
-
-function normalizePath(path: string): string {
-  return path.replace(/^\/+/, '').toLowerCase();
 }
 
 function toNote({ path, sha }: { path: string; sha?: string }): ReadOnlyNote {

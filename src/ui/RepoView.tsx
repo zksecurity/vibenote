@@ -8,6 +8,7 @@ import { GitHubIcon, ExternalLinkIcon, NotesIcon, CloseIcon, SyncIcon } from './
 import { useRepoData, type RepoNoteListItem } from '../data';
 import { getExpandedFolders, setExpandedFolders } from '../storage/local';
 import type { RepoRoute, Route } from './routing';
+import { normalizePath, pathsEqual } from '../lib/util';
 
 type RepoViewProps = {
   slug: string;
@@ -29,7 +30,6 @@ export function RepoView(props: RepoViewProps) {
 }
 
 function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
-  // Data layer exposes repo-backed state and the high-level actions the UI needs.
   const setActivePath = useCallback((nextPath: string | undefined) => {
     if (route.kind !== 'repo') return;
     const { owner, repo, notePath } = route;
@@ -37,6 +37,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
     navigate({ kind: 'repo', owner, repo, notePath: nextPath }, { replace: true });
   }, []);
 
+  // Data layer exposes repo-backed state and the high-level actions the UI needs.
   const { state, actions } = useRepoData({ slug, route, recordRecent, setActivePath });
   const {
     hasSession,
@@ -624,14 +625,4 @@ function detectPrimaryShortcut(): 'meta' | 'ctrl' {
   const APPLE_PLATFORM_PATTERN = /mac|iphone|ipad|ipod/i;
   if (APPLE_PLATFORM_PATTERN.test(platform)) return 'meta';
   return 'ctrl';
-}
-
-function pathsEqual(a: string | undefined, b: string | undefined): boolean {
-  if (a === b) return true;
-  return normalizePath(a) === normalizePath(b);
-}
-
-function normalizePath(path: string | undefined): string | undefined {
-  if (path === undefined) return undefined;
-  return path.replace(/^\/+/, '').replace(/\/+$/, '');
 }

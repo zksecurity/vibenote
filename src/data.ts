@@ -38,6 +38,7 @@ import {
 } from './sync/git-sync';
 import { logError } from './lib/logging';
 import { useReadOnlyNotes, type ReadOnlyNote } from './data/readonly-notes';
+import { normalizePath } from './lib/util';
 import type { RepoRoute } from './ui/routing';
 
 export { useRepoData };
@@ -156,8 +157,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   let accessStatusReady =
     repoAccess.status === 'ready' || repoAccess.status === 'rate-limited' || repoAccess.status === 'error';
 
-  let repoNotePath = route.kind === 'repo' ? route.notePath : undefined;
-  let desiredNotePath = repoNotePath !== undefined ? normalizePath(repoNotePath) : undefined;
+  let desiredPath = normalizePath(route.kind === 'repo' ? route.notePath : undefined);
 
   // in readonly mode, we store nothing locally and just fetch content from github no demand
   let isReadOnly = repoAccess.level === 'read';
@@ -167,7 +167,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     folders: readOnlyFolders,
     selectDoc: selectReadOnlyDoc,
     reset: resetReadOnlyState,
-  } = useReadOnlyNotes({ slug, isReadOnly, defaultBranch, desiredPath: desiredNotePath });
+  } = useReadOnlyNotes({ slug, isReadOnly, defaultBranch, desiredPath });
 
   // whether we treat the repo as locally writable
   // note that we are optimistic about write access until the access check completes,
@@ -187,11 +187,11 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   let folders = isReadOnly ? readOnlyFolders : localFolders;
 
   let activeNoteMeta = useMemo(() => {
-    if (desiredNotePath === undefined) return undefined;
-    return findByPath(notes, desiredNotePath);
-  }, [notes, desiredNotePath]);
+    if (desiredPath === undefined) return undefined;
+    return findByPath(notes, desiredPath);
+  }, [notes, desiredPath]);
 
-  if (activeNoteMeta === undefined && !isReadOnly && desiredNotePath === undefined && notes.length > 0) {
+  if (activeNoteMeta === undefined && !isReadOnly && desiredPath === undefined && notes.length > 0) {
     let readmeCandidate = notes.find((note) => note.path.toLowerCase() === 'readme.md');
     activeNoteMeta = (readmeCandidate ?? notes[0]) as NoteMeta;
   }
@@ -205,7 +205,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
 
   let doc = canEdit ? localDoc : readOnlyDoc;
 
-  let activeNotePath = doc?.path ?? activeNoteMeta?.path ?? desiredNotePath;
+  let activeNotePath = doc?.path ?? activeNoteMeta?.path ?? desiredPath;
 
   const ensureActivePath = (nextPath: string | undefined) => {
     if (route.kind !== 'repo') return;
@@ -233,9 +233,9 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   useEffect(() => {
     if (doc?.path === undefined) return;
     if (route.kind !== 'repo') return;
-    if (pathsEqual(repoNotePath, doc.path)) return;
+    if (pathsEqual(desiredPath, doc.path)) return;
     setActivePath(doc.path);
-  }, [doc?.path, route.kind, repoNotePath]);
+  }, [doc?.path, route.kind, desiredPath]);
 
   // Remember recently opened repos once we know the current repo is reachable.
   // TODO this shouldn't a useEffect, the only place a repo ever becomes reachable is after
@@ -272,7 +272,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
         let localStore = getRepoStore(slug);
         localStore.replaceWithRemote(files);
         let synced = localStore.listNotes();
-        if (desiredNotePath === undefined) {
+        if (desiredPath === undefined) {
           let storedId = getLastActiveNoteId(slug);
           let storedPath =
             storedId !== undefined
@@ -280,7 +280,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
               : undefined;
           let readmePath = synced.find((note) => note.path.toLowerCase() === 'readme.md')?.path;
           let initialPath = storedPath ?? readmePath;
-          if (initialPath !== undefined && route.kind === 'repo' && !pathsEqual(repoNotePath, initialPath)) {
+          if (initialPath !== undefined && route.kind === 'repo' && !pathsEqual(desiredPath, initialPath)) {
             setActivePath(initialPath);
           }
         }
@@ -293,7 +293,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
         initialPullRef.current.done = true;
       }
     })();
-  }, [route, repoAccess.level, linked, slug, canEdit, defaultBranch, desiredNotePath, repoNotePath]);
+  }, [route, repoAccess.level, linked, slug, canEdit, defaultBranch, desiredPath]);
 
   // CLICK HANDLERS
 
@@ -780,10 +780,6 @@ function isPathInsideDir(path: string, dir: string): boolean {
 function findByPath<T extends { id: string; path: string }>(notes: T[], targetPath: string): T | undefined {
   let normalized = normalizePath(targetPath);
   return notes.find((note) => normalizePath(note.path) === normalized);
-}
-
-function normalizePath(path: string): string {
-  return path.replace(/^\/+/, '').replace(/\/+$/, '');
 }
 
 function areAccessStatesEqual(a: RepoAccessState, b: RepoAccessState): boolean {
