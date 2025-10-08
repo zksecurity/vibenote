@@ -1,4 +1,5 @@
-import { useMemo, useState, useEffect } from 'react';
+// Primary workspace view combining repo chrome, file tree, and editor panels.
+import { useMemo, useState, useEffect, useCallback } from 'react';
 import { FileTree, type FileEntry } from './FileTree';
 import { Editor } from './Editor';
 import { RepoSwitcher } from './RepoSwitcher';
@@ -6,13 +7,14 @@ import { Toggle } from './Toggle';
 import { GitHubIcon, ExternalLinkIcon, NotesIcon, CloseIcon, SyncIcon } from './RepoIcons';
 import { useRepoData, type RepoNoteListItem } from '../data';
 import { getExpandedFolders, setExpandedFolders } from '../storage/local';
-import type { Route } from './routing';
+import type { RepoRoute, Route } from './routing';
+import { normalizePath, pathsEqual } from '../lib/util';
 
 type RepoViewProps = {
   slug: string;
-  route: Route;
+  route: RepoRoute;
   navigate: (route: Route, options?: { replace?: boolean }) => void;
-  onRecordRecent: (entry: {
+  recordRecent: (entry: {
     slug: string;
     owner?: string;
     repo?: string;
@@ -27,9 +29,24 @@ export function RepoView(props: RepoViewProps) {
   return <RepoViewInner key={props.slug} {...props} />;
 }
 
-function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps) {
+function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
+  const setActivePath = useCallback(
+    (nextPath: string | undefined) => {
+      if (route.kind === 'repo') {
+        if (pathsEqual(route.notePath, nextPath)) return;
+        navigate({ kind: 'repo', owner: route.owner, repo: route.repo, notePath: nextPath }, { replace: true });
+        return;
+      }
+      if (route.kind === 'new') {
+        if (pathsEqual(route.notePath, nextPath)) return;
+        navigate({ kind: 'new', notePath: nextPath }, { replace: true });
+      }
+    },
+    [route, navigate]
+  );
+
   // Data layer exposes repo-backed state and the high-level actions the UI needs.
-  const { state, actions } = useRepoData({ slug, route, onRecordRecent });
+  const { state, actions } = useRepoData({ slug, route, recordRecent, setActivePath });
   const {
     hasSession,
     user,
@@ -41,7 +58,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     needsInstall,
 
     doc,
-    activeId,
+    activePath,
     notes,
     folders,
 
@@ -73,7 +90,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
 
   const [showSwitcher, setShowSwitcher] = useState(false);
 
-  // Keyboard shortcuts: Cmd/Ctrl+K and "g" then "r" open the repo switcher.
+  // Keyboard shortcuts: Cmd/Ctrl+K and "g","r" open the repo switcher even when the tree is focused.
   const repoShortcutLabel = primaryModifier === 'meta' ? '⌘K' : 'Ctrl+K';
   const repoButtonBaseTitle = route.kind === 'repo' ? 'Change repository' : 'Choose repository';
   const repoButtonTitle = `${repoButtonBaseTitle} (${repoShortcutLabel})`;
@@ -113,6 +130,11 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+
+  const onSelect = async (path: string | undefined) => {
+    await actions.selectNote(path);
+    setSidebarOpen(false);
+  };
 
   return (
     <div className="app-shell">
@@ -237,11 +259,8 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
               folders={folders}
               canEdit={canEdit}
               slug={slug}
-              activeId={activeId}
-              onSelect={async (id: string) => {
-                await actions.selectNote(id);
-                setSidebarOpen(false);
-              }}
+              activePath={activePath}
+              onSelect={onSelect}
               onCreateNote={actions.createNote}
               onCreateFolder={actions.createFolder}
               onRenameNote={actions.renameNote}
@@ -318,8 +337,8 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
                       key={doc.id}
                       doc={doc}
                       readOnly={!canEdit}
-                      onChange={(id, text) => {
-                        actions.updateNoteText(id, text);
+                      onChange={(path, text) => {
+                        actions.updateNoteText(path, text);
                       }}
                     />
                   </div>
@@ -377,7 +396,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
           route={route}
           slug={slug}
           navigate={navigate}
-          onRecordRecent={onRecordRecent}
+          onRecordRecent={recordRecent}
           onClose={() => setShowSwitcher(false)}
         />
       )}
@@ -390,12 +409,12 @@ type FileSidebarProps = {
   folders: string[];
   canEdit: boolean;
   slug: string;
-  activeId: string | undefined;
-  onSelect: (id: string) => void;
+  activePath: string | undefined;
+  onSelect: (path: string | undefined) => void;
   onCreateNote: (dir: string, name: string) => string | undefined;
   onCreateFolder: (parentDir: string, name: string) => void;
-  onRenameNote: (id: string, title: string) => void;
-  onDeleteNote: (id: string) => void;
+  onRenameNote: (path: string, title: string) => void;
+  onDeleteNote: (path: string) => void;
   onRenameFolder: (dir: string, newName: string) => void;
   onDeleteFolder: (dir: string) => void;
 };
@@ -406,7 +425,7 @@ function FileSidebar(props: FileSidebarProps) {
     notes,
     slug,
     folders,
-    activeId,
+    activePath,
     onSelect,
     onCreateNote,
     onCreateFolder,
@@ -418,7 +437,7 @@ function FileSidebar(props: FileSidebarProps) {
 
   // Derive file entries for the tree component from the provided notes list.
   let files = useMemo<FileEntry[]>(
-    () => notes.map((note) => ({ id: note.id, name: note.title, path: note.path, dir: note.dir })),
+    () => notes.map((note) => ({ name: note.title, path: note.path, dir: note.dir })),
     [notes]
   );
 
@@ -442,7 +461,7 @@ function FileSidebar(props: FileSidebarProps) {
 
   // Track which item is highlighted so new actions know their context.
   let [selection, setSelection] = useState<
-    { kind: 'folder'; dir: string } | { kind: 'file'; id: string } | null
+    { kind: 'folder'; path: string } | { kind: 'file'; path: string } | null
   >(null);
 
   // Drive inline creation rows in the tree with a deterministic key.
@@ -459,9 +478,9 @@ function FileSidebar(props: FileSidebarProps) {
 
   // helper to get the correct parent directory for new notes/folders
   function selectedDir() {
-    if (selection?.kind === 'folder') return selection.dir;
+    if (selection?.kind === 'folder') return selection.path;
     if (selection?.kind === 'file') {
-      return files.find((f) => f.id === selection.id)?.dir ?? '';
+      return files.find((f) => normalizePath(f.path) === normalizePath(selection.path))?.dir ?? '';
     }
     return '';
   }
@@ -492,14 +511,17 @@ function FileSidebar(props: FileSidebarProps) {
         <FileTree
           files={files}
           folders={folders}
-          activeId={activeId}
+          activePath={activePath}
           collapsed={collapsed}
           onCollapsedChange={setCollapsedMap}
           onSelectionChange={setSelection}
           onSelectFile={onSelect}
           onRenameFile={onRenameNote}
           onDeleteFile={onDeleteNote}
-          onCreateFile={onCreateNote}
+          onCreateFile={(dir, name) => {
+            const createdPath = onCreateNote(dir, name);
+            if (createdPath !== undefined) onSelect(createdPath);
+          }}
           onCreateFolder={onCreateFolder}
           onRenameFolder={onRenameFolder}
           onDeleteFolder={onDeleteFolder}

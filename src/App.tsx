@@ -47,7 +47,7 @@ export function App() {
   }
 
   if (route.kind === 'new') {
-    return <RepoView slug="new" route={route} navigate={navigate} onRecordRecent={recordRecent} />;
+    return <RepoView slug="new" route={route} navigate={navigate} recordRecent={recordRecent} />;
   }
 
   if (route.kind === 'repo') {
@@ -56,7 +56,7 @@ export function App() {
         slug={`${route.owner}/${route.repo}`}
         route={route}
         navigate={navigate}
-        onRecordRecent={recordRecent}
+        recordRecent={recordRecent}
       />
     );
   }

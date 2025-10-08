@@ -72,7 +72,7 @@ export async function pullNote(config: RemoteConfig, path: string): Promise<Remo
     }
     let res = await githubRequest(token, 'GET', resourcePath);
     if (res.ok) {
-      let json = (await res.json()) as any;
+      let json = await res.json();
       let content = fromBase64(String(json.content || '').replace(/\n/g, ''));
       return { path, text: content, sha: String(json.sha || '') };
     }
@@ -129,13 +129,11 @@ export async function listNoteFiles(config: RemoteConfig): Promise<{ path: strin
   const filterEntries = (entries: Array<{ path?: string; sha?: string; type?: string }>) => {
     const results: { path: string; sha: string }[] = [];
     for (const e of entries) {
-      const type = e.type;
-      const path = e.path;
-      const sha = e.sha;
+      let type = e.type;
+      let path = e.path;
+      let sha = e.sha;
       if (type !== 'blob' || !path || !sha) continue;
       if (!/\.md$/i.test(path)) continue;
-      const name = path.slice(path.lastIndexOf('/') + 1);
-      if (name.toLowerCase() === 'readme.md') continue;
       results.push({ path, sha });
     }
     return results;
@@ -149,8 +147,8 @@ export async function listNoteFiles(config: RemoteConfig): Promise<{ path: strin
     )}/git/trees/${encodeURIComponent(branch)}?recursive=1`;
     let res = await githubRequest(token, 'GET', treePath);
     if (res.ok) {
-      let json = (await res.json()) as any;
-      let entries = Array.isArray(json?.tree) ? (json.tree as Array<any>) : [];
+      let json = await res.json();
+      let entries = Array.isArray(json?.tree) ? json.tree : [];
       return filterEntries(entries);
     }
     if (res.status !== 403 && res.status !== 404) {
@@ -204,7 +202,7 @@ export async function fetchBlob(config: RemoteConfig, sha: string): Promise<stri
   if (!res.ok) {
     return '';
   }
-  let json = (await res.json()) as any;
+  let json = await res.json();
   return fromBase64(String(json.content || '').replace(/\n/g, ''));
 }
 
@@ -239,7 +237,7 @@ async function commitChanges(
 
   let refRes = await githubRequest(token, 'GET', refPath);
   if (refRes.ok) {
-    let refJson = (await refRes.json()) as any;
+    let refJson = await refRes.json();
     let refObject = refJson && typeof refJson.object === 'object' ? refJson.object : null;
     if (!refObject || typeof refObject.sha !== 'string') {
       throw new Error('Unexpected ref payload from GitHub');
@@ -253,7 +251,7 @@ async function commitChanges(
     if (!commitRes.ok) {
       await throwGitHubError(commitRes, `/repos/${config.owner}/${config.repo}/git/commits/${headSha}`);
     }
-    let commitJson = (await commitRes.json()) as any;
+    let commitJson = await commitRes.json();
     baseTreeSha =
       commitJson && commitJson.tree && typeof commitJson.tree.sha === 'string'
         ? String(commitJson.tree.sha)
@@ -303,10 +301,10 @@ async function commitChanges(
   if (!treeRes.ok) {
     await throwGitHubError(treeRes, treePath);
   }
-  let treeJson = (await treeRes.json()) as any;
+  let treeJson = await treeRes.json();
   let blobShas: Record<string, string> = {};
   if (Array.isArray(treeJson?.tree)) {
-    for (let entry of treeJson.tree as Array<any>) {
+    for (let entry of treeJson.tree) {
       if (!entry || entry.type !== 'blob') continue;
       if (!entry.path || !entry.sha) continue;
       if (trackedPaths.has(String(entry.path))) {
@@ -327,7 +325,7 @@ async function commitChanges(
   if (!commitRes.ok) {
     await throwGitHubError(commitRes, commitPath);
   }
-  let commitJson = (await commitRes.json()) as any;
+  let commitJson = await commitRes.json();
   let newCommitSha = String(commitJson.sha || '');
 
   if (isInitialCommit || !headSha) {
@@ -416,6 +414,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
   let deletedLocal = 0;
   let merged = 0;
 
+  // TODO why does this not use a default branch??
   const config = buildRemoteConfig(slug);
   const storeSlug = store.slug;
   const entries = await listNoteFiles(config);
@@ -438,7 +437,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         const i = e.path.lastIndexOf('/');
         return i >= 0 ? e.path.slice(0, i) : '';
       })();
-      const id = (store as any).createNote(title, rf.text, dir);
+      const id = store.createNote(title, rf.text, dir);
       // Mark sync metadata
       markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: hashText(rf.text) });
       pulled++;
@@ -622,7 +621,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         } else {
           const title = basename(t.from).replace(/\.md$/i, '');
           const dir = t.from.includes('/') ? t.from.slice(0, t.from.lastIndexOf('/')) : '';
-          const newId = (store as any).createNote(title, remoteFile.text, dir);
+          const newId = store.createNote(title, remoteFile.text, dir);
           moveNotePath(storeSlug, newId, t.from);
           markSynced(storeSlug, newId, {
             remoteSha: remoteFile.sha,

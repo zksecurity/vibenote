@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import type { NoteDoc } from '../storage/local';
+import { normalizePath } from '../lib/util';
 import { hashText } from '../storage/local';
 import { logError } from '../lib/logging';
 import { buildRemoteConfig, listNoteFiles, pullNote } from '../sync/git-sync';
@@ -10,10 +11,16 @@ export type { ReadOnlyNote };
 
 type ReadOnlyNote = { id: string; path: string; title: string; dir: string; sha?: string };
 
-function useReadOnlyNotes(params: { slug: string; isReadOnly: boolean; defaultBranch?: string }) {
-  let { slug, isReadOnly, defaultBranch } = params;
+function useReadOnlyNotes(params: {
+  slug: string;
+  isReadOnly: boolean;
+  defaultBranch?: string;
+  desiredPath?: string;
+}) {
+  let { slug, isReadOnly, defaultBranch, desiredPath } = params;
   let [notes, setNotes] = useState<ReadOnlyNote[]>([]);
   let [doc, setDoc] = useState<NoteDoc | undefined>(undefined);
+  desiredPath = desiredPath === undefined ? undefined : normalizePath(desiredPath);
 
   // Drop read-only data once we gain write access or lose read access.
   useEffect(() => {
@@ -56,6 +63,43 @@ function useReadOnlyNotes(params: { slug: string; isReadOnly: boolean; defaultBr
     return Array.from(set).sort();
   }, [notes]);
 
+  useEffect(() => {
+    if (!isReadOnly) return;
+    if (notes.length === 0) return;
+    let target: ReadOnlyNote | undefined;
+    if (desiredPath !== undefined) {
+      target = notes.find((note) => normalizePath(note.path) === desiredPath);
+      if (!target) {
+        target = notes.find((note) => note.path.toLowerCase() === 'readme.md');
+      }
+    } else {
+      target = notes.find((note) => note.path.toLowerCase() === 'readme.md');
+    }
+    if (!target) return;
+    if (doc?.id === target.id) return;
+    void loadDoc(target);
+  }, [isReadOnly, notes, desiredPath, doc?.id]);
+
+  async function loadDoc(entry: ReadOnlyNote) {
+    let cfg = buildRemoteConfig(slug, defaultBranch);
+    try {
+      let remote = await pullNote(cfg, entry.path);
+      if (!remote) return;
+      setDoc({
+        id: entry.id,
+        path: entry.path,
+        title: entry.title,
+        dir: entry.dir,
+        text: remote.text,
+        updatedAt: Date.now(),
+        lastRemoteSha: remote.sha,
+        lastSyncedHash: hashText(remote.text),
+      });
+    } catch (error) {
+      logError(error);
+    }
+  }
+
   return {
     // exposed state
     notes,
@@ -75,23 +119,7 @@ function useReadOnlyNotes(params: { slug: string; isReadOnly: boolean; defaultBr
       if (!isReadOnly) return;
       let entry = notes.find((note) => note.id === id);
       if (!entry) return;
-      let cfg = buildRemoteConfig(slug, defaultBranch);
-      try {
-        let remote = await pullNote(cfg, entry.path);
-        if (!remote) return;
-        setDoc({
-          id: entry.id,
-          path: entry.path,
-          title: entry.title,
-          dir: entry.dir,
-          text: remote.text,
-          updatedAt: Date.now(),
-          lastRemoteSha: remote.sha,
-          lastSyncedHash: hashText(remote.text),
-        });
-      } catch (error) {
-        logError(error);
-      }
+      await loadDoc(entry);
     },
 
     reset() {
