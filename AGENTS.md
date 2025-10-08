@@ -83,7 +83,9 @@ See `.env.example` and `docs/AUTH.md` for a detailed breakdown of variables and 
 - Function arguments: Use an inline type instead of a separate type alias for types that are only used once.
 - When writing shared modules, prefer placing exported/high-level APIs at the top of the file and push low-level helpers toward the bottom, so readers can grasp intent before implementation details.
 - Nullish values: In data types, prefer `undefined` (and `?` on object properties) to model inexistent values. Do NOT use `null`, unless there is a specific strong reason. A valid reason to use `null` is if the data type needs to be JSON-stringified.
-- React: Don't memoize everything. Only use `useMemo()` for expensive computations, not for trivial stuff like ternary operators.
+- React: Don't memoize everything. Only use `useMemo()` for expensive computations, not for trivial stuff.
+  - example: use `useMemo()` when the logic involves reading from `localStorage`
+  - example: do NOT use `useMemo()` when the logic just filters an array
 - React: Do not use `useCallback()` (unless you have a strong reason). Just recreating callbacks on every render is usually fast, and will ensure they are never stale.
 - Prefer putting dense logic into simple top-level `function`s, instead of creating spaghetti of inline declared callbacks that implicitly depend on in-scope variables.
 

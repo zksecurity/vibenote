@@ -186,26 +186,30 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   let notes: RepoNoteListItem[] = isReadOnly ? readOnlyNotes : localNotes;
   let folders = isReadOnly ? readOnlyFolders : localFolders;
 
-  let activeNoteMeta = useMemo(() => {
-    if (desiredPath === undefined) return undefined;
-    return findByPath(notes, desiredPath);
+  // determine the active note
+  let activeNote = useMemo(() => {
+    // if specified in the route, that takes precedence
+    if (desiredPath !== undefined) return findByPath(notes, desiredPath);
+    if (!canEdit) return undefined;
+    // otherwise try to restore last active note (if any)
+    let storedId = getLastActiveNoteId(slug);
+    if (storedId !== undefined) {
+      return notes.find((note) => note.id === storedId);
+    }
+    // otherwise we don't show any note, that's fine
+    return undefined;
   }, [notes, desiredPath]);
 
-  if (activeNoteMeta === undefined && !isReadOnly && desiredPath === undefined && notes.length > 0) {
-    let readmeCandidate = notes.find((note) => note.path.toLowerCase() === 'readme.md');
-    activeNoteMeta = (readmeCandidate ?? notes[0]) as NoteMeta;
-  }
-
-  let activeNoteId = activeNoteMeta?.id;
+  let activeId = activeNote?.id;
 
   let localDoc = useMemo(() => {
-    if (!canEdit || activeNoteId === undefined) return undefined;
-    return getRepoStore(slug).loadNote(activeNoteId) ?? undefined;
-  }, [canEdit, activeNoteId, slug, localNotes]);
+    if (!canEdit || activeId === undefined) return undefined;
+    return getRepoStore(slug).loadNote(activeId) ?? undefined;
+  }, [canEdit, activeId, localNotes]);
 
   let doc = canEdit ? localDoc : readOnlyDoc;
 
-  let activeNotePath = doc?.path ?? activeNoteMeta?.path ?? desiredPath;
+  let activePath = doc?.path ?? activeNote?.path ?? desiredPath;
 
   const ensureActivePath = (nextPath: string | undefined) => {
     if (pathsEqual(route.notePath, nextPath)) return;
@@ -225,8 +229,8 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   // Persist last active note id so writable repos can restore it later.
   useEffect(() => {
     if (!canEdit) return;
-    setLastActiveNoteId(slug, activeNoteId ?? null);
-  }, [canEdit, slug, activeNoteId]);
+    setLastActiveNoteId(slug, activeId ?? null);
+  }, [canEdit, slug, activeId]);
 
   // When the loaded doc changes path (e.g., rename or sync), push the route forward.
   useEffect(() => {
@@ -431,7 +435,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     if (!meta) return;
     let store = getRepoStore(slug);
     store.deleteNote(meta.id);
-    if (activeNotePath !== undefined && pathsEqual(activeNotePath, path)) {
+    if (activePath !== undefined && pathsEqual(activePath, path)) {
       ensureActivePath(undefined);
     }
     scheduleAutoSync();
@@ -458,7 +462,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     });
     if (hasNotes && !window.confirm('Delete folder and all contained notes?')) return;
     localStore.deleteFolder(dir);
-    if (activeNotePath !== undefined && isPathInsideDir(activeNotePath, dir)) {
+    if (activePath !== undefined && isPathInsideDir(activePath, dir)) {
       ensureActivePath(undefined);
     }
     scheduleAutoSync();
@@ -470,13 +474,13 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
 
     canRead: canEdit || isReadOnly,
     canEdit,
-    canSync: linked && canEdit,
+    canSync,
     repoQueryStatus: repoAccess.status,
     needsInstall: repoAccess.needsInstall,
     manageUrl,
 
     doc,
-    activePath: activeNotePath,
+    activePath,
     notes,
     folders,
 
