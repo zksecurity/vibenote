@@ -1,3 +1,4 @@
+// File tree sidebar for browsing, editing, and managing repo notes.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 export type FileEntry = {
@@ -37,14 +38,38 @@ type FolderNode = {
 type FileNode = { kind: 'file'; name: string; dir: string; path: string };
 
 export function FileTree(props: FileTreeProps) {
+  // Rebuild the nested node structure whenever the note list changes.
   let tree = useMemo(() => buildTree(props.files, props.folders), [props.files, props.folders]);
+  // Currently highlighted item in the tree, used for keyboard navigation.
   let [selected, setSelected] = useState<Selection>(null);
+  // Node being renamed inline.
   let [editing, setEditing] = useState<Selection>(null);
+  // Text buffer shown while editing.
   let [editText, setEditText] = useState('');
+  // Root element ref to focus the tree container.
   let containerRef = useRef<HTMLDivElement | null>(null);
+  // Tracks which row shows the inline action menu.
   let [menuSel, setMenuSel] = useState<Selection>(null);
 
+  // Keep the latest collapsed map available to effects without resubscribing.
+  let collapsedMapRef = useRef(props.collapsed);
+  // Remember folders the user explicitly collapsed so auto-expand respects that choice.
+  let manualCollapsedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    // Keep a fresh copy of the collapsed map for background effects.
+    collapsedMapRef.current = props.collapsed;
+  }, [props.collapsed]);
+  useEffect(() => {
+    // Drop manual tracking for entries that are no longer collapsed or no longer present.
+    const manual = manualCollapsedRef.current;
+    for (let dir of Array.from(manual)) {
+      if (dir === '') continue;
+      if (props.collapsed[dir] !== true) manual.delete(dir);
+    }
+  }, [props.collapsed]);
+
   type FlatItem = { kind: 'folder' | 'file'; path: string; depth: number };
+  // Flatten the tree into the list rendered on screen, respecting collapsed state.
   const visibleItems = useMemo<FlatItem[]>(() => {
     const list: FlatItem[] = [];
     const walk = (node: FolderNode, depth: number) => {
@@ -63,13 +88,16 @@ export function FileTree(props: FileTreeProps) {
     return list;
   }, [tree, props.collapsed]);
 
-  // Sync selection to active file
+  // Sync selection to the active note supplied by the data layer.
   useEffect(() => {
     if (props.activePath !== undefined) setSelected({ kind: 'file', path: props.activePath });
   }, [props.activePath]);
 
   // Inline create handling
+  // Per-request key identifying the current inline creation row.
   let [createKey, setCreateKey] = useState<number | null>(null);
+
+  // Prepare inline creation or rename whenever a new-entry request arrives.
   useEffect(() => {
     if (!props.newEntry) return;
     setCreateKey(props.newEntry.key);
@@ -152,6 +180,7 @@ export function FileTree(props: FileTreeProps) {
     }
   };
 
+  // Reflect the current selection back to parent components.
   useEffect(() => {
     props.onSelectionChange?.(selected);
   }, [selected]);
@@ -159,37 +188,45 @@ export function FileTree(props: FileTreeProps) {
   const collapse = (dir: string) => {
     if (dir === '') return;
     let next = setCollapsedValue(props.collapsed, dir, true);
+    if (next) manualCollapsedRef.current.add(dir);
     if (next) props.onCollapsedChange(next);
   };
   const expand = (dir: string) => {
     if (dir === '') return;
+    manualCollapsedRef.current.delete(dir);
     let next = setCollapsedValue(props.collapsed, dir, false);
     if (next) props.onCollapsedChange(next);
   };
   const toggleCollapse = (dir: string) => {
     if (dir === '') return;
     let current = props.collapsed[dir] !== false;
-    let next = setCollapsedValue(props.collapsed, dir, !current);
+    let nextValue = !current;
+    if (nextValue) manualCollapsedRef.current.add(dir);
+    else manualCollapsedRef.current.delete(dir);
+    let next = setCollapsedValue(props.collapsed, dir, nextValue);
     if (next) props.onCollapsedChange(next);
   };
 
+  // Auto-expand ancestors of the active file unless the user collapsed them manually.
   useEffect(() => {
     if (props.activePath === undefined) return;
     let file = props.files.find((f) => normalizePath(f.path) === normalizePath(props.activePath));
     if (!file) return;
     let dirs = ancestorsOf(file.dir);
     if (dirs.length === 0) return;
-    let next = props.collapsed;
+    let next = collapsedMapRef.current;
     let changed = false;
     for (let dir of dirs) {
       if (dir === '') continue;
+      if (manualCollapsedRef.current.has(dir)) continue;
       if (next[dir] === true) {
+        manualCollapsedRef.current.delete(dir);
         next = { ...next, [dir]: false };
         changed = true;
       }
     }
     if (changed) props.onCollapsedChange(next);
-  }, [props.activePath, props.files, props.collapsed, props.onCollapsedChange]);
+  }, [props.activePath, props.files, props.onCollapsedChange]);
 
   const submitEdit = (context: { kind: 'file' | 'folder'; path?: string }) => {
     const name = editText.trim();
