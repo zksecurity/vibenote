@@ -1,4 +1,9 @@
+// Local storage persistence for repo files (markdown notes plus binary assets).
 import { logError } from '../lib/logging';
+
+type FileKind = 'markdown' | 'binary';
+
+const DEFAULT_MARKDOWN_MIME = 'text/markdown';
 
 export type NoteMeta = {
   id: string;
@@ -10,6 +15,9 @@ export type NoteMeta = {
 
 export type NoteDoc = NoteMeta & {
   text: string;
+  binaryBase64?: string;
+  kind?: FileKind;
+  mime?: string;
   lastRemoteSha?: string;
   lastSyncedHash?: string;
 };
@@ -203,6 +211,12 @@ export class LocalStore {
     // [VNDBG] This read is safe and avoids UI from showing entries that were removed elsewhere.
     const snapshot = ensureRepoSubscribers(this.slug).snapshot;
     this.index = snapshot.notes;
+    return snapshot.notes.filter((meta) => /\.md$/i.test(meta.path)).slice();
+  }
+
+  listFiles(): NoteMeta[] {
+    const snapshot = ensureRepoSubscribers(this.slug).snapshot;
+    this.index = snapshot.notes;
     return snapshot.notes.slice();
   }
 
@@ -210,6 +224,10 @@ export class LocalStore {
     let raw = localStorage.getItem(this.noteKey(id));
     if (!raw) return null;
     return JSON.parse(raw) as NoteDoc;
+  }
+
+  loadFile(id: string): NoteDoc | null {
+    return this.loadNote(id);
   }
 
   saveNote(id: string, text: string) {
@@ -302,7 +320,16 @@ export class LocalStore {
     return id;
   }
 
-  replaceWithRemote(files: { path: string; text: string; sha?: string }[]) {
+  replaceWithRemote(
+    files: Array<{
+      path: string;
+      text?: string;
+      binaryBase64?: string;
+      mime?: string;
+      kind?: FileKind;
+      sha?: string;
+    }>
+  ) {
     let previous = this.loadIndex();
     for (let note of previous) {
       localStorage.removeItem(this.noteKey(note.id));
@@ -312,15 +339,37 @@ export class LocalStore {
     let folderSet = new Set<string>();
     for (let file of files) {
       let id = crypto.randomUUID();
-      let title = basename(file.path).replace(/\.md$/i, '');
+      let kind = file.kind ?? inferKindFromPath(file.path);
       let dir = extractDir(file.path);
       if (dir !== '') folderSet.add(dir);
+      if (kind === 'binary') {
+        let base64 = file.binaryBase64 ?? '';
+        let mime = file.mime ?? inferMimeFromPath(file.path);
+        let title = basename(file.path);
+        let meta: NoteMeta = { id, path: file.path, title, dir, updatedAt: now };
+        let doc: NoteDoc = {
+          ...meta,
+          text: '',
+          binaryBase64: base64,
+          kind,
+          mime,
+          lastRemoteSha: file.sha,
+          lastSyncedHash: hashText(base64),
+        };
+        index.push(meta);
+        localStorage.setItem(this.noteKey(id), JSON.stringify(doc));
+        continue;
+      }
+      let text = file.text ?? '';
+      let title = basename(file.path).replace(/\.md$/i, '');
       let meta: NoteMeta = { id, path: file.path, title, dir, updatedAt: now };
       let doc: NoteDoc = {
         ...meta,
-        text: file.text,
+        text,
+        kind: 'markdown',
+        mime: DEFAULT_MARKDOWN_MIME,
         lastRemoteSha: file.sha,
-        lastSyncedHash: hashText(file.text),
+        lastSyncedHash: hashText(text),
       };
       index.push(meta);
       localStorage.setItem(this.noteKey(id), JSON.stringify(doc));
@@ -725,6 +774,28 @@ function touchIndexUpdatedAt(slug: string, id: string, updatedAt: number) {
 function basename(p: string) {
   let i = p.lastIndexOf('/');
   return i >= 0 ? p.slice(i + 1) : p;
+}
+
+function inferKindFromPath(path: string): FileKind {
+  return /\.md$/i.test(path) ? 'markdown' : 'binary';
+}
+
+const IMAGE_MIME_BY_EXT: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  svg: 'image/svg+xml',
+  avif: 'image/avif',
+};
+
+function inferMimeFromPath(path: string): string {
+  if (/\.md$/i.test(path)) return DEFAULT_MARKDOWN_MIME;
+  let idx = path.lastIndexOf('.');
+  if (idx < 0 || idx === path.length - 1) return 'application/octet-stream';
+  let ext = path.slice(idx + 1).toLowerCase();
+  return IMAGE_MIME_BY_EXT[ext] ?? 'application/octet-stream';
 }
 
 function ensureValidTitle(title: string): string {
