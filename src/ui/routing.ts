@@ -2,15 +2,15 @@
 import { useCallback, useEffect, useState } from 'react';
 
 export type { Route, RepoRoute };
-export { useRoute };
+export { useRoute, parseRoute, routeToPath };
 
 type Route =
   | { kind: 'home' }
-  | { kind: 'new' }
+  | { kind: 'new'; notePath?: string }
   | { kind: 'start' }
   | { kind: 'repo'; owner: string; repo: string; notePath?: string };
 
-type RepoRoute = { kind: 'new' } | { kind: 'repo'; owner: string; repo: string; notePath?: string };
+type RepoRoute = { kind: 'new'; notePath?: string } | { kind: 'repo'; owner: string; repo: string; notePath?: string };
 
 const HOME_ROUTE: Route = { kind: 'home' };
 const NEW_ROUTE: Route = { kind: 'new' };
@@ -27,6 +27,11 @@ function parseRoute(pathname: string): Route {
   if (clean === '/start') return START_ROUTE;
   if (clean === '/new') return NEW_ROUTE;
   let segments = clean.replace(/^\//, '').split('/');
+  if (segments.length >= 1 && segments[0] === 'new') {
+    let noteSegments = segments.slice(1).map((segment) => decodeURIComponent(segment ?? ''));
+    let notePath = noteSegments.length > 0 ? noteSegments.join('/') : undefined;
+    return { kind: 'new', notePath };
+  }
   if (segments.length >= 2) {
     let owner = decodeURIComponent(segments[0] ?? '');
     let repo = decodeURIComponent(segments[1] ?? '');
@@ -41,7 +46,15 @@ function parseRoute(pathname: string): Route {
 
 function routeToPath(route: Route): string {
   if (route.kind === 'home') return '/';
-  if (route.kind === 'new') return '/new';
+  if (route.kind === 'new') {
+    if (!route.notePath || route.notePath === '') return '/new';
+    let segments = route.notePath
+      .split('/')
+      .filter((segment) => segment !== '')
+      .map((segment) => encodeURIComponent(segment));
+    if (segments.length === 0) return '/new';
+    return `/new/${segments.join('/')}`;
+  }
   if (route.kind === 'start') return '/start';
   let owner = encodeURIComponent(route.owner);
   let repo = encodeURIComponent(route.repo);

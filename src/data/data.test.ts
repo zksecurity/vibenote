@@ -143,7 +143,10 @@ function renderRepoData(initial: RenderRepoDataProps) {
         route: routeState,
         recordRecent,
         setActivePath: (nextPath) => {
-          setRouteState((prev) => (prev.kind === 'repo' ? { ...prev, notePath: nextPath } : prev));
+          setRouteState((prev) => {
+            if (prev.kind === 'repo') return { ...prev, notePath: nextPath };
+            return { kind: 'new', notePath: nextPath };
+          });
         },
       });
     },
@@ -201,6 +204,38 @@ describe('useRepoData', () => {
     await waitFor(() => expect(result.current.state.doc?.path).toBe(welcomePath));
     expect(result.current.state.doc?.text).toContain('Welcome to VibeNote');
     expect(recordRecent).not.toHaveBeenCalled();
+  });
+
+  test('tracks active note path on the new route', async () => {
+    const recordRecent = vi.fn<RecordRecentFn>();
+    const store = new LocalStore('new');
+    const alphaId = store.createNote('Alpha', 'alpha text');
+    const welcome = store.listNotes().find((note) => note.title === 'Welcome');
+    const alpha = store.loadNote(alphaId);
+    if (!alpha) throw new Error('Failed to seed alpha note');
+    if (!welcome) throw new Error('Missing welcome note');
+
+    const { result } = renderHook(() => {
+      const [routeState, setRouteState] = useState<RepoRoute>({ kind: 'new', notePath: alpha.path });
+      const data = useRepoData({
+        slug: 'new',
+        route: routeState,
+        recordRecent,
+        setActivePath: (nextPath) => setRouteState({ kind: 'new', notePath: nextPath }),
+      });
+      return { data, routeState };
+    });
+
+    await waitFor(() => expect(result.current.data.state.activePath).toBe(alpha.path));
+    expect(result.current.data.state.doc?.text).toBe('alpha text');
+    expect(result.current.routeState.notePath).toBe(alpha.path);
+
+    await act(async () => {
+      await result.current.data.actions.selectNote(welcome.path);
+    });
+
+    await waitFor(() => expect(result.current.data.state.activePath).toBe(welcome.path));
+    expect(result.current.routeState.notePath).toBe(welcome.path);
   });
 
   test('activates the route note path when the file exists locally', async () => {

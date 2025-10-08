@@ -157,7 +157,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   let accessStatusReady =
     repoAccess.status === 'ready' || repoAccess.status === 'rate-limited' || repoAccess.status === 'error';
 
-  let desiredPath = normalizePath(route.kind === 'repo' ? route.notePath : undefined);
+  let desiredPath = normalizePath(route.notePath);
 
   // in readonly mode, we store nothing locally and just fetch content from github no demand
   let isReadOnly = repoAccess.level === 'read';
@@ -208,7 +208,6 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   let activeNotePath = doc?.path ?? activeNoteMeta?.path ?? desiredPath;
 
   const ensureActivePath = (nextPath: string | undefined) => {
-    if (route.kind !== 'repo') return;
     if (pathsEqual(route.notePath, nextPath)) return;
     setActivePath(nextPath);
   };
@@ -232,10 +231,9 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   // When the loaded doc changes path (e.g., rename or sync), push the route forward.
   useEffect(() => {
     if (doc?.path === undefined) return;
-    if (route.kind !== 'repo') return;
     if (pathsEqual(desiredPath, doc.path)) return;
     setActivePath(doc.path);
-  }, [doc?.path, route.kind, desiredPath]);
+  }, [doc?.path, desiredPath]);
 
   // Remember recently opened repos once we know the current repo is reachable.
   // TODO this shouldn't a useEffect, the only place a repo ever becomes reachable is after
@@ -280,7 +278,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
               : undefined;
           let readmePath = synced.find((note) => note.path.toLowerCase() === 'readme.md')?.path;
           let initialPath = storedPath ?? readmePath;
-          if (initialPath !== undefined && route.kind === 'repo' && !pathsEqual(desiredPath, initialPath)) {
+          if (initialPath !== undefined && !pathsEqual(desiredPath, initialPath)) {
             setActivePath(initialPath);
           }
         }

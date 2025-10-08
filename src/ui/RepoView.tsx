@@ -30,12 +30,20 @@ export function RepoView(props: RepoViewProps) {
 }
 
 function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
-  const setActivePath = useCallback((nextPath: string | undefined) => {
-    if (route.kind !== 'repo') return;
-    const { owner, repo, notePath } = route;
-    if (pathsEqual(notePath, nextPath)) return;
-    navigate({ kind: 'repo', owner, repo, notePath: nextPath }, { replace: true });
-  }, []);
+  const setActivePath = useCallback(
+    (nextPath: string | undefined) => {
+      if (route.kind === 'repo') {
+        if (pathsEqual(route.notePath, nextPath)) return;
+        navigate({ kind: 'repo', owner: route.owner, repo: route.repo, notePath: nextPath }, { replace: true });
+        return;
+      }
+      if (route.kind === 'new') {
+        if (pathsEqual(route.notePath, nextPath)) return;
+        navigate({ kind: 'new', notePath: nextPath }, { replace: true });
+      }
+    },
+    [route, navigate]
+  );
 
   // Data layer exposes repo-backed state and the high-level actions the UI needs.
   const { state, actions } = useRepoData({ slug, route, recordRecent, setActivePath });
