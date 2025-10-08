@@ -5,7 +5,8 @@ import { Editor } from './Editor';
 import { RepoSwitcher } from './RepoSwitcher';
 import { Toggle } from './Toggle';
 import { GitHubIcon, ExternalLinkIcon, NotesIcon, CloseIcon, SyncIcon } from './RepoIcons';
-import { useRepoData, type RepoNoteListItem } from '../data';
+import { useRepoData } from '../data';
+import type { FileMeta } from '../storage/local';
 import { getExpandedFolders, setExpandedFolders } from '../storage/local';
 import type { RepoRoute, Route } from './routing';
 import { normalizePath, pathsEqual } from '../lib/util';
@@ -63,6 +64,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
 
     doc,
     activePath,
+    files: repoFiles,
     notes,
     folders,
 
@@ -260,7 +262,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
               </div>
             </div>
             <FileSidebar
-              notes={notes}
+              files={repoFiles}
               folders={folders}
               canEdit={canEdit}
               slug={slug}
@@ -415,7 +417,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
 }
 
 type FileSidebarProps = {
-  notes: RepoNoteListItem[];
+  files: FileMeta[];
   folders: string[];
   canEdit: boolean;
   slug: string;
@@ -432,7 +434,7 @@ type FileSidebarProps = {
 function FileSidebar(props: FileSidebarProps) {
   let {
     canEdit,
-    notes,
+    files,
     slug,
     folders,
     activePath,
@@ -445,10 +447,19 @@ function FileSidebar(props: FileSidebarProps) {
     onDeleteFolder,
   } = props;
 
-  // Derive file entries for the tree component from the provided notes list.
-  let files = useMemo<FileEntry[]>(
-    () => notes.map((note) => ({ name: note.title, path: note.path, dir: note.dir })),
-    [notes]
+  const markdownFiles = useMemo(
+    () => files.filter((file) => file.kind === 'markdown'),
+    [files]
+  );
+
+  const treeFiles = useMemo<FileEntry[]>(
+    () =>
+      markdownFiles.map((file) => ({
+        name: file.path.slice(file.path.lastIndexOf('/') + 1),
+        path: file.path,
+        dir: file.dir,
+      })),
+    [markdownFiles]
   );
 
   // make sure that for every folder, its parent folders is also included (otherwise expanding doesn't work)
@@ -490,7 +501,7 @@ function FileSidebar(props: FileSidebarProps) {
   function selectedDir() {
     if (selection?.kind === 'folder') return selection.path;
     if (selection?.kind === 'file') {
-      return files.find((f) => normalizePath(f.path) === normalizePath(selection.path))?.dir ?? '';
+      return markdownFiles.find((f) => normalizePath(f.path) === normalizePath(selection.path))?.dir ?? '';
     }
     return '';
   }
@@ -519,7 +530,7 @@ function FileSidebar(props: FileSidebarProps) {
       )}
       <div className="sidebar-body">
         <FileTree
-          files={files}
+          files={treeFiles}
           folders={folders}
           activePath={activePath}
           collapsed={collapsed}
