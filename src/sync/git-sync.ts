@@ -13,7 +13,7 @@ import type { LocalStore, FileKind } from '../storage/local';
 import {
   listTombstones,
   removeTombstones,
-  findByPath,
+  findFileByPath,
   markSynced,
   updateNoteText,
   updateBinaryContent,
@@ -534,7 +534,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
 
   // Process remote files: pull new or changed, merge when both changed
   for (const e of entries) {
-    const local = findByPath(storeSlug, e.path);
+    const local = findFileByPath(storeSlug, e.path);
     if (!local) {
       if (renameSources.has(e.path) || deleteSources.has(e.path)) continue;
       // New remote file → pull
@@ -564,11 +564,20 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       continue;
     }
     const { id, doc } = local;
-    const docKind: FileKind = doc.kind ?? fileKindFromPath(doc.path) ?? 'markdown';
+    let docKind: FileKind;
     const lastRemoteSha = doc.lastRemoteSha;
-    const localText = doc.text || '';
-    const localBinary = doc.binaryBase64 ?? '';
-    const localHash = docKind === 'binary' ? hashText(localBinary) : hashText(localText);
+    let localText = '';
+    let localBinary = '';
+    let localHash = '';
+    if (doc.kind === 'binary') {
+      docKind = 'binary';
+      localBinary = doc.binaryBase64;
+      localHash = hashText(localBinary);
+    } else {
+      docKind = 'markdown';
+      localText = doc.text;
+      localHash = hashText(localText);
+    }
     if (e.sha === lastRemoteSha) {
       // Remote unchanged since base
       const changedLocally = doc.lastSyncedHash !== localHash;
@@ -641,13 +650,22 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
   const localFiles = store.listFiles();
   for (const meta of localFiles) {
     if (!remoteMap.has(meta.path)) {
-      const local = findByPath(storeSlug, meta.path);
+      const local = findFileByPath(storeSlug, meta.path);
       if (!local) continue;
       const { id, doc } = local;
-      const docKind: FileKind = doc.kind ?? fileKindFromPath(doc.path) ?? 'markdown';
-      const localText = doc.text || '';
-      const localBinary = doc.binaryBase64 ?? '';
-      const localHash = docKind === 'binary' ? hashText(localBinary) : hashText(localText);
+      let docKind: FileKind;
+      let localText = '';
+      let localBinary = '';
+      let localHash = '';
+      if (doc.kind === 'binary') {
+        docKind = 'binary';
+        localBinary = doc.binaryBase64;
+        localHash = hashText(localBinary);
+      } else {
+        docKind = 'markdown';
+        localText = doc.text;
+        localHash = hashText(localText);
+      }
       const changedLocally = doc.lastSyncedHash !== localHash;
       if (changedLocally) {
         // Restore to remote
@@ -713,21 +731,20 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         debugLog(slug, 'sync:tombstone:delete:remote-changed-keep-remote', { path: t.path });
       }
     } else if (t.type === 'rename') {
-      const targetLocal = findByPath(storeSlug, t.to);
+      const targetLocal = findFileByPath(storeSlug, t.to);
       const remoteTarget = remoteMap.get(t.to);
       if (targetLocal && !remoteTarget) {
         const { id, doc } = targetLocal;
-        const docKind: FileKind = doc.kind ?? fileKindFromPath(doc.path) ?? 'markdown';
         let nextSha: string;
-        if (docKind === 'binary') {
+        if (doc.kind === 'binary') {
           nextSha = await putFile(
             config,
-            { path: doc.path, binaryBase64: doc.binaryBase64 ?? '' },
+            { path: doc.path, binaryBase64: doc.binaryBase64 },
             'vibenote: update assets'
           );
           markSynced(storeSlug, id, {
             remoteSha: nextSha,
-            syncedHash: hashText(doc.binaryBase64 ?? ''),
+            syncedHash: hashText(doc.binaryBase64),
           });
           remoteMap.set(t.to, {
             path: t.to,
@@ -789,12 +806,11 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         continue;
       }
 
-      const existing = findByPath(storeSlug, t.from);
+      const existing = findFileByPath(storeSlug, t.from);
       const remoteFile = await pullRepoFile(config, t.from);
       if (remoteFile) {
         if (existing) {
-          const docKind: FileKind = existing.doc.kind ?? fileKindFromPath(existing.doc.path) ?? 'markdown';
-          if (docKind === 'binary') {
+          if (existing.doc.kind === 'binary') {
             updateBinaryContent(storeSlug, existing.id, remoteFile.binaryBase64 ?? '', remoteFile.mime);
             markSynced(storeSlug, existing.id, {
               remoteSha: remoteFile.sha,

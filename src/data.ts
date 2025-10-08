@@ -7,6 +7,7 @@ import {
   setAutosyncEnabled,
   getLastAutoSyncAt,
   recordAutoSyncRun,
+  type FileMeta,
   type NoteMeta,
   type NoteDoc,
   clearAllLocalData,
@@ -73,6 +74,7 @@ type RepoDataState = {
   // repo content
   doc: NoteDoc | undefined;
   activePath: string | undefined;
+  files: FileMeta[];
   notes: RepoNoteListItem[];
   folders: string[];
 
@@ -132,7 +134,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
 } {
   // ORIGINAL STATE AND MAIN HOOKS
   // Local storage wrapper
-  let { notes: localNotes, folders: localFolders } = useLocalRepoSnapshot(slug);
+  let { files: localFiles, notes: localNotes, folders: localFolders } = useLocalRepoSnapshot(slug);
 
   // Store the current GitHub App session token to toggle authenticated features instantly.
   let [sessionToken, setSessionToken] = useState<string | undefined>(() => getAppSessionToken() ?? undefined);
@@ -182,6 +184,21 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     canSync,
     defaultBranch,
   });
+
+  let files = useMemo<FileMeta[]>(() => {
+    if (isReadOnly) {
+      return readOnlyNotes.map((note) => ({
+        id: note.id,
+        path: note.path,
+        title: note.title,
+        dir: note.dir,
+        updatedAt: 0,
+        kind: 'markdown',
+        mime: 'text/markdown',
+      }));
+    }
+    return localFiles;
+  }, [isReadOnly, readOnlyNotes, localFiles]);
 
   // Derive the notes/folders from whichever source is powering the tree.
   let notes: RepoNoteListItem[] = isReadOnly ? readOnlyNotes : localNotes;
@@ -480,6 +497,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
 
     doc,
     activePath,
+    files,
     notes,
     folders,
 

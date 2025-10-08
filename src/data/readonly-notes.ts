@@ -94,6 +94,8 @@ function useReadOnlyNotes(params: {
         updatedAt: Date.now(),
         lastRemoteSha: remote.sha,
         lastSyncedHash: hashText(remote.text),
+        kind: 'markdown',
+        mime: 'text/markdown',
       });
     } catch (error) {
       logError(error);

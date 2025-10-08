@@ -194,9 +194,8 @@ function expectParity(store: LocalStore, remote: MockRemoteRepo) {
   for (const meta of store.listFiles()) {
     const doc = store.loadFile(meta.id);
     if (!doc) continue;
-    const kind = doc.kind ?? (meta.path.toLowerCase().endsWith('.md') ? 'markdown' : 'binary');
-    if (kind === 'binary') {
-      const decoded = Buffer.from(doc.binaryBase64 ?? '', 'base64').toString('utf8');
+    if (doc.kind === 'binary') {
+      const decoded = Buffer.from(doc.binaryBase64, 'base64').toString('utf8');
       localMap.set(meta.path, decoded);
     } else {
       localMap.set(meta.path, doc.text);
