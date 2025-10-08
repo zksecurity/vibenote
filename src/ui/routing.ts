@@ -7,10 +7,6 @@ export type Route =
   | { kind: 'start' }
   | { kind: 'repo'; owner: string; repo: string; notePath?: string };
 
-type NavigateOptions = {
-  replace?: boolean;
-};
-
 const HOME_ROUTE: Route = { kind: 'home' };
 const NEW_ROUTE: Route = { kind: 'new' };
 const START_ROUTE: Route = { kind: 'start' };
@@ -68,15 +64,15 @@ export function useRoute() {
     return () => window.removeEventListener('popstate', onPop);
   }, []);
 
-  let navigate = useCallback((next: Route, options: NavigateOptions = {}) => {
+  let navigate = useCallback((next: Route, { replace = false } = {}) => {
     let path = routeToPath(next);
     let current = stripTrailingSlash(window.location.pathname);
     let target = stripTrailingSlash(path);
-    if (options.replace) {
+    if (replace) {
       window.history.replaceState(null, '', target);
     } else if (current !== target) {
       window.history.pushState(null, '', target);
-    } else if (!options.replace) {
+    } else if (!replace) {
       // same path, no navigation needed
     }
     setRoute(parseRoute(target));
