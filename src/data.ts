@@ -156,6 +156,9 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   let accessStatusReady =
     repoAccess.status === 'ready' || repoAccess.status === 'rate-limited' || repoAccess.status === 'error';
 
+  let repoNotePath = route.kind === 'repo' ? route.notePath : undefined;
+  let desiredNotePath = repoNotePath !== undefined ? normalizePath(repoNotePath) : undefined;
+
   // in readonly mode, we store nothing locally and just fetch content from github no demand
   let isReadOnly = repoAccess.level === 'read';
   let {
@@ -164,7 +167,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     folders: readOnlyFolders,
     selectDoc: selectReadOnlyDoc,
     reset: resetReadOnlyState,
-  } = useReadOnlyNotes({ slug, isReadOnly, defaultBranch });
+  } = useReadOnlyNotes({ slug, isReadOnly, defaultBranch, desiredPath: desiredNotePath });
 
   // whether we treat the repo as locally writable
   // note that we are optimistic about write access until the access check completes,
@@ -182,9 +185,6 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
 
   let notes: RepoNoteListItem[] = isReadOnly ? readOnlyNotes : localNotes;
   let folders = isReadOnly ? readOnlyFolders : localFolders;
-
-  let repoNotePath = route.kind === 'repo' ? route.notePath : undefined;
-  let desiredNotePath = repoNotePath !== undefined ? normalizePath(repoNotePath) : undefined;
 
   let activeNoteMeta = useMemo(() => {
     if (desiredNotePath === undefined) return undefined;
@@ -222,22 +222,6 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
 
   // EFFECTS
   // please avoid adding more effects here, keep logic clean/separated
-
-  // Fetch read-only note content whenever the selection changes.
-  // TODO feels like this shouldn't live here, but currently is needed to load the initial note when
-  // opening a read-only repo. Active user selections are already handled by `selectNote` below.
-  // FIXME this was causing bugs when selecting notes, so I commented. needs to be refactored properly
-  // useEffect(() => {
-  //   if (!isReadOnly) return;
-  //   if (desiredNotePath === undefined) {
-  //     if (readOnlyDoc !== undefined) void selectReadOnlyDoc(undefined);
-  //     return;
-  //   }
-  //   let entry = findByPath(readOnlyNotes, desiredNotePath);
-  //   if (!entry) return;
-  //   if (readOnlyDoc?.path === entry.path) return;
-  //   void selectReadOnlyDoc(entry.id);
-  // }, [isReadOnly, desiredNotePath, readOnlyNotes, readOnlyDoc?.path]);
 
   // Persist last active note id so writable repos can restore it later.
   useEffect(() => {

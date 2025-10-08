@@ -412,13 +412,7 @@ describe('useRepoData', () => {
     });
 
     await waitFor(() => expect(result.current.state.notes.length).toBe(2));
-    expect(result.current.state.activePath).toBeUndefined();
-    expect(result.current.state.doc).toBeUndefined();
-
-    act(() => {
-      result.current.actions.selectNote('README.md');
-    });
-
+    expect(result.current.state.activePath).toBe('README.md');
     await waitFor(() => expect(result.current.state.doc?.path).toBe('README.md'));
     expect(mockPullNote).toHaveBeenCalledWith(expect.anything(), 'README.md');
   });
