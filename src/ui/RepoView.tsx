@@ -458,6 +458,7 @@ function FileSidebar(props: FileSidebarProps) {
         name: file.path.slice(file.path.lastIndexOf('/') + 1),
         path: file.path,
         dir: file.dir,
+        title: file.path.slice(file.path.lastIndexOf('/') + 1).replace(/\.md$/i, ''),
       })),
     [markdownFiles]
   );

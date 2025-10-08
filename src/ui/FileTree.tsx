@@ -2,9 +2,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 export type FileEntry = {
-  name: string; // filename without directory
+  name: string; // filename including extension
   path: string; // dir + name
   dir: string; // '' for root
+  title?: string; // extension-trimmed title for editing
 };
 
 type Selection = { kind: 'folder' | 'file'; path: string } | null;
@@ -35,7 +36,7 @@ type FolderNode = {
   name: string;
   children: (FolderNode | FileNode)[];
 };
-type FileNode = { kind: 'file'; name: string; dir: string; path: string };
+type FileNode = { kind: 'file'; name: string; dir: string; path: string; title?: string };
 
 export function FileTree(props: FileTreeProps) {
   // Rebuild the nested node structure whenever the note list changes.
@@ -154,7 +155,8 @@ export function FileTree(props: FileTreeProps) {
         const f = props.files.find((x) => normalizePath(x.path) === normalizePath(selected.path));
         if (!f) return;
         setEditing({ kind: 'file', path: f.path });
-        setEditText(f.name);
+        const initial = f.title ?? trimMarkdownExtension(f.name);
+        setEditText(initial);
       } else {
         const name = selected.path.slice(selected.path.lastIndexOf('/') + 1);
         setEditing(selected);
@@ -710,7 +712,7 @@ function buildTree(files: FileEntry[], folders: string[]): FolderNode {
   for (let d of folders) addFolder(d);
   for (let f of files) {
     const parent = addFolder(f.dir);
-    parent.children.push({ kind: 'file', name: f.name, dir: f.dir, path: f.path });
+    parent.children.push({ kind: 'file', name: f.name, dir: f.dir, path: f.path, title: f.title });
   }
   // Sort like GitHub: folders A→Z, then files A→Z
   const sortNode = (n: FolderNode) => {
@@ -731,4 +733,8 @@ function normalizeDir(dir: string): string {
   d = d.replace(/(^\/+|\/+?$)/g, '');
   if (d === '.' || d === '..') d = '';
   return d;
+}
+
+function trimMarkdownExtension(name: string): string {
+  return name.replace(/\.md$/i, '');
 }

@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { useEffect, useState } from 'react';
 import { beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
@@ -261,6 +262,27 @@ describe('useRepoData', () => {
 
     await waitFor(() => expect(result.current.state.activePath).toBe(target.path));
     expect(result.current.state.doc?.path).toBe(target.path);
+  });
+
+  test('state.files includes markdown and image entries for writable repos', async () => {
+    const slug = 'acme/assets';
+    const store = new LocalStore(slug);
+    store.createNote('Guide', '# usage');
+    store.createBinaryFile('art/logo.png', Buffer.from('png-data', 'utf8').toString('base64'), 'image/png');
+    markRepoLinked(slug);
+
+    mockGetSessionToken.mockReturnValue('token');
+    mockGetSessionUser.mockReturnValue({ login: 'octo', name: 'Octo', avatarUrl: 'https://example.com/octo.png' });
+    setRepoMetadata(writableMeta);
+
+    const recordRecent = vi.fn<RecordRecentFn>();
+    const route: RepoRoute = { kind: 'repo', owner: 'acme', repo: 'assets' };
+    const { result } = renderRepoData({ slug, route, recordRecent });
+
+    await waitFor(() => expect(result.current.state.files.length).toBe(2));
+    const byPath = new Map(result.current.state.files.map((file) => [file.path, file.kind]));
+    expect(byPath.get('Guide.md')).toBe('markdown');
+    expect(byPath.get('art/logo.png')).toBe('binary');
   });
 
   test('loads a read-only note that matches the route note path', async () => {
