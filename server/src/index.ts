@@ -43,7 +43,11 @@ app.get('/v1/healthz', (_req, res) => res.json({ ok: true }));
 
 app.get('/v1/auth/github/start', async (req, res) => {
   let returnTo = String(req.query.returnTo ?? '');
-  let redirect = await createAuthStartRedirect(env, returnTo, callbackURL(req));
+  let sanitizedReturnTo = normalizeReturnTo(returnTo, env.ALLOWED_ORIGINS);
+  if (sanitizedReturnTo === null) {
+    return res.status(400).json({ error: 'invalid returnTo origin' });
+  }
+  let redirect = await createAuthStartRedirect(env, sanitizedReturnTo, callbackURL(req));
   res.redirect(redirect);
 });
 
@@ -95,7 +99,11 @@ app.get('/v1/app/install-url', async (req, res) => {
   let owner = String(req.query.owner ?? '');
   let repo = String(req.query.repo ?? '');
   let returnTo = String(req.query.returnTo ?? '');
-  let url = await buildInstallUrl(env, owner, repo, returnTo);
+  let sanitizedReturnTo = normalizeReturnTo(returnTo, env.ALLOWED_ORIGINS);
+  if (sanitizedReturnTo === null && returnTo.trim().length > 0) {
+    return res.status(400).json({ error: 'invalid returnTo origin' });
+  }
+  let url = await buildInstallUrl(env, owner, repo, sanitizedReturnTo ?? '');
   res.json({ url });
 });
 
@@ -105,10 +113,14 @@ app.get('/v1/app/setup', async (req, res) => {
     let setupAction = req.query.setup_action ? String(req.query.setup_action) : null;
     let stateToken = String(req.query.state ?? '');
     let returnTo = String(req.query.returnTo ?? '');
+    let sanitizedReturnTo = normalizeReturnTo(returnTo, env.ALLOWED_ORIGINS);
+    if (sanitizedReturnTo === null && returnTo.trim().length > 0) {
+      return res.status(400).json({ error: 'invalid returnTo origin' });
+    }
     let target = await buildSetupRedirect(
       env,
       stateToken,
-      returnTo,
+      sanitizedReturnTo ?? '',
       setupAction,
       installationId,
       requestOrigin(req)
@@ -168,6 +180,28 @@ function getHost(req: express.Request): string {
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
   return String(error);
+}
+
+function normalizeReturnTo(value: string, allowedOrigins: string[]): string | null {
+  // Ensure callbacks only ever return control to trusted frontend origins.
+  let trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return '';
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return null;
+  }
+  let protocol = parsed.protocol.toLowerCase();
+  if (protocol !== 'https:' && protocol !== 'http:') {
+    return null;
+  }
+  if (!allowedOrigins.includes(parsed.origin)) {
+    return null;
+  }
+  return parsed.toString();
 }
 
 function requireSession(req: express.Request, res: express.Response, next: express.NextFunction) {
