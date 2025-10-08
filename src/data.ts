@@ -183,6 +183,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     defaultBranch,
   });
 
+  // Derive the notes/folders from whichever source is powering the tree.
   let notes: RepoNoteListItem[] = isReadOnly ? readOnlyNotes : localNotes;
   let folders = isReadOnly ? readOnlyFolders : localFolders;
 
@@ -211,28 +212,15 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
 
   let activePath = doc?.path ?? activeNote?.path ?? desiredPath;
 
-  const ensureActivePath = (nextPath: string | undefined) => {
-    if (pathsEqual(route.notePath, nextPath)) return;
-    setActivePath(nextPath);
-  };
-
-  const resolveEditableNote = (path: string | undefined): NoteMeta | undefined => {
-    if (path === undefined) return undefined;
-    let normalized = normalizePath(path);
-    let list = getRepoStore(slug).listNotes();
-    return list.find((note) => normalizePath(note.path) === normalized);
-  };
-
   // EFFECTS
   // please avoid adding more effects here, keep logic clean/separated
 
   // Persist last active note id so writable repos can restore it later.
   useEffect(() => {
-    if (!canEdit) return;
-    setLastActiveNoteId(slug, activeId ?? null);
-  }, [canEdit, slug, activeId]);
+    if (canEdit) setLastActiveNoteId(slug, activeId ?? null);
+  }, [canEdit, activeId]);
 
-  // When the loaded doc changes path (e.g., rename or sync), push the route forward.
+  // When the loaded doc changes path (e.g., rename or sync or restoring last active), push the route forward.
   useEffect(() => {
     if (doc?.path === undefined) return;
     if (pathsEqual(desiredPath, doc.path)) return;
@@ -274,12 +262,11 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
         let localStore = getRepoStore(slug);
         localStore.replaceWithRemote(files);
         let synced = localStore.listNotes();
+        // if we are not on a specific path yet and there's no stored active id, show README.md
         if (desiredPath === undefined) {
           let storedId = getLastActiveNoteId(slug);
           let storedPath =
-            storedId !== undefined
-              ? synced.find((note) => note.id === storedId)?.path ?? undefined
-              : undefined;
+            storedId !== undefined ? synced.find((note) => note.id === storedId)?.path : undefined;
           let readmePath = synced.find((note) => note.path.toLowerCase() === 'readme.md')?.path;
           let initialPath = storedPath ?? readmePath;
           if (initialPath !== undefined && !pathsEqual(desiredPath, initialPath)) {
@@ -298,6 +285,18 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   }, [route, repoAccess.level, linked, slug, canEdit, defaultBranch, desiredPath]);
 
   // CLICK HANDLERS
+
+  const ensureActivePath = (nextPath: string | undefined) => {
+    if (pathsEqual(route.notePath, nextPath)) return;
+    setActivePath(nextPath);
+  };
+
+  const resolveEditableNote = (path: string | undefined): NoteMeta | undefined => {
+    if (path === undefined) return undefined;
+    let normalized = normalizePath(path);
+    let list = getRepoStore(slug).listNotes();
+    return list.find((note) => normalizePath(note.path) === normalized);
+  };
 
   // "Connect GitHub" button in the header
   const signIn = async () => {
