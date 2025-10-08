@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { LocalStore, listTombstones } from '../storage/local';
 import { MockRemoteRepo } from '../test/mock-remote';
@@ -113,15 +114,23 @@ describe('syncBidirectional', () => {
     expect(store.listNotes()).toHaveLength(0);
   });
 
-  test('ignores non-Markdown files when syncing', async () => {
+  test('syncs tracked image files while ignoring unrelated blobs', async () => {
     remote.setFile('data.json', '{"keep":true}');
-    remote.setFile('image.png', 'binary');
+    remote.setFile('image.png', 'asset');
     store.createNote('OnlyNote', '# hello');
     await syncBidirectional(store, 'user/repo');
     const snapshot = remote.snapshot();
     expect(snapshot.get('data.json')).toBe('{"keep":true}');
-    expect(snapshot.get('image.png')).toBe('binary');
+    expect(snapshot.get('image.png')).toBe('asset');
     expect(snapshot.get('OnlyNote.md')).toBe('# hello');
+    const files = store.listFiles();
+    const imageMeta = files.find((f) => f.path === 'image.png');
+    expect(imageMeta).toBeDefined();
+    if (imageMeta) {
+      const imageDoc = store.loadFile(imageMeta.id);
+      expect(imageDoc?.binaryBase64).toBe(Buffer.from('asset', 'utf8').toString('base64'));
+    }
+    expectParity(store, remote);
   });
 
   test('pulls nested Markdown files', async () => {
@@ -135,6 +144,19 @@ describe('syncBidirectional', () => {
     expect(doc?.text).toBe('# nested');
   });
 
+  test('pulls binary image assets from remote', async () => {
+    remote.setFile('assets/logo.png', 'image-data');
+    await syncBidirectional(store, 'user/repo');
+    const files = store.listFiles();
+    const asset = files.find((f) => f.path === 'assets/logo.png');
+    expect(asset).toBeDefined();
+    if (!asset) return;
+    const doc = store.loadFile(asset.id);
+    expect(doc?.binaryBase64).toBe(Buffer.from('image-data', 'utf8').toString('base64'));
+    expect(doc?.kind ?? 'binary').toBe('binary');
+    expectParity(store, remote);
+  });
+
   test('listNoteFiles includes nested markdown', async () => {
     const mod = await import('./git-sync');
     remote.setFile('nested/Nested.md', '# nested');
@@ -142,6 +164,17 @@ describe('syncBidirectional', () => {
     let entries = await mod.listNoteFiles(cfg);
     const paths = entries.map((e) => e.path).sort();
     expect(paths).toEqual(['nested/Nested.md']);
+  });
+
+  test('listRepoFiles returns markdown and image entries', async () => {
+    const mod = await import('./git-sync');
+    remote.setFile('docs/Doc.md', '# hi');
+    remote.setFile('assets/logo.png', 'img');
+    let cfg = mod.buildRemoteConfig('user/repo');
+    let entries = await mod.listRepoFiles(cfg);
+    const byPath = new Map(entries.map((entry) => [entry.path, entry.kind]));
+    expect(byPath.get('docs/Doc.md')).toBe('markdown');
+    expect(byPath.get('assets/logo.png')).toBe('binary');
   });
 
   test('includes README.md files from the repository', async () => {
@@ -158,13 +191,35 @@ describe('syncBidirectional', () => {
 
 function expectParity(store: LocalStore, remote: MockRemoteRepo) {
   const localMap = new Map<string, string>();
-  for (const meta of store.listNotes()) {
-    const doc = store.loadNote(meta.id);
-    if (doc) localMap.set(meta.path, doc.text);
+  for (const meta of store.listFiles()) {
+    const doc = store.loadFile(meta.id);
+    if (!doc) continue;
+    const kind = doc.kind ?? (meta.path.toLowerCase().endsWith('.md') ? 'markdown' : 'binary');
+    if (kind === 'binary') {
+      const decoded = Buffer.from(doc.binaryBase64 ?? '', 'base64').toString('utf8');
+      localMap.set(meta.path, decoded);
+    } else {
+      localMap.set(meta.path, doc.text);
+    }
   }
   const remoteMap = remote.snapshot();
-  expect([...remoteMap.keys()].sort()).toEqual([...localMap.keys()].sort());
+  const trackedRemoteKeys = [...remoteMap.keys()].filter(isTrackedPath).sort();
+  expect(trackedRemoteKeys).toEqual([...localMap.keys()].sort());
   for (const [path, text] of localMap.entries()) {
     expect(remoteMap.get(path)).toBe(text);
   }
+}
+
+function isTrackedPath(path: string): boolean {
+  const lower = path.toLowerCase();
+  return (
+    lower.endsWith('.md') ||
+    lower.endsWith('.png') ||
+    lower.endsWith('.jpg') ||
+    lower.endsWith('.jpeg') ||
+    lower.endsWith('.gif') ||
+    lower.endsWith('.webp') ||
+    lower.endsWith('.svg') ||
+    lower.endsWith('.avif')
+  );
 }

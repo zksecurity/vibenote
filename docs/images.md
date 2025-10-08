@@ -17,6 +17,7 @@
 
 ## Completed Work
 - Local storage now preserves binary file payloads (base64 + MIME) while `listNotes` keeps non-Markdown assets hidden from the UI; helper APIs (`listFiles`, `loadFile`) exposed for upcoming sync/UI steps.
+- Git sync now lists/pulls/pushes tracked image assets alongside Markdown while retaining merge behaviour for notes only; regression tests cover the new flows.
 
 ## Decisions
 - Image extensions: `png`, `jpg`, `jpeg`, `gif`, `webp`, `svg`, `avif` (confirmed 2025-10-08).  
@@ -29,3 +30,4 @@
 - 2025-10-08 – Created worklog with initial roadmap.
 - 2025-10-08 – Confirmed image extension list and storage approach; noted sync-module change freeze.
 - 2025-10-08 – Extended local storage to carry binary assets (including MIME + base64) without surfacing them in note listings yet.
+- 2025-10-08 – Wired Git sync to treat images as binary assets end-to-end and added coverage for asset pulls/restores.

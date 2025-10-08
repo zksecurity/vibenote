@@ -1,7 +1,7 @@
 // Local storage persistence for repo files (markdown notes plus binary assets).
 import { logError } from '../lib/logging';
 
-type FileKind = 'markdown' | 'binary';
+export type FileKind = 'markdown' | 'binary';
 
 const DEFAULT_MARKDOWN_MIME = 'text/markdown';
 
@@ -256,6 +256,33 @@ export class LocalStore {
     this.index = idx;
     this.addFolder(normDir);
     debugLog(this.slug, 'createNote', { id, path, title: displayTitle });
+    emitRepoChange(this.slug);
+    return id;
+  }
+
+  createBinaryFile(path: string, base64: string, mime?: string): string {
+    let id = crypto.randomUUID();
+    let normPath = path.replace(/^\/+/, '');
+    let dir = extractDir(normPath);
+    let title = basename(normPath);
+    let now = Date.now();
+    let meta: NoteMeta = { id, path: normPath, title, dir, updatedAt: now };
+    let doc: NoteDoc = {
+      ...meta,
+      text: '',
+      binaryBase64: base64,
+      kind: 'binary',
+      mime: mime ?? inferMimeFromPath(normPath),
+      lastRemoteSha: undefined,
+      lastSyncedHash: hashText(base64),
+    };
+    let idx = this.loadIndex();
+    idx.push(meta);
+    localStorage.setItem(this.indexKey, JSON.stringify(idx));
+    localStorage.setItem(this.noteKey(id), JSON.stringify(doc));
+    this.index = idx;
+    if (dir !== '') this.addFolder(dir);
+    debugLog(this.slug, 'createBinary', { id, path: normPath });
     emitRepoChange(this.slug);
     return id;
   }
@@ -691,6 +718,31 @@ export function updateNoteText(slug: string, id: string, text: string) {
   localStorage.setItem(key, JSON.stringify(next));
   touchIndexUpdatedAt(slug, id, updatedAt);
   debugLog(slug, 'updateNoteText', { id, updatedAt });
+  emitRepoChange(slug);
+}
+
+export function updateBinaryContent(slug: string, id: string, base64: string, mime?: string) {
+  let key = `${repoKey(slug, 'note')}:${id}`;
+  let docRaw = localStorage.getItem(key);
+  if (!docRaw) return;
+  let doc: NoteDoc;
+  try {
+    doc = JSON.parse(docRaw) as NoteDoc;
+  } catch {
+    return;
+  }
+  let updatedAt = Date.now();
+  let next: NoteDoc = {
+    ...doc,
+    binaryBase64: base64,
+    mime: mime ?? doc.mime ?? inferMimeFromPath(doc.path),
+    kind: doc.kind ?? 'binary',
+    text: doc.kind === 'markdown' ? doc.text : '',
+    updatedAt,
+  };
+  localStorage.setItem(key, JSON.stringify(next));
+  touchIndexUpdatedAt(slug, id, updatedAt);
+  debugLog(slug, 'updateBinary', { id, updatedAt });
   emitRepoChange(slug);
 }
 
