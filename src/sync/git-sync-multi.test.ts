@@ -182,6 +182,36 @@ describe('syncBidirectional multi-device', () => {
     expect(remotePaths(remote)).toEqual(['Draft Renamed.md']);
   });
 
+  test('rename chooses the correct note when another note shares the same content', async () => {
+    let deviceOne = createDevice('device-one');
+    let storeOne = deviceOne.store;
+    let cloneId = storeOne.createNote('Clone', 'shared body');
+    let draftId = storeOne.createNote('Draft', 'shared body');
+    await syncBidirectional(storeOne, REPO_SLUG);
+
+    let deviceTwo = createDevice('device-two', deviceOne.storage);
+
+    let storeTwo = useDevice(deviceTwo);
+    storeTwo.saveNote(cloneId, 'clone offline edits');
+
+    storeOne = useDevice(deviceOne);
+    storeOne.renameNote(draftId, 'Draft Renamed');
+    await syncBidirectional(storeOne, REPO_SLUG);
+
+    storeTwo = useDevice(deviceTwo);
+    await syncBidirectional(storeTwo, REPO_SLUG);
+
+    let renamed = storeTwo.loadNote(draftId);
+    expect(renamed?.path).toBe('Draft Renamed.md');
+    expect(renamed?.text).toBe('shared body');
+    expect(renamed?.id).toBe(draftId);
+
+    let clone = storeTwo.loadNote(cloneId);
+    expect(clone?.path).toBe('Clone.md');
+    expect(clone?.text).toBe('clone offline edits');
+    expect(clone?.id).toBe(cloneId);
+  });
+
   test('device two removes a note deleted on device one', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
@@ -242,6 +272,31 @@ describe('syncBidirectional multi-device', () => {
     expect(notePaths(storeTwo)).toEqual(['guides/Doc.md']);
     expect(storeTwo.listFolders()).toEqual(['guides']);
     expect(remotePaths(remote)).toEqual(['guides/Doc.md']);
+  });
+
+  test('folder rename preserves offline edits on device two', async () => {
+    let deviceOne = createDevice('device-one');
+    let storeOne = deviceOne.store;
+    let noteId = storeOne.createNote('Doc', 'body', 'docs');
+    await syncBidirectional(storeOne, REPO_SLUG);
+
+    let deviceTwo = createDevice('device-two', deviceOne.storage);
+
+    storeOne = useDevice(deviceOne);
+    storeOne.renameFolder('docs', 'guides');
+    await syncBidirectional(storeOne, REPO_SLUG);
+
+    let storeTwo = useDevice(deviceTwo);
+    storeTwo.saveNote(noteId, 'offline edit after rename');
+    console.log('before sync', storeTwo.loadNote(noteId));
+    console.log('remote pre-sync', remote.snapshot());
+    await syncBidirectional(storeTwo, REPO_SLUG);
+
+    let updated = storeTwo.loadNote(noteId);
+    console.log('after sync', updated);
+    expect(updated?.path).toBe('guides/Doc.md');
+    expect(updated?.text).toBe('offline edit after rename');
+    expect(remote.snapshot().get('guides/Doc.md')).toBe('offline edit after rename');
   });
 
   test('folder deletion on device one removes its notes on device two', async () => {
