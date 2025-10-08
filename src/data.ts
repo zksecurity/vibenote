@@ -217,7 +217,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       setActivePath(undefined);
       return;
     }
-    setActivePath(activeNotePath);
+    if (route.notePath !== activeNotePath) setActivePath(activeNotePath);
   }, [route, activeNotePath, desiredNotePath]);
 
   // Fetch read-only note content whenever the selection changes.
