@@ -7,11 +7,11 @@ import { Toggle } from './Toggle';
 import { GitHubIcon, ExternalLinkIcon, NotesIcon, CloseIcon, SyncIcon } from './RepoIcons';
 import { useRepoData, type RepoNoteListItem } from '../data';
 import { getExpandedFolders, setExpandedFolders } from '../storage/local';
-import type { Route } from './routing';
+import type { RepoRoute, Route } from './routing';
 
 type RepoViewProps = {
   slug: string;
-  route: Route;
+  route: RepoRoute;
   navigate: (route: Route, options?: { replace?: boolean }) => void;
   recordRecent: (entry: {
     slug: string;

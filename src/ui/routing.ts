@@ -1,11 +1,16 @@
 // SPA routing helpers for parsing and updating the current location
 import { useCallback, useEffect, useState } from 'react';
 
-export type Route =
+export type { Route, RepoRoute };
+export { useRoute };
+
+type Route =
   | { kind: 'home' }
   | { kind: 'new' }
   | { kind: 'start' }
   | { kind: 'repo'; owner: string; repo: string; notePath?: string };
+
+type RepoRoute = { kind: 'new' } | { kind: 'repo'; owner: string; repo: string; notePath?: string };
 
 const HOME_ROUTE: Route = { kind: 'home' };
 const NEW_ROUTE: Route = { kind: 'new' };
@@ -16,7 +21,7 @@ function stripTrailingSlash(path: string): string {
   return path.replace(/\/+$/, '') || '/';
 }
 
-export function parseRoute(pathname: string): Route {
+function parseRoute(pathname: string): Route {
   let clean = stripTrailingSlash(pathname.split('?')[0]?.split('#')[0] ?? '/');
   if (clean === '/' || clean === '') return HOME_ROUTE;
   if (clean === '/start') return START_ROUTE;
@@ -34,7 +39,7 @@ export function parseRoute(pathname: string): Route {
   return HOME_ROUTE;
 }
 
-export function routeToPath(route: Route): string {
+function routeToPath(route: Route): string {
   if (route.kind === 'home') return '/';
   if (route.kind === 'new') return '/new';
   if (route.kind === 'start') return '/start';
@@ -53,7 +58,7 @@ export function routeToPath(route: Route): string {
   return `/${owner}/${repo}/${segments.join('/')}`;
 }
 
-export function useRoute() {
+function useRoute() {
   let [route, setRoute] = useState<Route>(() => parseRoute(window.location.pathname));
 
   useEffect(() => {

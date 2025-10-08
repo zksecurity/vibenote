@@ -38,7 +38,7 @@ import {
 } from './sync/git-sync';
 import { logError } from './lib/logging';
 import { useReadOnlyNotes, type ReadOnlyNote } from './data/readonly-notes';
-import type { Route } from './ui/routing';
+import type { RepoRoute } from './ui/routing';
 
 export { useRepoData };
 export type {
@@ -106,7 +106,7 @@ type RepoDataActions = {
 
 type RepoDataInputs = {
   slug: string;
-  route: Route;
+  route: RepoRoute;
   recordRecent: (entry: {
     slug: string;
     owner?: string;
@@ -172,12 +172,12 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   let canEdit =
     route.kind === 'new' || (hasSession && (repoAccess.level === 'write' || (!accessStatusReady && linked)));
 
-  let { autosync, setAutosync, scheduleAutoSync, performSync, syncing } = useSync({
+  let canSync = canEdit && route.kind === 'repo' && linked;
+
+  let { autosync, syncing, setAutosync, scheduleAutoSync, performSync } = useSync({
     slug,
-    route,
-    sessionToken,
-    linked,
-    canEdit,
+    canSync,
+    defaultBranch,
   });
 
   // Derive the notes/folders/doc from whichever source is powering the tree.
@@ -221,6 +221,8 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   }, [route, activeNotePath, desiredNotePath]);
 
   // Fetch read-only note content whenever the selection changes.
+  // TODO feels like this shouldn't live here, but currently is needed to load the initial note when
+  // opening a read-only repo. Active user selections are already handled by `selectNote` below.
   useEffect(() => {
     if (!isReadOnly) return;
     if (activeId === undefined) {
@@ -286,61 +288,6 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       }
     })();
   }, [route, repoAccess.level, linked, slug, canEdit, defaultBranch, desiredNotePath]);
-
-  // Attempt a last-minute sync via the Service Worker so pending edits survive tab closure.
-  // TODO move this into `useSync`, and the syncing logic into our syncing library
-  useEffect(() => {
-    if (route.kind !== 'repo') return;
-    if (!hasSession || !linked || slug === 'new' || !canEdit) return;
-    if (!('serviceWorker' in navigator)) return;
-
-    const flushViaServiceWorker = async () => {
-      try {
-        let reg = await navigator.serviceWorker.ready;
-        let ctrl = reg?.active;
-        if (ctrl === null || ctrl === undefined) return;
-        let accessToken = getAccessTokenRecord()?.token;
-        if (accessToken === undefined) return;
-        let cfg = buildRemoteConfig(slug, defaultBranch);
-        let localStore = getRepoStore(slug);
-        let pending = localStore
-          .listNotes()
-          .map((meta) => localStore.loadNote(meta.id))
-          .filter((note): note is NoteDoc => note !== null)
-          .filter((note) => note.lastSyncedHash !== hashText(note.text))
-          .map((note) => ({
-            path: note.path,
-            text: note.text,
-            baseSha: note.lastRemoteSha,
-            message: 'vibenote: background sync',
-          }));
-        if (pending.length === 0) return;
-        ctrl.postMessage({
-          type: 'vibenote-flush',
-          payload: {
-            token: accessToken,
-            config: cfg,
-            files: pending,
-          },
-        });
-      } catch (error) {
-        console.warn('vibenote: background flush failed', error);
-      }
-    };
-
-    const onPageHide = () => {
-      void flushViaServiceWorker();
-    };
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') void flushViaServiceWorker();
-    };
-    window.addEventListener('pagehide', onPageHide);
-    document.addEventListener('visibilitychange', onVisibilityChange);
-    return () => {
-      window.removeEventListener('pagehide', onPageHide);
-      document.removeEventListener('visibilitychange', onVisibilityChange);
-    };
-  }, [route.kind, hasSession, linked, slug, canEdit, defaultBranch]);
 
   // CLICK HANDLERS
 
@@ -417,6 +364,12 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       logError(error);
       setSyncMessage('Sync failed');
     }
+  };
+
+  // click on a note in the sidebar
+  const selectNote = async (id: string | undefined) => {
+    setActiveId(id);
+    await selectReadOnlyDoc(id);
   };
 
   const updateNoteText = (id: string, text: string) => {
@@ -496,11 +449,6 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       return list.some((note) => note.id === prev) ? prev : list[0]?.id;
     });
     scheduleAutoSync();
-  };
-
-  const selectNote = async (id: string | undefined) => {
-    setActiveId(id);
-    await selectReadOnlyDoc(id);
   };
 
   let state: RepoDataState = {
@@ -584,7 +532,7 @@ const initialAccessState: RepoAccessState = {
   isPrivate: undefined,
 };
 
-function useRepoAccess(params: { route: Route; sessionToken: string | undefined }): RepoAccessState {
+function useRepoAccess(params: { route: RepoRoute; sessionToken: string | undefined }): RepoAccessState {
   let { route, sessionToken } = params;
   let owner = route.kind === 'repo' ? route.owner : undefined;
   let repo = route.kind === 'repo' ? route.repo : undefined;
@@ -655,15 +603,9 @@ function deriveAccessFromMetadata({
   };
 }
 
-function useSync(params: {
-  slug: string;
-  route: Route;
-  sessionToken: string | undefined;
-  linked: boolean;
-  canEdit: boolean;
-}) {
-  let { slug, route, sessionToken, linked, canEdit } = params;
-  let noSync = route.kind !== 'repo' || sessionToken === undefined || !linked || !canEdit;
+function useSync(params: { slug: string; canSync: boolean; defaultBranch?: string }) {
+  let { slug, defaultBranch, canSync } = params;
+  let noSync = !canSync;
 
   // Remember the user's autosync preference per repo slug.
   let [autosync, setAutosyncState] = useState<boolean>(() =>
@@ -751,6 +693,58 @@ function useSync(params: {
     }
     scheduleAutoSync(0);
   };
+
+  // Attempt a last-minute sync via the Service Worker so pending edits survive tab closure.
+  useEffect(() => {
+    if (noSync || !('serviceWorker' in navigator)) return;
+
+    const flushViaServiceWorker = async () => {
+      try {
+        let reg = await navigator.serviceWorker.ready;
+        let ctrl = reg?.active;
+        if (ctrl === null || ctrl === undefined) return;
+        let accessToken = getAccessTokenRecord()?.token;
+        if (accessToken === undefined) return;
+        let cfg = buildRemoteConfig(slug, defaultBranch);
+        let localStore = getRepoStore(slug);
+        let pending = localStore
+          .listNotes()
+          .map((meta) => localStore.loadNote(meta.id))
+          .filter((note): note is NoteDoc => note !== null)
+          .filter((note) => note.lastSyncedHash !== hashText(note.text))
+          .map((note) => ({
+            path: note.path,
+            text: note.text,
+            baseSha: note.lastRemoteSha,
+            message: 'vibenote: background sync',
+          }));
+        if (pending.length === 0) return;
+        ctrl.postMessage({
+          type: 'vibenote-flush',
+          payload: {
+            token: accessToken,
+            config: cfg,
+            files: pending,
+          },
+        });
+      } catch (error) {
+        console.warn('vibenote: background flush failed', error);
+      }
+    };
+
+    const onPageHide = () => {
+      void flushViaServiceWorker();
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') void flushViaServiceWorker();
+    };
+    window.addEventListener('pagehide', onPageHide);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.removeEventListener('pagehide', onPageHide);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [slug, noSync, defaultBranch]);
 
   return { autosync, setAutosync, scheduleAutoSync, performSync, syncing };
 }

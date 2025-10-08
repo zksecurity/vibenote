@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { RepoMetadata } from '../lib/backend';
-import type { Route } from '../ui/routing';
+import type { RepoRoute, Route } from '../ui/routing';
 import { LocalStore, markRepoLinked, recordAutoSyncRun, setLastActiveNoteId } from '../storage/local';
 
 type RemoteFile = { path: string; text: string; sha: string };
@@ -620,7 +620,7 @@ describe('useRepoData', () => {
     const { result, rerender } = renderHook(
       (props: {
         slug: string;
-        route: Route;
+        route: RepoRoute;
         recordRecent: typeof recordRecent;
         setActivePath: typeof dummy;
       }) => {
