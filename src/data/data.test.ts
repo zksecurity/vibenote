@@ -120,6 +120,8 @@ function createDeferred<T>() {
   return { promise, resolve, reject } as const;
 }
 
+function dummy() {}
+
 describe('useRepoData', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -153,8 +155,10 @@ describe('useRepoData', () => {
 
   // New workspaces should immediately surface the seeded welcome note without contacting remote APIs.
   test('seeds welcome note for a new workspace and keeps it editable', async () => {
-    const onRecordRecent = vi.fn();
-    const { result } = renderHook(() => useRepoData({ slug: 'new', route: { kind: 'new' }, onRecordRecent }));
+    const recordRecent = vi.fn();
+    const { result } = renderHook(() =>
+      useRepoData({ slug: 'new', route: { kind: 'new' }, recordRecent, setActivePath: dummy })
+    );
 
     expect(result.current.state.canEdit).toBe(true);
     expect(result.current.state.canSync).toBe(false);
@@ -169,7 +173,7 @@ describe('useRepoData', () => {
 
     await waitFor(() => expect(result.current.state.doc?.id).toBe(welcomeId));
     expect(result.current.state.doc?.text).toContain('Welcome to VibeNote');
-    expect(onRecordRecent).not.toHaveBeenCalled();
+    expect(recordRecent).not.toHaveBeenCalled();
   });
 
   test('activates the route note path when the file exists locally', async () => {
@@ -189,9 +193,9 @@ describe('useRepoData', () => {
     });
     setRepoMetadata(writableMeta);
 
-    const onRecordRecent = vi.fn();
+    const recordRecent = vi.fn();
     const route: Route = { kind: 'repo', owner: 'acme', repo: 'docs', notePath: target.path };
-    const { result } = renderHook(() => useRepoData({ slug, route, onRecordRecent }));
+    const { result } = renderHook(() => useRepoData({ slug, route, recordRecent, setActivePath: dummy }));
 
     await waitFor(() => expect(result.current.state.activeId).toBe(targetId));
     expect(result.current.state.doc?.path).toBe(target.path);
@@ -207,9 +211,9 @@ describe('useRepoData', () => {
       sha: 'sha-intro',
     });
 
-    const onRecordRecent = vi.fn();
+    const recordRecent = vi.fn();
     const route: Route = { kind: 'repo', owner: 'acme', repo: 'docs', notePath: 'guides/Intro.md' };
-    const { result } = renderHook(() => useRepoData({ slug, route, onRecordRecent }));
+    const { result } = renderHook(() => useRepoData({ slug, route, recordRecent, setActivePath: dummy }));
 
     await waitFor(() => expect(result.current.state.activeId).toBe('guides/Intro.md'));
     await waitFor(() => expect(result.current.state.doc?.text).toBe('# Intro'));
@@ -219,7 +223,7 @@ describe('useRepoData', () => {
   // Writable repos should sync on demand and reflect updated auth/session state without losing edits.
   test('syncing a linked repo updates storage, reports status, and refreshes auth state', async () => {
     const slug = 'acme/docs';
-    const onRecordRecent = vi.fn();
+    const recordRecent = vi.fn();
 
     const seededUuid = '00000000-0000-0000-0000-000000000001';
     const uuidSpy = vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValueOnce(seededUuid);
@@ -248,7 +252,12 @@ describe('useRepoData', () => {
     });
 
     const { result } = renderHook(() =>
-      useRepoData({ slug, route: { kind: 'repo', owner: 'acme', repo: 'docs' }, onRecordRecent })
+      useRepoData({
+        slug,
+        route: { kind: 'repo', owner: 'acme', repo: 'docs' },
+        recordRecent,
+        setActivePath: dummy,
+      })
     );
 
     await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
@@ -258,7 +267,7 @@ describe('useRepoData', () => {
     expect(result.current.state.canSync).toBe(true);
 
     await waitFor(() =>
-      expect(onRecordRecent).toHaveBeenCalledWith(expect.objectContaining({ slug, connected: true }))
+      expect(recordRecent).toHaveBeenCalledWith(expect.objectContaining({ slug, connected: true }))
     );
 
     await act(async () => {
@@ -304,7 +313,7 @@ describe('useRepoData', () => {
   // Read-only repos should list remote notes and refresh on selection.
   test('read-only repos surface notes and refresh on selection', async () => {
     const slug = 'octo/wiki';
-    const onRecordRecent = vi.fn();
+    const recordRecent = vi.fn();
 
     mockGetSessionToken.mockReturnValue(null);
     setRepoMetadata(readOnlyMeta);
@@ -318,7 +327,12 @@ describe('useRepoData', () => {
     );
 
     const { result } = renderHook(() =>
-      useRepoData({ slug, route: { kind: 'repo', owner: 'octo', repo: 'wiki' }, onRecordRecent })
+      useRepoData({
+        slug,
+        route: { kind: 'repo', owner: 'octo', repo: 'wiki' },
+        recordRecent,
+        setActivePath: dummy,
+      })
     );
 
     await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
@@ -333,7 +347,7 @@ describe('useRepoData', () => {
     expect(result.current.state.doc).toBeUndefined();
 
     await waitFor(() =>
-      expect(onRecordRecent).toHaveBeenCalledWith(expect.objectContaining({ slug, connected: false }))
+      expect(recordRecent).toHaveBeenCalledWith(expect.objectContaining({ slug, connected: false }))
     );
 
     await act(async () => {
@@ -360,7 +374,7 @@ describe('useRepoData', () => {
 
   test('read-only repos list README without auto-selecting it', async () => {
     const slug = 'octo/wiki';
-    const onRecordRecent = vi.fn();
+    const recordRecent = vi.fn();
 
     mockGetSessionToken.mockReturnValue(null);
     setRepoMetadata(readOnlyMeta);
@@ -377,7 +391,12 @@ describe('useRepoData', () => {
     );
 
     const { result } = renderHook(() =>
-      useRepoData({ slug, route: { kind: 'repo', owner: 'octo', repo: 'wiki' }, onRecordRecent })
+      useRepoData({
+        slug,
+        route: { kind: 'repo', owner: 'octo', repo: 'wiki' },
+        recordRecent,
+        setActivePath: dummy,
+      })
     );
 
     await waitFor(() => expect(result.current.state.notes.length).toBe(2));
@@ -394,7 +413,7 @@ describe('useRepoData', () => {
 
   test('linked repos focus README after initial import', async () => {
     const slug = 'acme/docs';
-    const onRecordRecent = vi.fn();
+    const recordRecent = vi.fn();
 
     mockGetSessionToken.mockReturnValue('session-token');
     mockGetSessionUser.mockReturnValue({
@@ -421,7 +440,12 @@ describe('useRepoData', () => {
       .mockReturnValueOnce('00000000-0000-0000-0000-000000000222');
 
     const { result } = renderHook(() =>
-      useRepoData({ slug, route: { kind: 'repo', owner: 'acme', repo: 'docs' }, onRecordRecent })
+      useRepoData({
+        slug,
+        route: { kind: 'repo', owner: 'acme', repo: 'docs' },
+        recordRecent,
+        setActivePath: dummy,
+      })
     );
 
     await waitFor(() => expect(result.current.state.notes.length).toBe(2));
@@ -436,7 +460,7 @@ describe('useRepoData', () => {
   // During the repo access check, the active document should never flicker away in the UI.
   test('doc remains loaded while repo access resolves', async () => {
     const slug = 'acme/docs';
-    const onRecordRecent = vi.fn();
+    const recordRecent = vi.fn();
 
     const seededUuid = '00000000-0000-0000-0000-000000000042';
     const uuidSpy = vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValueOnce(seededUuid);
@@ -463,7 +487,8 @@ describe('useRepoData', () => {
       const value = useRepoData({
         slug,
         route: { kind: 'repo', owner: 'acme', repo: 'docs' },
-        onRecordRecent,
+        recordRecent,
+        setActivePath: dummy,
       });
       seenDocIds.push(value.state.doc?.id);
       seenNeedsInstall.push(value.state.needsInstall);
@@ -488,7 +513,7 @@ describe('useRepoData', () => {
   // Autosync should run quietly in the background without flickering UI state.
   test('autosync schedules background sync without surfacing UI noise', async () => {
     const slug = 'acme/docs';
-    const onRecordRecent = vi.fn();
+    const recordRecent = vi.fn();
 
     const uuidSpy = vi
       .spyOn(globalThis.crypto, 'randomUUID')
@@ -517,7 +542,12 @@ describe('useRepoData', () => {
     const setTimeoutSpy = vi.spyOn(window, 'setTimeout');
 
     const { result } = renderHook(() =>
-      useRepoData({ slug, route: { kind: 'repo', owner: 'acme', repo: 'docs' }, onRecordRecent })
+      useRepoData({
+        slug,
+        route: { kind: 'repo', owner: 'acme', repo: 'docs' },
+        recordRecent,
+        setActivePath: dummy,
+      })
     );
 
     await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
@@ -558,7 +588,7 @@ describe('useRepoData', () => {
 
   // Switching to another repo should swap all derived state without leaking the previous doc.
   test('switching repositories replaces local state without leaking the previous doc', async () => {
-    const onRecordRecent = vi.fn();
+    const recordRecent = vi.fn();
 
     const slugA = 'acme/docs';
     const slugB = 'acme/wiki';
@@ -588,13 +618,25 @@ describe('useRepoData', () => {
     const seenNeedsInstall: boolean[] = [];
 
     const { result, rerender } = renderHook(
-      (props: { slug: string; route: Route; onRecordRecent: typeof onRecordRecent }) => {
+      (props: {
+        slug: string;
+        route: Route;
+        recordRecent: typeof recordRecent;
+        setActivePath: typeof dummy;
+      }) => {
         const value = useRepoData(props);
         seenDocIds.push(value.state.doc?.id);
         seenNeedsInstall.push(value.state.needsInstall);
         return value;
       },
-      { initialProps: { slug: slugA, route: { kind: 'repo', owner: 'acme', repo: 'docs' }, onRecordRecent } }
+      {
+        initialProps: {
+          slug: slugA,
+          route: { kind: 'repo', owner: 'acme', repo: 'docs' },
+          recordRecent,
+          setActivePath: dummy,
+        },
+      }
     );
 
     await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
@@ -606,7 +648,12 @@ describe('useRepoData', () => {
     await waitFor(() => expect(result.current.state.doc?.id).toBe(noteA));
 
     act(() => {
-      rerender({ slug: slugB, route: { kind: 'repo', owner: 'acme', repo: 'wiki' }, onRecordRecent });
+      rerender({
+        slug: slugB,
+        route: { kind: 'repo', owner: 'acme', repo: 'wiki' },
+        recordRecent,
+        setActivePath: dummy,
+      });
     });
 
     await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
@@ -624,7 +671,7 @@ describe('useRepoData', () => {
   // The needs-install flow should keep the doc visible and toggle the banner off after re-auth.
   test('needs-install flow preserves the current doc while awaiting GitHub access', async () => {
     const slug = 'acme/private';
-    const onRecordRecent = vi.fn();
+    const recordRecent = vi.fn();
 
     const store = new LocalStore(slug);
     const noteId = store.createNote('Secret', 'classified');
@@ -657,7 +704,8 @@ describe('useRepoData', () => {
       const value = useRepoData({
         slug,
         route: { kind: 'repo', owner: 'acme', repo: 'private' },
-        onRecordRecent,
+        recordRecent,
+        setActivePath: dummy,
       });
       seenNeedsInstall.push(value.state.needsInstall);
       return value;
@@ -688,7 +736,7 @@ describe('useRepoData', () => {
   // Switching notes in read-only mode should respect loading states without toggling install banners.
   test('read-only selection keeps install state stable', async () => {
     const slug = 'octo/wiki';
-    const onRecordRecent = vi.fn();
+    const recordRecent = vi.fn();
 
     mockGetSessionToken.mockReturnValue(null);
     setRepoMetadata(readOnlyMeta);
@@ -712,7 +760,8 @@ describe('useRepoData', () => {
       const value = useRepoData({
         slug,
         route: { kind: 'repo', owner: 'octo', repo: 'wiki' },
-        onRecordRecent,
+        recordRecent,
+        setActivePath: dummy,
       });
       seenNeedsInstall.push(value.state.needsInstall);
       return value;
@@ -737,7 +786,7 @@ describe('useRepoData', () => {
   // Signing out should clear local data and disable syncing.
   test('signing out clears local state and disables syncing', async () => {
     const slug = 'acme/docs';
-    const onRecordRecent = vi.fn();
+    const recordRecent = vi.fn();
 
     const store = new LocalStore(slug);
     const noteId = store.createNote('Seed', 'content');
@@ -753,7 +802,12 @@ describe('useRepoData', () => {
     mockSignOutFromGitHubApp.mockResolvedValue(undefined);
 
     const { result } = renderHook(() =>
-      useRepoData({ slug, route: { kind: 'repo', owner: 'acme', repo: 'docs' }, onRecordRecent })
+      useRepoData({
+        slug,
+        route: { kind: 'repo', owner: 'acme', repo: 'docs' },
+        recordRecent,
+        setActivePath: dummy,
+      })
     );
 
     await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));

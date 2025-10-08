@@ -13,7 +13,7 @@ type RepoViewProps = {
   slug: string;
   route: Route;
   navigate: (route: Route, options?: { replace?: boolean }) => void;
-  onRecordRecent: (entry: {
+  recordRecent: (entry: {
     slug: string;
     owner?: string;
     repo?: string;
@@ -28,16 +28,16 @@ export function RepoView(props: RepoViewProps) {
   return <RepoViewInner key={props.slug} {...props} />;
 }
 
-function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps) {
+function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
   // Data layer exposes repo-backed state and the high-level actions the UI needs.
-  const onActiveNotePathChange = useCallback((nextPath: string | undefined) => {
+  const setActivePath = useCallback((nextPath: string | undefined) => {
     if (route.kind !== 'repo') return;
     const { owner, repo, notePath } = route;
     if (pathsEqual(notePath, nextPath)) return;
     navigate({ kind: 'repo', owner, repo, notePath: nextPath }, { replace: true });
   }, []);
 
-  const { state, actions } = useRepoData({ slug, route, onRecordRecent, onActiveNotePathChange });
+  const { state, actions } = useRepoData({ slug, route, recordRecent, setActivePath });
   const {
     hasSession,
     user,
@@ -396,7 +396,7 @@ function RepoViewInner({ slug, route, navigate, onRecordRecent }: RepoViewProps)
           route={route}
           slug={slug}
           navigate={navigate}
-          onRecordRecent={onRecordRecent}
+          onRecordRecent={recordRecent}
           onClose={() => setShowSwitcher(false)}
         />
       )}

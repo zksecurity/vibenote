@@ -107,17 +107,25 @@ type RepoDataActions = {
 type RepoDataInputs = {
   slug: string;
   route: Route;
-  onRecordRecent: (entry: {
+  recordRecent: (entry: {
     slug: string;
     owner?: string;
     repo?: string;
     title?: string;
     connected?: boolean;
   }) => void;
-  onActiveNotePathChange?: (notePath: string | undefined) => void;
+  setActivePath: (notePath: string | undefined) => void;
 };
 
-function useRepoData({ slug, route, onRecordRecent, onActiveNotePathChange }: RepoDataInputs): {
+/**
+ * Data layer entry point.
+ *
+ * Invariants when calling this hook:
+ * - `slug` and `route` are always in sync, and never change througout the component lifetime
+ * - `recordRecent` and `setActivePath` are stable as well
+ * - none of these will be put in dependency arrays
+ */
+function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInputs): {
   state: RepoDataState;
   actions: RepoDataActions;
 } {
@@ -172,7 +180,7 @@ function useRepoData({ slug, route, onRecordRecent, onActiveNotePathChange }: Re
     canEdit,
   });
 
-  // Derive the notes/folders from whichever source is powering the tree.
+  // Derive the notes/folders/doc from whichever source is powering the tree.
   let notes = isReadOnly ? readOnlyNotes : localNotes;
   let folders = isReadOnly ? readOnlyFolders : localFolders;
 
@@ -195,19 +203,22 @@ function useRepoData({ slug, route, onRecordRecent, onActiveNotePathChange }: Re
   // EFFECTS
   // please avoid adding more effects here, keep logic clean/separated
 
+  // Keep the URL in sync with the active note path (or clear it when no note is active).
+  // E.g. user selects a note -> URL updates
+  // TODO this should obviously happen inside `useActiveId`, because is needs to _always_ run when
+  // `setActiveId` is called
   useEffect(() => {
-    if (!onActiveNotePathChange) return;
     if (route.kind !== 'repo') {
-      onActiveNotePathChange(undefined);
+      setActivePath(undefined);
       return;
     }
     if (activeNotePath === undefined) {
       if (desiredNotePath !== undefined) return;
-      onActiveNotePathChange(undefined);
+      setActivePath(undefined);
       return;
     }
-    onActiveNotePathChange(activeNotePath);
-  }, [onActiveNotePathChange, route, activeNotePath, desiredNotePath]);
+    setActivePath(activeNotePath);
+  }, [route, activeNotePath, desiredNotePath]);
 
   // Fetch read-only note content whenever the selection changes.
   useEffect(() => {
@@ -222,16 +233,18 @@ function useRepoData({ slug, route, onRecordRecent, onActiveNotePathChange }: Re
   }, [isReadOnly, activeId, readOnlyDoc, selectReadOnlyDoc]);
 
   // Remember recently opened repos once we know the current repo is reachable.
+  // TODO this shouldn't a useEffect, the only place a repo ever becomes reachable is after
+  // fetching metadata, so just record it there
   useEffect(() => {
     if (route.kind !== 'repo') return;
     if (repoAccess.level === 'none') return;
-    onRecordRecent({
+    recordRecent({
       slug,
       owner: route.owner,
       repo: route.repo,
       connected: repoAccess.level === 'write' && linked,
     });
-  }, [slug, route, linked, onRecordRecent, repoAccess.level]);
+  }, [slug, route, linked, recordRecent, repoAccess.level]);
 
   let initialPullRef = useRef({ done: false });
 
@@ -275,6 +288,7 @@ function useRepoData({ slug, route, onRecordRecent, onActiveNotePathChange }: Re
   }, [route, repoAccess.level, linked, slug, canEdit, defaultBranch, desiredNotePath]);
 
   // Attempt a last-minute sync via the Service Worker so pending edits survive tab closure.
+  // TODO move this into `useSync`, and the syncing logic into our syncing library
   useEffect(() => {
     if (route.kind !== 'repo') return;
     if (!hasSession || !linked || slug === 'new' || !canEdit) return;
