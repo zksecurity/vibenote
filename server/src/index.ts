@@ -42,16 +42,18 @@ let corsOrigins = Array.from(new Set([...env.ALLOWED_ORIGINS, ...env.PUBLIC_VIEW
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
-app.use(
-  cors({
-    origin: (origin, cb) => {
-      if (!origin) return cb(null, true);
-      if (corsOrigins.includes(origin)) return cb(null, true);
-      return cb(new Error('CORS not allowed'));
-    },
-    credentials: true,
-  })
-);
+
+const corsMiddleware = cors({
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true);
+    if (corsOrigins.includes(origin)) return cb(null, true);
+    return cb(new Error('CORS not allowed'));
+  },
+  credentials: true,
+});
+
+app.use(corsMiddleware);
+app.options('*', corsMiddleware);
 
 app.get('/v1/healthz', (_req, res) => res.json({ ok: true }));
 
