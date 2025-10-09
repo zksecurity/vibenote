@@ -5,6 +5,9 @@ export type FileKind = 'markdown' | 'binary';
 
 const DEFAULT_MARKDOWN_MIME = 'text/markdown' as const;
 
+/**
+ * Backwards-compatible serialized format for file metadata
+ */
 type StoredFileMeta = {
   id: string;
   path: string;
@@ -15,6 +18,9 @@ type StoredFileMeta = {
   mime?: string;
 };
 
+/**
+ * Backwards-compatible serialized format for stored files.
+ */
 type StoredFile = StoredFileMeta & {
   text: string;
   lastRemoteSha?: string;
@@ -42,7 +48,50 @@ export type NoteDoc = NoteMeta & {
 
 export type RepoFileDoc =
   | NoteDoc
-  | (FileMeta & { kind: 'binary'; text?: undefined; binaryBase64: string; lastRemoteSha?: string; lastSyncedHash?: string });
+  | (FileMeta & {
+      kind: 'binary';
+      text?: undefined;
+      binaryBase64: string;
+      lastRemoteSha?: string;
+      lastSyncedHash?: string;
+    });
+
+function serializeIndex(index: FileMeta[]): string {
+  // important: written metadata stays compatible with `StoredFileMeta`
+  return JSON.stringify(index satisfies StoredFileMeta[]);
+}
+function deserializeIndex(raw: string | null): FileMeta[] {
+  if (raw === null) return [];
+  try {
+    let parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(normalizeMeta).filter((m) => m !== null);
+  } catch {
+    return [];
+  }
+}
+
+function serializeFile(doc: RepoFileDoc): string {
+  // important: written files stay compatible with `StoredFile`
+  return JSON.stringify(toStoredFile(doc) satisfies StoredFile);
+}
+function deserializeFile(raw: string | null): RepoFileDoc | null {
+  if (raw === null) return null;
+  // important: read files stay compatible with `StoredFile`
+  try {
+    let parsed = JSON.parse(raw);
+    return normalizeFile(parsed);
+  } catch {
+    return null;
+  }
+}
+/**
+ * @deprecated refactor to use `deserializeFile()` instead
+ */
+function deserializeNote(raw: string | null): NoteDoc | null {
+  let doc = deserializeFile(raw);
+  return doc?.kind === 'markdown' ? doc : null;
+}
 
 export { debugLog };
 
@@ -247,31 +296,19 @@ export class LocalStore {
 
   loadNote(id: string): NoteDoc | null {
     let raw = localStorage.getItem(this.noteKey(id));
-    if (!raw) return null;
-    try {
-      let doc = normalizeDoc(JSON.parse(raw));
-      return doc && doc.kind === 'markdown' ? (doc as NoteDoc) : null;
-    } catch {
-      return null;
-    }
+    return deserializeNote(raw);
   }
 
   loadFile(id: string): RepoFileDoc | null {
     let raw = localStorage.getItem(this.noteKey(id));
-    if (!raw) return null;
-    try {
-      return normalizeDoc(JSON.parse(raw));
-    } catch {
-      return null;
-    }
+    return deserializeFile(raw);
   }
 
   saveNote(id: string, text: string) {
     let doc = this.loadNote(id);
     if (!doc) return;
     let updatedAt = Date.now();
-    let next: NoteDoc = { ...doc, text, updatedAt };
-    localStorage.setItem(this.noteKey(id), JSON.stringify(next));
+    localStorage.setItem(this.noteKey(id), serializeFile({ ...doc, text, updatedAt }));
     debugLog(this.slug, 'saveNote', { id, path: doc.path, updatedAt });
     this.touchIndex(id, { updatedAt });
     emitRepoChange(this.slug);
@@ -295,8 +332,8 @@ export class LocalStore {
     let doc: NoteDoc = { ...meta, text };
     let idx = this.loadIndex();
     idx.push(meta);
-    localStorage.setItem(this.indexKey, JSON.stringify(idx));
-    localStorage.setItem(this.noteKey(id), JSON.stringify(doc));
+    localStorage.setItem(this.indexKey, serializeIndex(idx));
+    localStorage.setItem(this.noteKey(id), serializeFile(doc));
     this.index = idx;
     this.addFolder(normDir);
     debugLog(this.slug, 'createNote', { id, path, title: displayTitle });
@@ -328,20 +365,8 @@ export class LocalStore {
     };
     let idx = this.loadIndex();
     idx.push(meta);
-    localStorage.setItem(this.indexKey, JSON.stringify(idx));
-    const stored: StoredFile = {
-      id,
-      path: normPath,
-      title,
-      dir,
-      updatedAt: now,
-      kind: 'binary',
-      mime: doc.mime,
-      text: base64,
-      lastRemoteSha: undefined,
-      lastSyncedHash: undefined,
-    };
-    localStorage.setItem(this.noteKey(id), JSON.stringify({ ...stored, binaryBase64: base64 }));
+    localStorage.setItem(this.indexKey, serializeIndex(idx));
+    localStorage.setItem(this.noteKey(id), serializeFile(doc));
     this.index = idx;
     ensureFolderForSlug(this.slug, dir);
     debugLog(this.slug, 'createBinary', { id, path: normPath });
@@ -382,7 +407,7 @@ export class LocalStore {
       delete next.lastRemoteSha;
       delete next.lastSyncedHash;
     }
-    localStorage.setItem(this.noteKey(id), JSON.stringify(next));
+    localStorage.setItem(this.noteKey(id), serializeFile(next));
     this.touchIndex(id, { title: safe, path, dir: normDir, updatedAt });
     if (pathChanged) {
       recordRenameTombstone(this.slug, {
@@ -413,19 +438,7 @@ export class LocalStore {
       lastRemoteSha: undefined,
       lastSyncedHash: undefined,
     };
-    const stored: StoredFile = {
-      id,
-      path: toPath,
-      title: safeName,
-      dir: normDir,
-      updatedAt,
-      kind: 'binary',
-      mime: next.mime,
-      text: next.binaryBase64,
-      lastRemoteSha: undefined,
-      lastSyncedHash: undefined,
-    };
-    localStorage.setItem(this.noteKey(id), JSON.stringify({ ...stored, binaryBase64: next.binaryBase64 }));
+    localStorage.setItem(this.noteKey(id), serializeFile(next));
     this.touchIndex(id, {
       title: safeName,
       path: toPath,
@@ -448,7 +461,7 @@ export class LocalStore {
   deleteNote(id: string) {
     let doc = this.loadFile(id);
     let idx = this.loadIndex().filter((n) => n.id !== id);
-    localStorage.setItem(this.indexKey, JSON.stringify(idx));
+    localStorage.setItem(this.indexKey, serializeIndex(idx));
     if (doc) {
       recordDeleteTombstone(this.slug, {
         path: doc.path,
@@ -518,7 +531,7 @@ export class LocalStore {
           lastSyncedHash: hashText(base64),
         };
         index.push(meta);
-        localStorage.setItem(this.noteKey(id), JSON.stringify(doc));
+        localStorage.setItem(this.noteKey(id), serializeFile(doc));
         continue;
       }
       let text = file.text ?? '';
@@ -539,9 +552,9 @@ export class LocalStore {
         lastSyncedHash: hashText(text),
       };
       index.push(meta);
-      localStorage.setItem(this.noteKey(id), JSON.stringify(doc));
+      localStorage.setItem(this.noteKey(id), serializeFile(doc));
     }
-    localStorage.setItem(this.indexKey, JSON.stringify(index));
+    localStorage.setItem(this.indexKey, serializeIndex(index));
     localStorage.setItem(this.foldersKey, JSON.stringify(Array.from(folderSet).sort()));
     this.index = index;
     debugLog(this.slug, 'replaceWithRemote', { count: files.length });
@@ -646,7 +659,7 @@ export class LocalStore {
     let next: NoteDoc = { ...doc, dir: normDir, path: toPath, updatedAt };
     delete next.lastRemoteSha;
     delete next.lastSyncedHash;
-    localStorage.setItem(this.noteKey(id), JSON.stringify(next));
+    localStorage.setItem(this.noteKey(id), serializeFile(next));
     this.touchIndex(id, { dir: normDir, path: toPath, updatedAt });
     recordRenameTombstone(this.slug, {
       from: fromPath,
@@ -672,19 +685,7 @@ export class LocalStore {
 
   private loadIndex(): FileMeta[] {
     let raw = localStorage.getItem(this.indexKey);
-    if (!raw) return [];
-    try {
-      let parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return [];
-      let result: FileMeta[] = [];
-      for (let entry of parsed) {
-        let meta = normalizeMeta(entry);
-        if (meta) result.push(meta);
-      }
-      return result;
-    } catch {
-      return [];
-    }
+    return deserializeIndex(raw);
   }
 
   private touchIndex(id: string, patch: Partial<FileMeta>) {
@@ -694,7 +695,7 @@ export class LocalStore {
       let updated = normalizeMeta({ ...idx[i]!, ...patch }) ?? idx[i]!;
       idx[i] = updated;
     }
-    localStorage.setItem(this.indexKey, JSON.stringify(idx));
+    localStorage.setItem(this.indexKey, serializeIndex(idx));
     this.index = idx;
     debugLog(this.slug, 'touchIndex', { id, patch });
   }
@@ -855,21 +856,7 @@ export function markSynced(slug: string, id: string, patch: { remoteSha?: string
   let next: RepoFileDoc = { ...doc };
   if (patch.remoteSha !== undefined) next.lastRemoteSha = patch.remoteSha;
   if (patch.syncedHash !== undefined) next.lastSyncedHash = patch.syncedHash;
-  const stored: StoredFile = {
-    id: next.id,
-    path: next.path,
-    title: next.title,
-    dir: next.dir,
-    updatedAt: next.updatedAt,
-    kind: next.kind,
-    mime: next.mime,
-    text: next.kind === 'binary' ? next.binaryBase64 : next.text,
-    lastRemoteSha: next.lastRemoteSha,
-    lastSyncedHash: next.lastSyncedHash,
-  };
-  const serialized =
-    next.kind === 'binary' ? { ...stored, binaryBase64: next.binaryBase64 } : stored;
-  localStorage.setItem(key, JSON.stringify(serialized));
+  localStorage.setItem(key, serializeFile(next));
   debugLog(slug, 'markSynced', { id, patch });
   emitRepoChange(slug);
 }
@@ -880,7 +867,7 @@ export function updateNoteText(slug: string, id: string, text: string) {
   if (!doc || doc.kind !== 'markdown') return;
   let updatedAt = Date.now();
   let next: NoteDoc = { ...doc, text, updatedAt };
-  localStorage.setItem(key, JSON.stringify(next));
+  localStorage.setItem(key, serializeFile(next));
   touchIndexUpdatedAt(slug, id, updatedAt, { kind: 'markdown', mime: DEFAULT_MARKDOWN_MIME });
   debugLog(slug, 'updateNoteText', { id, updatedAt });
   emitRepoChange(slug);
@@ -909,19 +896,7 @@ export function updateBinaryContent(slug: string, id: string, base64: string, mi
     };
   }
   next.lastSyncedHash = hashText(base64);
-  const stored: StoredFile = {
-    id: next.id,
-    path: next.path,
-    title: next.title,
-    dir: next.dir,
-    updatedAt,
-    kind: next.kind,
-    mime: next.mime,
-    text: base64,
-    lastRemoteSha: next.lastRemoteSha,
-    lastSyncedHash: next.lastSyncedHash,
-  };
-  localStorage.setItem(key, JSON.stringify({ ...stored, binaryBase64: base64 }));
+  localStorage.setItem(key, serializeFile(next));
   touchIndexUpdatedAt(slug, id, updatedAt, { kind: next.kind, mime: next.mime });
   debugLog(slug, 'updateBinary', { id, updatedAt });
   emitRepoChange(slug);
@@ -949,37 +924,37 @@ export function findFileByPath(slug: string, path: string): { id: string; doc: R
   return null;
 }
 
-export function findByRemoteSha(slug: string, remoteSha: string | undefined): { id: string; doc: NoteDoc } | null {
+// TODO why does this return only NoteDocs?
+export function findByRemoteSha(
+  slug: string,
+  remoteSha: string | undefined
+): { id: string; doc: NoteDoc } | null {
   if (!remoteSha) return null;
   let idx = loadIndexForSlug(slug);
   for (let note of idx) {
     let dr = localStorage.getItem(`${repoKey(slug, 'note')}:${note.id}`);
-    if (!dr) continue;
-    try {
-      let doc = JSON.parse(dr) as NoteDoc;
-      if (doc.lastRemoteSha === remoteSha) {
-        return { id: note.id, doc };
-      }
-    } catch {
-      continue;
+    let doc = deserializeNote(dr);
+    if (doc === null) continue;
+    if (doc.lastRemoteSha === remoteSha) {
+      return { id: note.id, doc };
     }
   }
   return null;
 }
 
-export function findBySyncedHash(slug: string, syncedHash: string | undefined): { id: string; doc: NoteDoc } | null {
+// TODO why does this return only NoteDocs?
+export function findBySyncedHash(
+  slug: string,
+  syncedHash: string | undefined
+): { id: string; doc: NoteDoc } | null {
   if (!syncedHash) return null;
   let idx = loadIndexForSlug(slug);
   for (let note of idx) {
     let dr = localStorage.getItem(`${repoKey(slug, 'note')}:${note.id}`);
-    if (!dr) continue;
-    try {
-      let doc = JSON.parse(dr) as NoteDoc;
-      if (doc.lastSyncedHash === syncedHash) {
-        return { id: note.id, doc };
-      }
-    } catch {
-      continue;
+    let doc = deserializeNote(dr);
+    if (doc === null) continue;
+    if (doc.lastSyncedHash === syncedHash) {
+      return { id: note.id, doc };
     }
   }
   return null;
@@ -992,14 +967,14 @@ export function moveNotePath(slug: string, id: string, toPath: string) {
   let updatedAt = Date.now();
   let nextDir = extractDir(toPath);
   let next: NoteDoc = { ...doc, path: toPath, dir: nextDir, updatedAt };
-  localStorage.setItem(key, JSON.stringify(next));
+  localStorage.setItem(key, serializeFile(next));
   let idx = loadIndexForSlug(slug);
   let j = idx.findIndex((n) => n.id === id);
   if (j >= 0) {
     let merged = normalizeMeta({ ...idx[j]!, path: toPath, dir: nextDir, updatedAt });
     if (merged) idx[j] = merged;
   }
-  localStorage.setItem(repoKey(slug, 'index'), JSON.stringify(idx));
+  localStorage.setItem(repoKey(slug, 'index'), serializeIndex(idx));
   rebuildFolderIndex(slug);
   debugLog(slug, 'moveNotePath', { id, toPath });
   emitRepoChange(slug);
@@ -1007,19 +982,7 @@ export function moveNotePath(slug: string, id: string, toPath: string) {
 
 function loadIndexForSlug(slug: string): FileMeta[] {
   let raw = localStorage.getItem(repoKey(slug, 'index'));
-  if (!raw) return [];
-  try {
-    let parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    let list: FileMeta[] = [];
-    for (let entry of parsed) {
-      let meta = normalizeMeta(entry);
-      if (meta) list.push(meta);
-    }
-    return list;
-  } catch {
-    return [];
-  }
+  return deserializeIndex(raw);
 }
 
 function rebuildFolderIndex(slug: string) {
@@ -1031,10 +994,7 @@ function rebuildFolderIndex(slug: string) {
     if (dir === '') continue;
     for (let ancestor of ancestorsOf(dir)) folderSet.add(ancestor);
   }
-  localStorage.setItem(
-    repoKey(slug, FOLDERS_SUFFIX),
-    JSON.stringify(Array.from(folderSet).sort())
-  );
+  localStorage.setItem(repoKey(slug, FOLDERS_SUFFIX), JSON.stringify(Array.from(folderSet).sort()));
 }
 
 function loadFoldersForSlug(slug: string): string[] {
@@ -1056,14 +1016,14 @@ function touchIndexUpdatedAt(slug: string, id: string, updatedAt: number, patch?
     let merged = normalizeMeta({ ...idx[i]!, updatedAt, ...patch });
     if (merged) idx[i] = merged;
   }
-  localStorage.setItem(repoKey(slug, 'index'), JSON.stringify(idx));
+  localStorage.setItem(repoKey(slug, 'index'), serializeIndex(idx));
 }
 
 function loadFileForKey(slug: string, id: string): RepoFileDoc | null {
   let raw = localStorage.getItem(`${repoKey(slug, 'note')}:${id}`);
   if (!raw) return null;
   try {
-    return normalizeDoc(JSON.parse(raw));
+    return normalizeFile(JSON.parse(raw));
   } catch {
     return null;
   }
@@ -1114,9 +1074,10 @@ function normalizeMeta(raw: unknown): FileMeta | null {
   let updatedAt =
     typeof stored.updatedAt === 'number' && Number.isFinite(stored.updatedAt) ? stored.updatedAt : Date.now();
   let inferredKind =
-    stored.kind === 'markdown' || stored.kind === 'binary' ? stored.kind : inferKindFromPath(path) ?? 'markdown';
-  let baseTitle =
-    typeof stored.title === 'string' && stored.title.trim() ? stored.title : basename(path);
+    stored.kind === 'markdown' || stored.kind === 'binary'
+      ? stored.kind
+      : inferKindFromPath(path) ?? 'markdown';
+  let baseTitle = typeof stored.title === 'string' && stored.title.trim() ? stored.title : basename(path);
   if (inferredKind === 'markdown' && baseTitle.toLowerCase().endsWith('.md')) {
     baseTitle = baseTitle.replace(/\.md$/i, '');
   }
@@ -1124,26 +1085,39 @@ function normalizeMeta(raw: unknown): FileMeta | null {
     typeof stored.mime === 'string' && stored.mime.trim()
       ? stored.mime
       : inferredKind === 'markdown'
-        ? DEFAULT_MARKDOWN_MIME
-        : inferMimeFromPath(path);
+      ? DEFAULT_MARKDOWN_MIME
+      : inferMimeFromPath(path);
   return { id: stored.id, path, title: baseTitle, dir, updatedAt, kind: inferredKind, mime };
 }
 
-function normalizeDoc(raw: unknown): RepoFileDoc | null {
-  if (!raw || typeof raw !== 'object') return null;
+function toStoredFile(doc: RepoFileDoc): StoredFile {
+  return {
+    id: doc.id,
+    path: doc.path,
+    title: doc.title,
+    dir: doc.dir,
+    updatedAt: doc.updatedAt,
+    kind: doc.kind,
+    mime: doc.mime,
+    text: doc.kind === 'markdown' ? doc.text : doc.binaryBase64,
+    lastRemoteSha: doc.lastRemoteSha,
+    lastSyncedHash: doc.lastSyncedHash,
+  };
+}
+
+function normalizeFile(raw: unknown): RepoFileDoc | null {
+  if (raw === null || typeof raw !== 'object') return null;
   let stored = raw as StoredFile;
   let meta = normalizeMeta(stored);
   if (!meta) return null;
-  let lastRemoteSha =
-    typeof stored.lastRemoteSha === 'string' ? stored.lastRemoteSha : undefined;
-  let lastSyncedHash =
-    typeof stored.lastSyncedHash === 'string' ? stored.lastSyncedHash : undefined;
+  let lastRemoteSha = typeof stored.lastRemoteSha === 'string' ? stored.lastRemoteSha : undefined;
+  let lastSyncedHash = typeof stored.lastSyncedHash === 'string' ? stored.lastSyncedHash : undefined;
   let text =
     typeof stored.text === 'string'
       ? stored.text
       : typeof (raw as any)?.binaryBase64 === 'string'
-        ? String((raw as any).binaryBase64)
-        : '';
+      ? String((raw as any).binaryBase64)
+      : '';
   if (meta.kind === 'markdown') {
     return { ...meta, kind: 'markdown', text, lastRemoteSha, lastSyncedHash };
   }
