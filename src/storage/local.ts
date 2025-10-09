@@ -294,11 +294,7 @@ export class LocalStore {
   }
 
   listNotes(): NoteMeta[] {
-    // Defensive: refresh from storage to avoid returning stale data across tabs
-    // [VNDBG] This read is safe and avoids UI from showing entries that were removed elsewhere.
-    const snapshot = ensureRepoSubscribers(this.slug).snapshot;
-    this.index = snapshot.files;
-    return snapshot.notes.slice();
+    return this.listFiles().filter(isMarkdownMeta) as NoteMeta[];
   }
 
   listFiles(): FileMeta[] {
@@ -308,8 +304,8 @@ export class LocalStore {
   }
 
   loadNote(id: string): NoteDoc | null {
-    let raw = localStorage.getItem(this.noteKey(id));
-    return deserializeNote(raw);
+    let doc = this.loadFile(id);
+    return doc && isMarkdownDoc(doc) ? doc : null;
   }
 
   loadFile(id: string): RepoFileDoc | null {
@@ -348,44 +344,54 @@ export class LocalStore {
   }
 
   createNote(title = 'Untitled', text = '', dir: string = ''): string {
-    let id = crypto.randomUUID();
     let safe = ensureValidTitle(title || 'Untitled');
     let displayTitle = title.trim() || 'Untitled';
     let normDir = normalizeDir(dir);
     let path = joinPath(normDir, `${safe}.md`);
-    let updatedAt = Date.now();
-    let meta: NoteMeta = {
-      id,
+    return this.createFile({
       path,
       title: displayTitle,
       dir: normDir,
-      updatedAt,
+      content: text,
       kind: 'markdown',
       mime: DEFAULT_MARKDOWN_MIME,
-    };
-    debugLog(this.slug, 'createNote', { id, path, title: displayTitle });
-    this.persistNewFile(meta, text);
-    emitRepoChange(this.slug);
-    return id;
+    });
   }
 
   createBinaryFile(path: string, base64: string, mime?: string): string {
+    return this.createFile({
+      path,
+      content: base64,
+      kind: 'binary',
+      mime,
+    });
+  }
+
+  createFile(params: {
+    path: string;
+    content: string;
+    kind?: FileKind;
+    title?: string;
+    dir?: string;
+    mime?: string;
+  }): string {
     let id = crypto.randomUUID();
-    let normPath = path.replace(/^\/+/, '');
-    let dir = extractDir(normPath);
-    let title = basename(normPath);
-    let now = Date.now();
-    let meta: FileMeta = {
+    let normPath = normalizeFilePath(params.path);
+    let kind = params.kind ?? inferKindFromPath(normPath);
+    let dir = normalizeDir(params.dir ?? extractDir(normPath));
+    let title = params.title ?? (kind === 'markdown' ? basename(normPath).replace(/\.md$/i, '') : basename(normPath));
+    let mime = params.mime ?? (kind === 'markdown' ? DEFAULT_MARKDOWN_MIME : inferMimeFromPath(normPath));
+    let meta: RepoFileMeta = {
       id,
       path: normPath,
       title,
       dir,
-      updatedAt: now,
-      kind: 'binary',
-      mime: mime ?? inferMimeFromPath(normPath),
+      updatedAt: Date.now(),
+      kind,
+      mime,
     };
-    debugLog(this.slug, 'createBinary', { id, path: normPath });
-    this.persistNewFile(meta, base64);
+    debugLog(this.slug, 'createFile', { id, path: normPath, kind });
+    this.persistNewFile(meta, params.content);
     emitRepoChange(this.slug);
     return id;
   }
@@ -393,13 +399,20 @@ export class LocalStore {
   renameFile(path: string, newName: string): string | undefined {
     let meta = this.findMetaByPath(path);
     if (!meta) return undefined;
-    if (meta.kind === 'markdown') {
+    let doc = this.loadFile(meta.id);
+    if (!doc) return undefined;
+    if (isMarkdownDoc(doc)) {
       let trimmed = newName.replace(/\.md$/i, '');
       this.renameNote(meta.id, trimmed);
       let updated = this.loadNote(meta.id);
       return updated?.path;
     }
-    return this.renameBinary(meta.id, newName);
+    let safeName = ensureValidFileName(newName);
+    let normDir = normalizeDir(doc.dir);
+    let toPath = joinPath(normDir, safeName);
+    if (toPath === doc.path) return doc.path;
+    let next = this.applyRename(doc, { title: safeName, dir: normDir, path: toPath, mime: doc.mime }, 'renameFile');
+    return next.path;
   }
 
   private applyRename(
@@ -448,7 +461,7 @@ export class LocalStore {
   deleteFile(path: string): boolean {
     let meta = this.findMetaByPath(path);
     if (!meta) return false;
-    this.deleteNote(meta.id);
+    this.deleteFileById(meta.id);
     return true;
   }
 
@@ -461,18 +474,11 @@ export class LocalStore {
     this.applyRename(doc, { title: safe, dir: normDir, path, mime: DEFAULT_MARKDOWN_MIME }, 'renameNote');
   }
 
-  private renameBinary(id: string, newName: string): string | undefined {
-    let doc = this.loadFile(id);
-    if (!doc || !isBinaryDoc(doc)) return undefined;
-    let safeName = ensureValidFileName(newName);
-    let normDir = normalizeDir(doc.dir);
-    let toPath = joinPath(normDir, safeName);
-    if (toPath === doc.path) return doc.path;
-    let next = this.applyRename(doc, { title: safeName, dir: normDir, path: toPath, mime: doc.mime }, 'renameBinary');
-    return next.path;
+  deleteNote(id: string) {
+    this.deleteFileById(id);
   }
 
-  deleteNote(id: string) {
+  deleteFileById(id: string) {
     let doc = this.loadFile(id);
     let idx = this.loadIndex().filter((n) => n.id !== id);
     localStorage.setItem(this.indexKey, serializeIndex(idx));
@@ -486,7 +492,7 @@ export class LocalStore {
     localStorage.removeItem(this.noteKey(id));
     this.index = idx;
     rebuildFolderIndex(this.slug);
-    debugLog(this.slug, 'deleteNote', { id, path: doc?.path });
+    debugLog(this.slug, 'deleteFileById', { id, path: doc?.path });
     emitRepoChange(this.slug);
   }
 
