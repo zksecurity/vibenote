@@ -20,6 +20,7 @@ type ShareMetadata = {
 
 type ShareAsset = {
   originalPath: string;
+  normalizedPath: string;
   gistFile: string;
   encoding: 'utf8' | 'base64';
   mediaType?: string;
@@ -29,14 +30,19 @@ type SharedNote = {
   id: string;
   mode: ShareMode;
   gistId: string;
+  gistOwner: string;
   primaryFile: string;
   primaryEncoding: 'utf8' | 'base64';
   assets: ShareAsset[];
   title?: string;
   createdBy: ShareCreator;
   createdAt: string;
+  updatedAt: string;
   expiresAt?: string;
   isDisabled: boolean;
+  includeAssets: boolean;
+  sourceRepo: string;
+  sourcePath: string;
   metadata: ShareMetadata;
 };
 
@@ -74,9 +80,12 @@ function createShareStore(options: ShareStoreOptions): ShareStoreInstance {
       let parsed = JSON.parse(raw) as SharedNote[];
       if (Array.isArray(parsed)) {
         for (let item of parsed) {
-          if (item && typeof item.id === 'string' && item.id.trim().length > 0) {
-            records.set(item.id, item);
-          }
+      if (item && typeof item.id === 'string' && item.id.trim().length > 0) {
+        let normalized = upgradeSharedNote(item as Partial<SharedNote>);
+        if (normalized) {
+          records.set(normalized.id, normalized);
+        }
+      }
         }
       }
     } catch (error) {
@@ -179,4 +188,104 @@ function createShareStore(options: ShareStoreOptions): ShareStoreInstance {
     delete: remove,
     replaceAll,
   };
+}
+
+function upgradeSharedNote(record: Partial<SharedNote>): SharedNote | null {
+  let id = typeof record.id === 'string' ? record.id : null;
+  let gistId = typeof record.gistId === 'string' ? record.gistId : null;
+  let primaryFile = typeof record.primaryFile === 'string' ? record.primaryFile : null;
+  if (!id || !gistId || !primaryFile) {
+    return null;
+  }
+  let createdByUserId =
+    typeof record.createdBy?.userId === 'string' ? record.createdBy.userId : record.createdBy?.userId
+      ? String(record.createdBy.userId)
+      : null;
+  let createdByLogin =
+    typeof record.createdBy?.githubLogin === 'string'
+      ? record.createdBy.githubLogin
+      : record.createdBy?.githubLogin
+      ? String(record.createdBy.githubLogin)
+      : null;
+  if (!createdByUserId || !createdByLogin) {
+    return null;
+  }
+  let mode: ShareMode = record.mode === 'unlisted' ? 'unlisted' : 'unlisted';
+  let primaryEncoding: 'utf8' | 'base64' =
+    record.primaryEncoding === 'base64' ? 'base64' : 'utf8';
+  let assets = Array.isArray(record.assets)
+    ? record.assets
+        .map((asset) => upgradeShareAsset(asset as Partial<ShareAsset>))
+        .filter((value): value is ShareAsset => value !== null)
+    : [];
+  let createdAt =
+    typeof record.createdAt === 'string' && record.createdAt.length > 0
+      ? record.createdAt
+      : new Date().toISOString();
+  let updatedAt =
+    typeof record.updatedAt === 'string' && record.updatedAt.length > 0
+      ? record.updatedAt
+      : createdAt;
+  let expiresAt =
+    typeof record.expiresAt === 'string' && record.expiresAt.length > 0 ? record.expiresAt : undefined;
+  let isDisabled = record.isDisabled === true;
+  let includeAssets = record.includeAssets !== false;
+  let sourceRepo = typeof record.sourceRepo === 'string' ? record.sourceRepo : '';
+  let sourcePath = typeof record.sourcePath === 'string' ? record.sourcePath : '';
+  let gistOwner =
+    typeof record.gistOwner === 'string' && record.gistOwner.length > 0
+      ? record.gistOwner
+      : createdByLogin;
+  let metadata: ShareMetadata = {
+    noteBytes: record.metadata?.noteBytes ?? 0,
+    assetBytes: record.metadata?.assetBytes ?? 0,
+    snapshotSha: record.metadata?.snapshotSha,
+  };
+  return {
+    id,
+    mode,
+    gistId,
+    gistOwner,
+    primaryFile,
+    primaryEncoding,
+    assets,
+    title: typeof record.title === 'string' ? record.title : undefined,
+    createdBy: { userId: createdByUserId, githubLogin: createdByLogin },
+    createdAt,
+    updatedAt,
+    expiresAt,
+    isDisabled,
+    includeAssets,
+    sourceRepo,
+    sourcePath,
+    metadata,
+  };
+}
+
+function upgradeShareAsset(asset: Partial<ShareAsset>): ShareAsset | null {
+  let originalPath = typeof asset.originalPath === 'string' ? asset.originalPath : undefined;
+  if (!originalPath) return null;
+  let normalizedPath =
+    typeof asset.normalizedPath === 'string' && asset.normalizedPath.length > 0
+      ? asset.normalizedPath
+      : normalizeAssetPath(originalPath);
+  let gistFile = typeof asset.gistFile === 'string' ? asset.gistFile : undefined;
+  if (!gistFile) return null;
+  let encoding: 'utf8' | 'base64' = asset.encoding === 'base64' ? 'base64' : 'utf8';
+  return {
+    originalPath,
+    normalizedPath,
+    gistFile,
+    encoding,
+    mediaType: typeof asset.mediaType === 'string' ? asset.mediaType : undefined,
+  };
+}
+
+function normalizeAssetPath(value: string): string {
+  try {
+    let addr = value.split('?')[0]?.split('#')[0] ?? value;
+    return addr.replace(/^\.\//, '');
+  } catch {
+    return value;
+  }
 }

@@ -1,11 +1,11 @@
 // Modal for creating public share links for a single note.
 import { useEffect, useState } from 'react';
-import { createShareLink, type ShareLink } from '../lib/backend';
+import { createShareLink, disableShareLink, type ShareLink } from '../lib/backend';
 import { CloseIcon } from './RepoIcons';
 
 export type { ShareModalProps };
 export function ShareModal(props: ShareModalProps) {
-  let { repoSlug, notePath, noteTitle, onClose, onShared } = props;
+  let { repoSlug, notePath, noteTitle, noteText, share, onClose, onShared, onUnshared } = props;
   let [includeAssets, setIncludeAssets] = useState(true);
   let [expiryDate, setExpiryDate] = useState('');
   let [submitting, setSubmitting] = useState(false);
@@ -21,6 +21,16 @@ export function ShareModal(props: ShareModalProps) {
     setResult(null);
     setCopied(false);
   }, [repoSlug, notePath]);
+
+  useEffect(() => {
+    if (share) {
+      setResult(share);
+      setIncludeAssets(share.includeAssets);
+      setExpiryDate(share.expiresAt ? share.expiresAt.slice(0, 10) : '');
+    }
+  }, [share?.id, share?.updatedAt]);
+
+  let activeShare = (share ?? result) ?? null;
 
   useEffect(() => {
     let onKey = (event: KeyboardEvent) => {
@@ -44,6 +54,7 @@ export function ShareModal(props: ShareModalProps) {
         path: notePath,
         includeAssets,
         expiresAt,
+        text: noteText,
       });
       setResult(share);
       setCopied(false);
@@ -57,12 +68,29 @@ export function ShareModal(props: ShareModalProps) {
   };
 
   let onCopy = async () => {
-    if (!result) return;
+    if (!activeShare) return;
     try {
-      await navigator.clipboard.writeText(result.url);
+      await navigator.clipboard.writeText(activeShare.url);
       setCopied(true);
     } catch {
       setCopied(false);
+    }
+  };
+
+  let onStopSharing = async () => {
+    if (!activeShare) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await disableShareLink(activeShare.id);
+      setResult(null);
+      setCopied(false);
+      if (onUnshared) onUnshared();
+    } catch (err) {
+      let message = err instanceof Error ? err.message : 'Failed to stop sharing.';
+      setError(message);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -93,7 +121,7 @@ export function ShareModal(props: ShareModalProps) {
             <CloseIcon />
           </button>
         </div>
-        {result === null ? (
+        {activeShare === null ? (
           <form className="share-form" onSubmit={onSubmit}>
             <label className="share-field">
               <span>Attachments</span>
@@ -128,7 +156,7 @@ export function ShareModal(props: ShareModalProps) {
         ) : (
           <div className="share-result">
             <div className="share-url">
-              <input type="text" readOnly value={result.url} aria-label="Share URL" />
+              <input type="text" readOnly value={activeShare.url} aria-label="Share URL" />
               <button className="btn secondary" onClick={onCopy}>
                 {copied ? 'Copied' : 'Copy'}
               </button>
@@ -136,19 +164,32 @@ export function ShareModal(props: ShareModalProps) {
             <dl>
               <div>
                 <dt>Created</dt>
-                <dd>{formatDisplayDate(new Date(result.createdAt))}</dd>
+                <dd>{formatDisplayDate(new Date(activeShare.createdAt))}</dd>
               </div>
-              {result.expiresAt && (
+              <div>
+                <dt>Last updated</dt>
+                <dd>{formatDisplayDate(new Date(activeShare.updatedAt))}</dd>
+              </div>
+              <div>
+                <dt>Attachments</dt>
+                <dd>{activeShare.includeAssets ? 'Images & files included' : 'Note only'}</dd>
+              </div>
+              {activeShare.expiresAt && (
                 <div>
                   <dt>Expires</dt>
-                  <dd>{formatDisplayDate(new Date(result.expiresAt))}</dd>
+                  <dd>{formatDisplayDate(new Date(activeShare.expiresAt))}</dd>
                 </div>
               )}
             </dl>
+            <p className="share-note">This link stays in sync with your edits automatically.</p>
+            {error && <div className="share-error">{error}</div>}
             <div className="share-actions">
-              <a className="btn secondary" href={result.url} target="_blank" rel="noreferrer">
+              <a className="btn secondary" href={activeShare.url} target="_blank" rel="noreferrer">
                 Open
               </a>
+              <button className="btn subtle" onClick={onStopSharing} disabled={submitting}>
+                Stop sharing
+              </button>
               <button className="btn primary" onClick={onClose}>
                 Close
               </button>
@@ -164,8 +205,11 @@ type ShareModalProps = {
   repoSlug: string;
   notePath: string;
   noteTitle?: string;
+  noteText: string;
+  share?: ShareLink | null;
   onClose: () => void;
   onShared?: (link: ShareLink) => void;
+  onUnshared?: () => void;
 };
 
 function todayDate(): string {

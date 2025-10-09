@@ -12,6 +12,10 @@
 - Note markdown: 2&nbsp;MiB max.
 - Assets: up to 24 unique files, capped at 8&nbsp;MiB combined. Binary assets are stored base64-encoded in the gist and decoded on proxy.
 
+## Updates
+
+- Shares belong to the creator’s GitHub account. When the note text changes, the frontend debounces and pushes the new markdown to the gist so viewers always see the latest version without re-sharing.
+
 ## Expiry & Revocation
 
 - Shares can optionally include an expiry date. A background task marks expired shares as disabled hourly.

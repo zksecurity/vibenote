@@ -26,7 +26,10 @@ import {
 import {
   getRepoMetadata as apiGetRepoMetadata,
   getInstallUrl as apiGetInstallUrl,
+  listShareLinks as apiListShareLinks,
+  updateShareLink as apiUpdateShareLink,
   type RepoMetadata,
+  type ShareLink,
 } from './lib/backend';
 import {
   buildRemoteConfig,
@@ -75,6 +78,7 @@ type RepoDataState = {
   activePath: string | undefined;
   notes: RepoNoteListItem[];
   folders: string[];
+  shareLink: ShareLink | null;
 
   // sync state
   autosync: boolean;
@@ -103,6 +107,8 @@ type RepoDataActions = {
   renameFolder: (dir: string, newName: string) => void;
   deleteFolder: (dir: string) => void;
   updateNoteText: (path: string, text: string) => void;
+  notifyShareCreated: (share: ShareLink) => void;
+  notifyShareRemoved: () => void;
 };
 
 type RepoDataInputs = {
@@ -183,6 +189,10 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     defaultBranch,
   });
 
+  let [shareLink, setShareLink] = useState<ShareLink | null>(null);
+  let shareSyncRef = useRef<{ timer: number; shareId: string; path: string } | null>(null);
+  let sharePathRef = useRef<string | undefined>(undefined);
+
   // Derive the notes/folders from whichever source is powering the tree.
   let notes: RepoNoteListItem[] = isReadOnly ? readOnlyNotes : localNotes;
   let folders = isReadOnly ? readOnlyFolders : localFolders;
@@ -212,6 +222,15 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
 
   let activePath = doc?.path ?? activeNote?.path ?? desiredPath;
 
+  useEffect(() => {
+    return () => {
+      if (shareSyncRef.current?.timer !== undefined) {
+        window.clearTimeout(shareSyncRef.current.timer);
+        shareSyncRef.current = null;
+      }
+    };
+  }, []);
+
   // EFFECTS
   // please avoid adding more effects here, keep logic clean/separated
 
@@ -226,6 +245,44 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     if (pathsEqual(desiredPath, doc.path)) return;
     setActivePath(doc.path);
   }, [doc?.path, desiredPath]);
+
+  useEffect(() => {
+    if (route.kind !== 'repo' || doc?.path === undefined) {
+      setShareLink(null);
+      sharePathRef.current = undefined;
+      if (shareSyncRef.current?.timer !== undefined) {
+        window.clearTimeout(shareSyncRef.current.timer);
+        shareSyncRef.current = null;
+      }
+      return;
+    }
+    let cancelled = false;
+    let repoSlug = `${route.owner}/${route.repo}`;
+    apiListShareLinks(repoSlug, doc.path)
+      .then((shares) => {
+        if (cancelled) return;
+        let next = shares[0] ?? null;
+        setShareLink(next);
+        sharePathRef.current = next ? doc.path : undefined;
+        if (!next && shareSyncRef.current?.timer !== undefined) {
+          window.clearTimeout(shareSyncRef.current.timer);
+          shareSyncRef.current = null;
+        }
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        logError(error);
+        setShareLink(null);
+        sharePathRef.current = undefined;
+        if (shareSyncRef.current?.timer !== undefined) {
+          window.clearTimeout(shareSyncRef.current.timer);
+          shareSyncRef.current = null;
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [route.kind, route.kind === 'repo' ? route.owner : '', route.kind === 'repo' ? route.repo : '', doc?.path]);
 
   // Remember recently opened repos once we know the current repo is reachable.
   // TODO this shouldn't a useEffect, the only place a repo ever becomes reachable is after
@@ -347,6 +404,12 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     resetReadOnlyState();
     ensureActivePath(undefined);
     initialPullRef.current.done = false;
+    if (shareSyncRef.current?.timer !== undefined) {
+      window.clearTimeout(shareSyncRef.current.timer);
+      shareSyncRef.current = null;
+    }
+    setShareLink(null);
+    sharePathRef.current = undefined;
 
     setSyncMessage('Signed out');
   };
@@ -379,12 +442,52 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     ensureActivePath(path);
   };
 
+  const queueShareUpdate = (shareId: string, path: string, text: string) => {
+    if (shareSyncRef.current?.timer !== undefined) {
+      window.clearTimeout(shareSyncRef.current.timer);
+    }
+    shareSyncRef.current = {
+      shareId,
+      path,
+      timer: window.setTimeout(async () => {
+        shareSyncRef.current = null;
+        if (sharePathRef.current && !pathsEqual(sharePathRef.current, path)) {
+          return;
+        }
+        try {
+          let updated = await apiUpdateShareLink(shareId, text);
+          setShareLink(updated);
+          sharePathRef.current = path;
+        } catch (error) {
+          logError(error);
+        }
+      }, 2000),
+    };
+  };
+
   const updateNoteText = (path: string, text: string) => {
     if (!canEdit) return;
     let meta = resolveEditableNote(path);
     if (!meta) return;
     getRepoStore(slug).saveNote(meta.id, text);
     scheduleAutoSync();
+    if (shareLink && sharePathRef.current && pathsEqual(sharePathRef.current, path)) {
+      queueShareUpdate(shareLink.id, sharePathRef.current, text);
+    }
+  };
+
+  const notifyShareCreated = (link: ShareLink) => {
+    setShareLink(link);
+    sharePathRef.current = doc?.path;
+  };
+
+  const notifyShareRemoved = () => {
+    if (shareSyncRef.current?.timer !== undefined) {
+      window.clearTimeout(shareSyncRef.current.timer);
+      shareSyncRef.current = null;
+    }
+    setShareLink(null);
+    sharePathRef.current = undefined;
   };
 
   const createNote = (dir: string, name: string) => {
@@ -482,6 +585,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     activePath,
     notes,
     folders,
+    shareLink,
 
     autosync,
     syncing,
@@ -503,6 +607,8 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     renameFolder,
     deleteFolder,
     updateNoteText,
+    notifyShareCreated,
+    notifyShareRemoved,
   };
 
   return { state, actions };

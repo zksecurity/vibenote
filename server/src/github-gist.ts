@@ -1,13 +1,27 @@
-export type { GistFileInput, CreatedGist, GistFileData };
-export { createSecretGist, fetchGistFile };
+// Lightweight helpers around the GitHub Gist REST API used for per-user sharing.
+export type { GistFileInput, GistFilePatch, CreatedGist, UpdatedGist, GistFileData };
+export { createSecretGist, updateSecretGist, downloadGistFile };
 
 type GistFileInput = {
   filename: string;
   content: string;
 };
 
+type GistFilePatch = {
+  filename: string;
+  content?: string;
+  delete?: boolean;
+};
+
 type CreatedGist = {
   id: string;
+  ownerLogin: string;
+  htmlUrl?: string;
+  revision?: string;
+};
+
+type UpdatedGist = {
+  revision?: string;
 };
 
 type GistFileData = {
@@ -42,50 +56,68 @@ async function createSecretGist(token: string, files: GistFileInput[], descripti
   }
   let json = (await res.json()) as any;
   let id = typeof json?.id === 'string' ? json.id : undefined;
-  if (!id) {
-    throw new Error('gist create missing id');
-  }
-  return { id };
+  if (!id) throw new Error('gist create missing id');
+  let ownerLogin =
+    typeof json?.owner?.login === 'string' && json.owner.login.length > 0 ? json.owner.login : undefined;
+  let revision = typeof json?.history?.[0]?.version === 'string' ? json.history[0].version : undefined;
+  let htmlUrl = typeof json?.html_url === 'string' ? json.html_url : undefined;
+  return {
+    id,
+    ownerLogin: ownerLogin ?? '',
+    htmlUrl,
+    revision,
+  };
 }
 
-async function fetchGistFile(token: string, gistId: string, filename: string): Promise<GistFileData> {
-  let metaRes = await fetch(`https://api.github.com/gists/${encodeURIComponent(gistId)}`, {
+async function updateSecretGist(token: string, gistId: string, files: GistFilePatch[], description?: string): Promise<UpdatedGist> {
+  let filesPayload: Record<string, { content?: string | null }> = {};
+  for (let file of files) {
+    if (file.delete) {
+      filesPayload[file.filename] = { content: null };
+    } else if (typeof file.content === 'string') {
+      filesPayload[file.filename] = { content: file.content };
+    }
+  }
+  let body: Record<string, unknown> = { files: filesPayload };
+  if (typeof description === 'string') {
+    body.description = description;
+  }
+  let res = await fetch(`https://api.github.com/gists/${encodeURIComponent(gistId)}`, {
+    method: 'PATCH',
     headers: {
       Accept: 'application/vnd.github+json',
       Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
     },
+    body: JSON.stringify(body),
   });
-  if (!metaRes.ok) {
-    throw new Error(`gist fetch failed (${metaRes.status})`);
+  if (!res.ok) {
+    throw new Error(`gist update failed (${res.status})`);
   }
-  let meta = (await metaRes.json()) as any;
-  let files = meta?.files;
-  if (typeof files !== 'object' || files === null) {
-    throw new Error('gist missing files');
-  }
-  let file = files[filename];
-  if (!file) {
-    throw new Error('gist file not found');
-  }
-  let mediaType = typeof file?.type === 'string' ? String(file.type) : undefined;
-  if (file.truncated === false && typeof file.content === 'string') {
-    let content = file.content as string;
-    return { bytes: new TextEncoder().encode(content), mediaType };
-  }
-  let rawUrl = typeof file.raw_url === 'string' ? file.raw_url : undefined;
-  if (!rawUrl) {
-    throw new Error('gist raw url unavailable');
-  }
-  let rawRes = await fetch(rawUrl, {
-    headers: {
-      Accept: 'application/vnd.github.v3.raw',
-      Authorization: `Bearer ${token}`,
-    },
+  let json = (await res.json()) as any;
+  let revision = typeof json?.history?.[0]?.version === 'string' ? json.history[0].version : undefined;
+  return { revision };
+}
+
+async function downloadGistFile(ownerLogin: string, gistId: string, filename: string): Promise<GistFileData> {
+  let rawUrl = buildRawUrl(ownerLogin, gistId, filename);
+  let res = await fetch(rawUrl, {
+    headers: { Accept: 'application/vnd.github.v3.raw' },
   });
-  if (!rawRes.ok) {
-    throw new Error(`gist raw fetch failed (${rawRes.status})`);
+  if (!res.ok) {
+    throw new Error(`gist raw fetch failed (${res.status})`);
   }
-  let arrayBuffer = await rawRes.arrayBuffer();
-  let fetchedType = rawRes.headers.get('content-type') ?? undefined;
-  return { bytes: new Uint8Array(arrayBuffer), mediaType: fetchedType ?? mediaType ?? undefined };
+  let bytes = new Uint8Array(await res.arrayBuffer());
+  let mediaType = res.headers.get('content-type') ?? undefined;
+  return { bytes, mediaType: mediaType ?? undefined };
+}
+
+function buildRawUrl(owner: string, gistId: string, filename: string): string {
+  let encodedOwner = encodeURIComponent(owner);
+  let encodedId = encodeURIComponent(gistId);
+  let encodedFile = filename
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+  return `https://gist.githubusercontent.com/${encodedOwner}/${encodedId}/raw/${encodedFile}`;
 }

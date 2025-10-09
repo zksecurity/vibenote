@@ -51,6 +51,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
 
   // Data layer exposes repo-backed state and the high-level actions the UI needs.
   const { state, actions } = useRepoData({ slug, route, recordRecent, setActivePath });
+  const { notifyShareCreated, notifyShareRemoved } = actions;
   const {
     hasSession,
     user,
@@ -66,6 +67,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
     activePath,
     notes,
     folders,
+    shareLink,
 
     autosync,
     syncing,
@@ -219,12 +221,12 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
             <>
               {doc !== undefined && canRead && route.kind === 'repo' && (
                 <button
-                  className="btn secondary share-btn"
+                  className={`btn secondary share-btn${shareLink ? ' is-active' : ''}`}
                   onClick={() => setShareOpen(true)}
                   aria-label="Share note"
                 >
                   <ShareIcon />
-                  <span>Share</span>
+                  <span>{shareLink ? 'Shared' : 'Share'}</span>
                 </button>
               )}
               {canSync && (
@@ -423,7 +425,11 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
           repoSlug={`${route.owner}/${route.repo}`}
           notePath={doc.path}
           noteTitle={doc.title}
+          noteText={doc.text}
+          share={shareLink}
           onClose={() => setShareOpen(false)}
+          onShared={(link) => notifyShareCreated(link)}
+          onUnshared={() => notifyShareRemoved()}
         />
       )}
       {showSwitcher && (

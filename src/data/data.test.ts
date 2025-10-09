@@ -18,6 +18,8 @@ type AuthMocks = {
 type BackendMocks = {
   getRepoMetadata: ReturnType<typeof vi.fn>;
   getInstallUrl: ReturnType<typeof vi.fn>;
+  listShareLinks: ReturnType<typeof vi.fn>;
+  updateShareLink: ReturnType<typeof vi.fn>;
 };
 
 type SyncMocks = {
@@ -38,6 +40,17 @@ const authModule = vi.hoisted<AuthMocks>(() => ({
 const backendModule = vi.hoisted<BackendMocks>(() => ({
   getRepoMetadata: vi.fn(),
   getInstallUrl: vi.fn(),
+  listShareLinks: vi.fn(async () => []),
+  updateShareLink: vi.fn(async (_shareId: string, text: string) => ({
+    id: 'share-id',
+    url: 'https://example.com/share/share-id',
+    title: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    expiresAt: null,
+    includeAssets: true,
+    mode: 'unlisted' as const,
+  })),
 }));
 
 const syncModule = vi.hoisted<SyncMocks>(() => ({
@@ -61,6 +74,8 @@ vi.mock('../auth/app-auth', () => ({
 vi.mock('../lib/backend', () => ({
   getRepoMetadata: backendModule.getRepoMetadata,
   getInstallUrl: backendModule.getInstallUrl,
+  listShareLinks: backendModule.listShareLinks,
+  updateShareLink: backendModule.updateShareLink,
 }));
 
 vi.mock('../sync/git-sync', () => ({
@@ -83,6 +98,7 @@ const mockEnsureFreshAccessToken = authModule.ensureFreshAccessToken;
 const mockSignOutFromGitHubApp = authModule.signOutFromGitHubApp;
 
 const mockGetRepoMetadata = backendModule.getRepoMetadata;
+const mockListShareLinks = backendModule.listShareLinks;
 
 const mockBuildRemoteConfig = syncModule.buildRemoteConfig;
 const mockListNoteFiles = syncModule.listNoteFiles;

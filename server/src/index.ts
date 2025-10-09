@@ -12,12 +12,14 @@ import {
   type SessionClaims,
 } from './api.ts';
 import { createSessionStore } from './session-store.ts';
-import { createShareStore } from './share-store.ts';
+import { createShareStore, type SharedNote } from './share-store.ts';
 import {
   createShare,
+  updateShare,
   resolveShare,
   disableShare,
   fetchSharedFile,
+  listSharesForNote,
   markExpiredShares,
   ShareError,
 } from './share-service.ts';
@@ -161,25 +163,24 @@ app.post('/api/share/gist', requireSession, async (req, res) => {
     let body = req.body ?? {};
     let modeValue = typeof body.mode === 'string' ? body.mode : 'unlisted';
     let includeAssets =
-      body.includeAssets === undefined ? undefined : body.includeAssets === null ? undefined : Boolean(body.includeAssets);
+      body.includeAssets === undefined
+        ? undefined
+        : body.includeAssets === null
+        ? undefined
+        : Boolean(body.includeAssets);
     let expiresAt =
       body.expiresAt === null ? null : typeof body.expiresAt === 'string' ? body.expiresAt : undefined;
+    let text = typeof body.text === 'string' ? body.text : undefined;
     let request = {
       repo: typeof body.repo === 'string' ? body.repo : '',
       path: typeof body.path === 'string' ? body.path : '',
       mode: modeValue as any,
       includeAssets,
       expiresAt,
+      text,
     };
     let result = await createShare(env, shareStore, sessionStore, claims.sessionId, claims.login, request);
-    res.status(201).json({
-      id: result.shared.id,
-      url: result.url,
-      title: result.shared.title ?? null,
-      createdAt: result.shared.createdAt,
-      expiresAt: result.shared.expiresAt ?? null,
-      mode: result.shared.mode,
-    });
+    res.status(201).json({ share: presentShare(result.share, result.url) });
   } catch (error) {
     if (handleShareError(res, error)) return;
     res.status(500).json({ error: getErrorMessage(error) });
@@ -206,6 +207,49 @@ app.delete('/api/shares/:id', requireSession, async (req, res) => {
     }
     await disableShare(shareStore, shareId);
     res.status(204).end();
+  } catch (error) {
+    if (handleShareError(res, error)) return;
+    res.status(500).json({ error: getErrorMessage(error) });
+  }
+});
+
+app.put('/api/shares/:id', requireSession, async (req, res) => {
+  setShareSecurityHeaders(res, 'json');
+  try {
+    let claims = req.sessionUser;
+    if (!claims) {
+      return res.status(401).json({ error: 'missing session' });
+    }
+    let shareId = String(req.params.id ?? '').trim();
+    if (shareId.length === 0) {
+      return res.status(400).json({ error: 'invalid share id' });
+    }
+    let body = req.body ?? {};
+    let text = typeof body.text === 'string' ? body.text : undefined;
+    let updated = await updateShare(env, shareStore, sessionStore, claims.sessionId, claims.login, shareId, {
+      text,
+    });
+    res.json({ share: presentShare(updated) });
+  } catch (error) {
+    if (handleShareError(res, error)) return;
+    res.status(500).json({ error: getErrorMessage(error) });
+  }
+});
+
+app.get('/api/shares', requireSession, async (req, res) => {
+  setShareSecurityHeaders(res, 'json');
+  try {
+    let claims = req.sessionUser;
+    if (!claims) {
+      return res.status(401).json({ error: 'missing session' });
+    }
+    let repo = String(req.query.repo ?? '').trim();
+    let path = String(req.query.path ?? '').trim();
+    if (repo.length === 0 || path.length === 0) {
+      return res.status(400).json({ error: 'missing repo or path' });
+    }
+    let shares = await listSharesForNote(env, shareStore, sessionStore, claims.sessionId, repo, path);
+    res.json({ shares });
   } catch (error) {
     if (handleShareError(res, error)) return;
     res.status(500).json({ error: getErrorMessage(error) });
@@ -241,7 +285,7 @@ app.get('/api/gist-raw', async (req, res) => {
     if (shareId.length === 0 || fileName.length === 0) {
       return res.status(400).json({ error: 'missing share or file' });
     }
-    let result = await fetchSharedFile(env, shareStore, shareId, fileName);
+    let result = await fetchSharedFile(shareStore, shareId, fileName);
     if (result === null) {
       return res.status(404).json({ error: 'share not found' });
     }
@@ -332,6 +376,26 @@ function setShareSecurityHeaders(res: express.Response, kind: 'json' | 'asset'):
   } else {
     res.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'; sandbox");
   }
+}
+
+function presentShare(share: SharedNote, urlOverride?: string) {
+  return {
+    id: share.id,
+    url: urlOverride ?? buildPublicShareUrl(share.id),
+    title: share.title ?? null,
+    createdAt: share.createdAt,
+    updatedAt: share.updatedAt,
+    expiresAt: share.expiresAt ?? null,
+    mode: share.mode,
+    includeAssets: share.includeAssets,
+  };
+}
+
+function buildPublicShareUrl(shareId: string): string {
+  let base = env.PUBLIC_VIEWER_BASE_URL.endsWith('/')
+    ? env.PUBLIC_VIEWER_BASE_URL.slice(0, -1)
+    : env.PUBLIC_VIEWER_BASE_URL;
+  return `${base}/s/${shareId}`;
 }
 
 function normalizeReturnTo(value: string, allowedOrigins: string[]): string | null {

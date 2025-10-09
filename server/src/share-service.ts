@@ -1,4 +1,4 @@
-// Core business logic for sharing notes as secret gists.
+// Core business logic for sharing notes as per-user secret gists.
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { refreshAccessToken, type OAuthTokenResult } from './api.ts';
@@ -6,14 +6,39 @@ import type { Env } from './env.ts';
 import type { SessionStoreInstance } from './session-store.ts';
 import type { ShareStoreInstance, SharedNote, ShareAsset } from './share-store.ts';
 import { extractMarkdownAssets, rewriteMarkdownAssets } from './markdown-assets.ts';
-import { createSecretGist, fetchGistFile } from './github-gist.ts';
+import {
+  createSecretGist,
+  updateSecretGist,
+  downloadGistFile,
+  type GistFileInput,
+  type GistFilePatch,
+} from './github-gist.ts';
 
-export type { CreateShareRequest, CreateShareResult, ResolveShareResult };
+type RepoTarget = { owner: string; repo: string };
+
+type RepoFile = { bytes: Buffer; mediaType?: string; size: number };
+
+type AssetPackaging = {
+  shareAssets: ShareAsset[];
+  gistFiles: GistFileInput[];
+  removedFiles: string[];
+  markdown: string;
+  noteBytes: number;
+  assetBytes: number;
+};
+
+const MAX_NOTE_BYTES = 2 * 1024 * 1024;
+const MAX_ASSET_BYTES = 8 * 1024 * 1024;
+const MAX_ASSET_COUNT = 24;
+
+export type { CreateShareRequest, CreateShareResult, ResolveShareResult, UpdateShareRequest, NoteShareSummary };
 export {
   createShare,
+  updateShare,
   resolveShare,
   disableShare,
   fetchSharedFile,
+  listSharesForNote,
   markExpiredShares,
   validateExpiry,
 };
@@ -24,52 +49,38 @@ type CreateShareRequest = {
   mode: 'unlisted';
   includeAssets?: boolean;
   expiresAt?: string | null;
+  text?: string;
+};
+
+type UpdateShareRequest = {
+  text?: string | null;
 };
 
 type CreateShareResult = {
-  shared: SharedNote;
+  share: SharedNote;
   url: string;
+};
+
+type NoteShareSummary = {
+  id: string;
+  url: string;
+  createdAt: string;
+  updatedAt: string;
+  expiresAt?: string;
+  includeAssets: boolean;
 };
 
 type ResolveShareResult = {
   id: string;
   title?: string;
   createdAt: string;
+  updatedAt: string;
   expiresAt?: string;
   mode: 'unlisted';
   isDisabled: boolean;
   assetNames: string[];
   primaryFile: string;
 };
-
-type RepoTarget = {
-  owner: string;
-  repo: string;
-  path: string;
-};
-
-type RepoFile = {
-  bytes: Buffer;
-  mediaType?: string;
-  size: number;
-};
-
-type GistFile = {
-  filename: string;
-  content: string;
-};
-
-type AssetPackaging = {
-  shareAssets: ShareAsset[];
-  gistFiles: GistFile[];
-  markdown: string;
-  noteBytes: number;
-  assetBytes: number;
-};
-
-const MAX_NOTE_BYTES = 2 * 1024 * 1024;
-const MAX_ASSET_BYTES = 8 * 1024 * 1024;
-const MAX_ASSET_COUNT = 24;
 
 async function createShare(
   env: Env,
@@ -79,76 +90,152 @@ async function createShare(
   githubLogin: string,
   request: CreateShareRequest
 ): Promise<CreateShareResult> {
-  let parsed = parseRepo(request.repo);
+  let repoTarget = parseRepo(request.repo);
   let notePath = sanitizePath(request.path);
-  if (!notePath) {
-    throw new ShareError(400, 'invalid note path');
-  }
-  let expiresAt = validateExpiry(request.expiresAt);
-  if (request.mode !== 'unlisted') {
-    throw new ShareError(400, 'unsupported mode');
-  }
+  if (!notePath) throw new ShareError(400, 'invalid note path');
+  if (request.mode !== 'unlisted') throw new ShareError(400, 'unsupported mode');
 
+  let expiresAt = validateExpiry(request.expiresAt);
   let tokens = await ensureAccessToken(env, sessionStore, sessionId);
-  let noteFile = await fetchRepoFile(parsed.owner, parsed.repo, notePath, tokens.accessToken, 'note');
-  if (noteFile.size > MAX_NOTE_BYTES) {
+  assertHasGistScope(tokens.scope);
+
+  let noteText = resolveNoteText(request.text, notePath);
+  if (noteText === null) {
+    let repoFile = await fetchRepoFile(repoTarget.owner, repoTarget.repo, notePath, tokens.accessToken, 'note');
+    if (repoFile.size > MAX_NOTE_BYTES) {
+      throw new ShareError(413, 'note is too large to share');
+    }
+    noteText = repoFile.bytes.toString('utf8');
+  }
+  let noteBytes = Buffer.byteLength(noteText, 'utf8');
+  if (noteBytes > MAX_NOTE_BYTES) {
     throw new ShareError(413, 'note is too large to share');
   }
-  let noteText = noteFile.bytes.toString('utf8');
 
+  let includeAssets = request.includeAssets !== false;
   let packaging = await packageAssets({
     noteText,
     notePath,
-    owner: parsed.owner,
-    repo: parsed.repo,
+    owner: repoTarget.owner,
+    repo: repoTarget.repo,
     accessToken: tokens.accessToken,
-    includeAssets: request.includeAssets !== false,
+    includeAssets,
   });
 
-  let gistFiles: GistFile[] = [{ filename: 'note.md', content: packaging.markdown }, ...packaging.gistFiles];
+  let gistFiles: GistFileInput[] = [{ filename: 'note.md', content: packaging.markdown }, ...packaging.gistFiles];
   let title = extractTitle(noteText, notePath);
   let description = buildGistDescription(title);
 
-  let gist = await createSecretGist(env.GIST_SERVICE_TOKEN, gistFiles, description);
-
+  let gist = await createSecretGist(tokens.accessToken, gistFiles, description);
+  let nowIso = new Date().toISOString();
   let shareId = generateShareId();
-  let createdAt = new Date().toISOString();
-  let shared: SharedNote = {
+  let share: SharedNote = {
     id: shareId,
     mode: 'unlisted',
     gistId: gist.id,
+    gistOwner: gist.ownerLogin || githubLogin,
     primaryFile: 'note.md',
     primaryEncoding: 'utf8',
     assets: packaging.shareAssets,
     title,
-    createdBy: {
-      userId: tokens.userId,
-      githubLogin,
-    },
-    createdAt,
+    createdBy: { userId: tokens.userId, githubLogin },
+    createdAt: nowIso,
+    updatedAt: nowIso,
     expiresAt: expiresAt ?? undefined,
     isDisabled: false,
+    includeAssets,
+    sourceRepo: `${repoTarget.owner}/${repoTarget.repo}`,
+    sourcePath: notePath,
     metadata: {
       noteBytes: packaging.noteBytes,
       assetBytes: packaging.assetBytes,
+      snapshotSha: gist.revision,
     },
   };
 
-  await shareStore.create(shared);
-  let url = buildShareUrl(env.PUBLIC_VIEWER_BASE_URL, shareId);
-  return { shared, url };
+  await shareStore.create(share);
+  return { share, url: buildShareUrl(env.PUBLIC_VIEWER_BASE_URL, shareId) };
+}
+
+async function updateShare(
+  env: Env,
+  shareStore: ShareStoreInstance,
+  sessionStore: SessionStoreInstance,
+  sessionId: string,
+  githubLogin: string,
+  shareId: string,
+  body: UpdateShareRequest
+): Promise<SharedNote> {
+  let existing = shareStore.getById(shareId);
+  if (!existing) throw new ShareError(404, 'share not found');
+  if (existing.isDisabled) throw new ShareError(410, 'share disabled');
+
+  let tokens = await ensureAccessToken(env, sessionStore, sessionId);
+  assertHasGistScope(tokens.scope);
+  if (existing.createdBy.userId !== tokens.userId) {
+    throw new ShareError(403, 'forbidden');
+  }
+
+  let repoParts = parseRepo(existing.sourceRepo);
+  let notePath = existing.sourcePath;
+  let noteText = resolveNoteText(body.text ?? undefined, notePath);
+  if (noteText === null) {
+    let repoFile = await fetchRepoFile(repoParts.owner, repoParts.repo, notePath, tokens.accessToken, 'note');
+    if (repoFile.size > MAX_NOTE_BYTES) {
+      throw new ShareError(413, 'note is too large to share');
+    }
+    noteText = repoFile.bytes.toString('utf8');
+  }
+  let noteBytes = Buffer.byteLength(noteText, 'utf8');
+  if (noteBytes > MAX_NOTE_BYTES) {
+    throw new ShareError(413, 'note is too large to share');
+  }
+
+  let packaging = await packageAssets({
+    noteText,
+    notePath,
+    owner: repoParts.owner,
+    repo: repoParts.repo,
+    accessToken: tokens.accessToken,
+    includeAssets: existing.includeAssets,
+    existingAssets: existing.assets,
+  });
+
+  let gistDescription = buildGistDescription(extractTitle(noteText, notePath));
+  let patches: GistFilePatch[] = [
+    { filename: existing.primaryFile, content: packaging.markdown },
+    ...packaging.gistFiles.map((file) => ({ filename: file.filename, content: file.content })),
+    ...packaging.removedFiles.map((filename) => ({ filename, delete: true })),
+  ];
+  let updated = await updateSecretGist(tokens.accessToken, existing.gistId, patches, gistDescription);
+
+  let updatedShare: SharedNote = {
+    ...existing,
+    title: extractTitle(noteText, notePath),
+    updatedAt: new Date().toISOString(),
+    assets: packaging.shareAssets,
+    metadata: {
+      noteBytes: packaging.noteBytes,
+      assetBytes: packaging.assetBytes,
+      snapshotSha: updated.revision ?? existing.metadata.snapshotSha,
+    },
+  };
+  let stored = await shareStore.update(existing.id, updatedShare);
+  return stored ?? updatedShare;
 }
 
 async function resolveShare(shareStore: ShareStoreInstance, shareId: string): Promise<ResolveShareResult | null> {
   let record = shareStore.getById(shareId);
   if (!record) return null;
+  let disabled = record.isDisabled || isExpired(record.expiresAt);
   return {
     id: record.id,
     title: record.title,
     createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
     expiresAt: record.expiresAt,
     mode: record.mode,
-    isDisabled: record.isDisabled || isExpired(record.expiresAt),
+    isDisabled: disabled,
     assetNames: record.assets.map((asset) => asset.gistFile),
     primaryFile: record.primaryFile,
   };
@@ -159,16 +246,37 @@ async function disableShare(shareStore: ShareStoreInstance, shareId: string): Pr
   return updated !== undefined;
 }
 
-async function fetchSharedFile(
+async function listSharesForNote(
   env: Env,
+  shareStore: ShareStoreInstance,
+  sessionStore: SessionStoreInstance,
+  sessionId: string,
+  repo: string,
+  notePath: string
+): Promise<NoteShareSummary[]> {
+  let tokens = await ensureAccessToken(env, sessionStore, sessionId);
+  let normalizedPath = sanitizePath(notePath);
+  if (!normalizedPath) return [];
+  let entries = shareStore
+    .listByUser(tokens.userId)
+    .filter((item) => !item.isDisabled && item.sourceRepo === repo && item.sourcePath === normalizedPath);
+  return entries.map((item) => ({
+    id: item.id,
+    url: buildShareUrl(env.PUBLIC_VIEWER_BASE_URL, item.id),
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+    expiresAt: item.expiresAt,
+    includeAssets: item.includeAssets,
+  }));
+}
+
+async function fetchSharedFile(
   shareStore: ShareStoreInstance,
   shareId: string,
   filename: string
 ): Promise<{ bytes: Buffer; mediaType?: string; encoding: 'utf8' | 'base64'; isPrimary: boolean } | null> {
   let record = shareStore.getById(shareId);
-  if (!record) {
-    return null;
-  }
+  if (!record) return null;
   if (record.isDisabled || isExpired(record.expiresAt)) {
     throw new ShareError(410, 'share disabled');
   }
@@ -176,13 +284,10 @@ async function fetchSharedFile(
   let assetMeta: ShareAsset | undefined;
   if (!isPrimary) {
     assetMeta = record.assets.find((asset) => asset.gistFile === filename);
-    if (!assetMeta) {
-      throw new ShareError(404, 'file not found');
-    }
+    if (!assetMeta) throw new ShareError(404, 'file not found');
   }
-  let gistFile = await fetchGistFile(env.GIST_SERVICE_TOKEN, record.gistId, filename);
-  let encoding: 'utf8' | 'base64' = 'utf8';
-  encoding = isPrimary ? record.primaryEncoding : assetMeta?.encoding ?? 'utf8';
+  let gistFile = await downloadGistFile(record.gistOwner, record.gistId, filename);
+  let encoding: 'utf8' | 'base64' = isPrimary ? record.primaryEncoding : assetMeta?.encoding ?? 'utf8';
   let bytes = Buffer.from(gistFile.bytes);
   if (encoding === 'base64') {
     bytes = Buffer.from(bytes.toString('utf8'), 'base64');
@@ -198,7 +303,7 @@ async function fetchSharedFile(
     let rewritten = rewriteMarkdownAssets(bytes.toString('utf8'), replacements);
     bytes = Buffer.from(rewritten, 'utf8');
   }
-  let mediaType = isPrimary ? 'text/markdown' : assetMeta?.mediaType ?? gistFile.mediaType;
+  let mediaType = isPrimary ? 'text/markdown; charset=utf-8' : assetMeta?.mediaType ?? gistFile.mediaType;
   return { bytes, mediaType, encoding, isPrimary };
 }
 
@@ -206,10 +311,10 @@ function markExpiredShares(store: ShareStoreInstance): Promise<void> {
   let now = Date.now();
   let pending: Promise<unknown>[] = [];
   for (let share of store.listAll()) {
-    if (share.expiresAt === undefined) continue;
+    if (!share.expiresAt) continue;
     let expiry = Date.parse(share.expiresAt);
-    if (!Number.isFinite(expiry)) continue;
-    if (expiry <= now && !share.isDisabled) {
+    if (Number.isNaN(expiry) || expiry > now) continue;
+    if (!share.isDisabled) {
       pending.push(store.disable(share.id));
     }
   }
@@ -221,12 +326,8 @@ function validateExpiry(value?: string | null): string | null {
   let trimmed = value.trim();
   if (trimmed.length === 0) return null;
   let parsed = Date.parse(trimmed);
-  if (!Number.isFinite(parsed)) {
-    throw new ShareError(400, 'invalid expiresAt timestamp');
-  }
-  if (parsed <= Date.now()) {
-    throw new ShareError(400, 'expiresAt must be in the future');
-  }
+  if (!Number.isFinite(parsed)) throw new ShareError(400, 'invalid expiresAt timestamp');
+  if (parsed <= Date.now()) throw new ShareError(400, 'expiresAt must be in the future');
   return new Date(parsed).toISOString();
 }
 
@@ -237,9 +338,7 @@ async function ensureAccessToken(
 ): Promise<OAuthTokenResult & { userId: string }> {
   let refreshed = await refreshAccessToken(env, sessionStore, sessionId);
   let record = sessionStore.get(sessionId);
-  if (!record) {
-    throw new ShareError(401, 'session expired');
-  }
+  if (!record) throw new ShareError(401, 'session expired');
   return { ...refreshed, userId: record.userId };
 }
 
@@ -254,19 +353,15 @@ function parseRepo(value: string): RepoTarget {
   if (!owner || !repo) {
     throw new ShareError(400, 'repo must be owner/repo');
   }
-  return { owner, repo, path: '' };
+  return { owner, repo };
 }
 
 function sanitizePath(value: string): string | null {
   let trimmed = value.trim();
   if (trimmed.length === 0) return null;
-  if (trimmed.startsWith('/')) {
-    trimmed = trimmed.slice(1);
-  }
+  if (trimmed.startsWith('/')) trimmed = trimmed.slice(1);
   let normalized = path.posix.normalize(trimmed);
-  if (normalized.startsWith('../') || normalized === '..') {
-    return null;
-  }
+  if (normalized.startsWith('../') || normalized === '..') return null;
   return normalized;
 }
 
@@ -291,9 +386,7 @@ async function fetchRepoFile(
     },
   });
   if (res.status === 404) {
-    if (kind === 'note') {
-      throw new ShareError(404, 'note file not found');
-    }
+    if (kind === 'note') throw new ShareError(404, 'note file not found');
     throw new ShareError(404, `asset not found: ${filePath}`);
   }
   if (!res.ok) {
@@ -314,74 +407,97 @@ async function packageAssets(options: {
   repo: string;
   accessToken: string;
   includeAssets: boolean;
+  existingAssets?: ShareAsset[];
 }): Promise<AssetPackaging> {
   let noteBytes = Buffer.byteLength(options.noteText, 'utf8');
   if (!options.includeAssets) {
-    return { shareAssets: [], gistFiles: [], markdown: options.noteText, noteBytes, assetBytes: 0 };
+    return {
+      shareAssets: [],
+      gistFiles: [],
+      removedFiles: options.existingAssets?.map((asset) => asset.gistFile) ?? [],
+      markdown: options.noteText,
+      noteBytes,
+      assetBytes: 0,
+    };
   }
 
   let assets = extractMarkdownAssets(options.noteText);
   let noteDir = path.posix.dirname(options.notePath);
   if (noteDir === '.') noteDir = '';
 
+  let existingByNormalized = new Map<string, ShareAsset>();
+  if (Array.isArray(options.existingAssets)) {
+    for (let asset of options.existingAssets) {
+      existingByNormalized.set(asset.normalizedPath, asset);
+    }
+  }
+
   let shareAssets: ShareAsset[] = [];
-  let gistFiles: GistFile[] = [];
-  let byNormalized = new Map<string, ShareAsset>();
+  let gistFiles: GistFileInput[] = [];
   let replacements = new Map<string, string>();
   let totalAssetBytes = 0;
+  let usedNames = new Set<string>();
 
   for (let ref of assets) {
-    let existing = byNormalized.get(ref.normalized);
-    if (existing) {
-      replacements.set(ref.raw, existing.gistFile);
-      continue;
-    }
-    if (byNormalized.size >= MAX_ASSET_COUNT) {
-      throw new ShareError(413, 'too many asset files');
-    }
-    let resolved = noteDir ? path.posix.join(noteDir, ref.normalized) : ref.normalized;
+    let normalized = ref.normalized;
+    let existing = existingByNormalized.get(normalized);
+    let resolved = noteDir ? path.posix.join(noteDir, normalized) : normalized;
     let content = await fetchRepoFile(options.owner, options.repo, resolved, options.accessToken, 'asset');
     totalAssetBytes += content.size;
     if (totalAssetBytes > MAX_ASSET_BYTES) {
       throw new ShareError(413, 'asset files exceed size limit');
     }
-    let gistFile = buildAssetFilename(resolved, byNormalized.size);
+    let gistFile = existing?.gistFile ?? buildAssetFilename(resolved, usedNames.size);
+    while (usedNames.has(gistFile)) {
+      gistFile = buildAssetFilename(resolved, usedNames.size + 1);
+    }
+    usedNames.add(gistFile);
     let encoding = chooseEncoding(resolved, content.mediaType);
     let asset: ShareAsset = {
       originalPath: ref.raw,
+      normalizedPath: normalized,
       gistFile,
       encoding,
       mediaType: content.mediaType,
     };
     shareAssets.push(asset);
-    byNormalized.set(ref.normalized, asset);
-    let gistContent =
-      encoding === 'base64' ? content.bytes.toString('base64') : content.bytes.toString('utf8');
-    gistFiles.push({ filename: gistFile, content: gistContent });
     replacements.set(ref.raw, gistFile);
+    let gistContent = encoding === 'base64' ? content.bytes.toString('base64') : content.bytes.toString('utf8');
+    gistFiles.push({ filename: gistFile, content: gistContent });
+  }
+
+  let removedFiles: string[] = [];
+  if (Array.isArray(options.existingAssets)) {
+    let retain = new Set(shareAssets.map((asset) => asset.gistFile));
+    for (let asset of options.existingAssets) {
+      if (!retain.has(asset.gistFile)) {
+        removedFiles.push(asset.gistFile);
+      }
+    }
   }
 
   let rewritten = rewriteMarkdownAssets(options.noteText, replacements);
-  return { shareAssets, gistFiles, markdown: rewritten, noteBytes, assetBytes: totalAssetBytes };
+  return {
+    shareAssets,
+    gistFiles,
+    removedFiles,
+    markdown: rewritten,
+    noteBytes,
+    assetBytes: totalAssetBytes,
+  };
 }
 
 function buildAssetFilename(originalPath: string, index: number): string {
   let ext = path.posix.extname(originalPath).toLowerCase();
-  if (!ext || ext.length > 8) {
-    ext = '.bin';
-  }
+  if (!ext || ext.length > 8) ext = '.bin';
   let padded = String(index + 1).padStart(4, '0');
   return `asset_${padded}${ext}`;
 }
 
 function chooseEncoding(resolvedPath: string, mediaType: string | undefined): 'utf8' | 'base64' {
   let ext = path.posix.extname(resolvedPath).toLowerCase();
-  if (mediaType && mediaType.startsWith('text/')) {
-    return 'utf8';
-  }
-  if (ext === '.svg' || ext === '.txt' || ext === '.json') {
-    return 'utf8';
-  }
+  if (mediaType && mediaType.startsWith('text/')) return 'utf8';
+  if (ext === '.svg' || ext === '.txt' || ext === '.json') return 'utf8';
   return 'base64';
 }
 
@@ -405,8 +521,8 @@ function extractTitle(markdown: string, notePath: string): string | undefined {
   return base || undefined;
 }
 
-function buildShareUrl(base: string, shareId: string): string {
-  let normalized = base.endsWith('/') ? base.slice(0, -1) : base;
+function buildShareUrl(baseUrl: string, shareId: string): string {
+  let normalized = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
   return `${normalized}/s/${shareId}`;
 }
 
@@ -417,8 +533,21 @@ function generateShareId(): string {
 function isExpired(value: string | undefined): boolean {
   if (!value) return false;
   let parsed = Date.parse(value);
-  if (!Number.isFinite(parsed)) return false;
-  return parsed <= Date.now();
+  return Number.isFinite(parsed) ? parsed <= Date.now() : false;
+}
+
+function resolveNoteText(text: string | undefined, notePath: string): string | null {
+  if (typeof text !== 'string') return null;
+  if (text.length === 0) return '';
+  return text;
+}
+
+function assertHasGistScope(scopes: string[]): void {
+  if (!Array.isArray(scopes)) {
+    throw new ShareError(403, 'GitHub authorization missing gist scope');
+  }
+  if (scopes.some((scope) => scope.trim().toLowerCase() === 'gist')) return;
+  throw new ShareError(403, 'GitHub authorization missing gist scope');
 }
 
 class ShareError extends Error {

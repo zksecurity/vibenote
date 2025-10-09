@@ -24,13 +24,18 @@ describe('share store', () => {
       id: 'share123',
       mode: 'unlisted' as const,
       gistId: 'gist1',
+      gistOwner: 'octocat',
       primaryFile: 'note.md',
       primaryEncoding: 'utf8' as const,
       assets: [],
       title: 'Doc',
       createdBy: { userId: 'user1', githubLogin: 'octocat' },
       createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
       isDisabled: false,
+      includeAssets: true,
+      sourceRepo: 'octo/repo',
+      sourcePath: 'docs/doc.md',
       metadata: { noteBytes: 10, assetBytes: 0 },
     };
     await store.create(sample);

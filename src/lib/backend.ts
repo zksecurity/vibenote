@@ -2,7 +2,16 @@
 import { ensureFreshAccessToken, refreshAccessTokenNow, getApiBase, getSessionToken } from '../auth/app-auth';
 import { fetchPublicRepoInfo } from './github-public';
 
-export { type RepoMetadata, type ShareLink, getRepoMetadata, getInstallUrl, createShareLink, disableShareLink };
+export {
+  type RepoMetadata,
+  type ShareLink,
+  getRepoMetadata,
+  getInstallUrl,
+  createShareLink,
+  updateShareLink,
+  listShareLinks,
+  disableShareLink,
+};
 
 const GITHUB_API_BASE = 'https://api.github.com';
 
@@ -11,7 +20,9 @@ type ShareLink = {
   url: string;
   title: string | null;
   createdAt: string;
+  updatedAt: string;
   expiresAt: string | null;
+  includeAssets: boolean;
   mode: 'unlisted';
 };
 
@@ -20,6 +31,7 @@ type ShareCreateOptions = {
   path: string;
   includeAssets: boolean;
   expiresAt?: string | null;
+  text: string;
 };
 
 async function createShareLink(options: ShareCreateOptions): Promise<ShareLink> {
@@ -34,6 +46,7 @@ async function createShareLink(options: ShareCreateOptions): Promise<ShareLink> 
     mode: 'unlisted' as const,
     includeAssets: options.includeAssets,
     expiresAt: options.expiresAt ?? null,
+    text: options.text,
   };
   let res = await fetch(`${base}/api/share/gist`, {
     method: 'POST',
@@ -46,6 +59,32 @@ async function createShareLink(options: ShareCreateOptions): Promise<ShareLink> 
   let body = await parseJsonSafe(res);
   if (!res.ok) {
     let message = body && typeof body.error === 'string' ? body.error : 'Failed to create share link.';
+    throw new Error(message);
+  }
+  let share = normalizeShareLink(body);
+  if (!share) {
+    throw new Error('Share response was malformed.');
+  }
+  return share;
+}
+
+async function updateShareLink(shareId: string, text: string): Promise<ShareLink> {
+  let sessionToken = getSessionToken();
+  if (!sessionToken) {
+    throw new Error('Sign in to update shares.');
+  }
+  let base = getApiBase();
+  let res = await fetch(`${base}/api/shares/${encodeURIComponent(shareId)}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${sessionToken}`,
+    },
+    body: JSON.stringify({ text }),
+  });
+  let body = await parseJsonSafe(res);
+  if (!res.ok) {
+    let message = body && typeof body.error === 'string' ? body.error : 'Failed to update share.';
     throw new Error(message);
   }
   let share = normalizeShareLink(body);
@@ -72,6 +111,32 @@ async function disableShareLink(shareId: string): Promise<void> {
   }
 }
 
+async function listShareLinks(repo: string, path: string): Promise<ShareLink[]> {
+  let sessionToken = getSessionToken();
+  if (!sessionToken) {
+    return [];
+  }
+  let base = getApiBase();
+  let url = new URL(`${base}/api/shares`);
+  url.searchParams.set('repo', repo);
+  url.searchParams.set('path', path);
+  let res = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${sessionToken}` },
+  });
+  let body = await parseJsonSafe(res);
+  if (!res.ok) {
+    let message = body && typeof body.error === 'string' ? body.error : 'Failed to load share info.';
+    throw new Error(message);
+  }
+  let rawShares = Array.isArray(body?.shares) ? body.shares : [];
+  let shares: ShareLink[] = [];
+  for (let raw of rawShares) {
+    let link = normalizeShareLink(raw);
+    if (link) shares.push(link);
+  }
+  return shares;
+}
+
 async function parseJsonSafe(res: Response): Promise<any> {
   try {
     return await res.json();
@@ -82,20 +147,34 @@ async function parseJsonSafe(res: Response): Promise<any> {
 
 function normalizeShareLink(raw: any): ShareLink | null {
   if (!raw || typeof raw !== 'object') return null;
-  let id = typeof raw.id === 'string' ? raw.id : undefined;
-  let url = typeof raw.url === 'string' ? raw.url : undefined;
-  let createdAt = typeof raw.createdAt === 'string' ? raw.createdAt : undefined;
+  let payload = raw && typeof raw === 'object' && 'share' in raw ? (raw as any).share : raw;
+  if (!payload || typeof payload !== 'object') return null;
+  let id = typeof payload.id === 'string' ? payload.id : undefined;
+  let url = typeof payload.url === 'string' ? payload.url : undefined;
+  let createdAt = typeof payload.createdAt === 'string' ? payload.createdAt : undefined;
+  let updatedAt = typeof payload.updatedAt === 'string' ? payload.updatedAt : undefined;
   if (!id || !url || !createdAt) return null;
-  let expiresAtValue = raw.expiresAt;
+  let expiresAtValue = (payload as any).expiresAt;
   let expiresAt =
     typeof expiresAtValue === 'string'
       ? expiresAtValue
       : expiresAtValue === null || expiresAtValue === undefined
       ? null
       : null;
-  let titleValue = raw.title;
+  let titleValue = (payload as any).title;
   let title = typeof titleValue === 'string' ? titleValue : null;
-  return { id, url, title, createdAt, expiresAt, mode: 'unlisted' };
+  let includeAssets = Boolean((payload as any).includeAssets !== false);
+  const mode: 'unlisted' = 'unlisted';
+  return {
+    id,
+    url,
+    title,
+    createdAt,
+    updatedAt: updatedAt ?? createdAt,
+    expiresAt,
+    includeAssets,
+    mode,
+  };
 }
 
 type RepoMetadata = {

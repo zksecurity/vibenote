@@ -383,6 +383,7 @@ That’s it — ship v1.
 - Share metadata is stored in a JSON-backed file store (`SHARE_STORE_FILE`) that mirrors the existing session-store pattern and supports soft-disable without deleting rows.
 - Viewer bundles live under `src/viewer` with a standalone `viewer.html`; Vercel routes `/s/*` directly to the viewer bundle so the main SPA keeps its own routing.
 - Share responses apply strict security headers (`Referrer-Policy`, `X-Frame-Options`, and CSP) and CORS now allows both the main app origins and the public viewer origins.
+- When a note is edited locally, the frontend debounces and re-syncs the associated gist so the shared link stays up-to-date without manual actions.
 
 ## Current Progress
 

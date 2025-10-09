@@ -1382,6 +1382,12 @@ textarea:focus-visible {
   font-weight: 600;
 }
 
+.share-note {
+  font-size: 0.9rem;
+  color: var(--muted);
+  margin: 4px 0 12px;
+}
+
 .share-btn {
   display: inline-flex;
   align-items: center;
@@ -1391,6 +1397,11 @@ textarea:focus-visible {
 .share-btn svg {
   width: 18px;
   height: 18px;
+}
+
+.share-btn.is-active {
+  background: rgba(34, 197, 94, 0.12);
+  color: #15803d;
 }
 
 .repo-config-modal {

@@ -23,7 +23,7 @@ export async function createAuthStartRedirect(
   let params = new URLSearchParams({
     client_id: env.GITHUB_OAUTH_CLIENT_ID,
     redirect_uri: callbackUrl,
-    scope: 'read:user user:email',
+    scope: 'read:user user:email gist',
     state,
   });
   return `https://github.com/login/oauth/authorize?${params.toString()}`;
