@@ -691,7 +691,12 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
           if (!fetchedBinary) continue;
         }
         const rf = fetchedBinary;
-        const id = store.createBinaryFile(rf.path, rf.binaryBase64 ?? '', rf.mime);
+        const id = store.createFile({
+          path: rf.path,
+          content: rf.binaryBase64 ?? '',
+          kind: 'binary',
+          mime: rf.mime,
+        });
         markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: hashText(rf.binaryBase64 ?? '') });
         remoteMap.set(entry.path, { path: entry.path, sha: rf.sha, kind: 'binary', mime: rf.mime });
         pulled++;
@@ -939,7 +944,12 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
           });
         } else {
           if (remoteFile.kind === 'binary') {
-            const newId = store.createBinaryFile(remoteFile.path, remoteFile.binaryBase64 ?? '', remoteFile.mime);
+            const newId = store.createFile({
+              path: remoteFile.path,
+              content: remoteFile.binaryBase64 ?? '',
+              kind: 'binary',
+              mime: remoteFile.mime,
+            });
             markSynced(storeSlug, newId, {
               remoteSha: remoteFile.sha,
               syncedHash: hashText(remoteFile.binaryBase64 ?? ''),

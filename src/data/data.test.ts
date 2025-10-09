@@ -17,6 +17,10 @@ function createMarkdown(store: LocalStore, title: string, text: string, dir = ''
   });
 }
 
+function createBinary(store: LocalStore, path: string, base64: string, mime: string) {
+  return store.createFile({ path, content: base64, kind: 'binary', mime });
+}
+
 type RemoteFile = { path: string; text: string; sha: string };
 
 type AuthMocks = {
@@ -279,7 +283,7 @@ describe('useRepoData', () => {
     const slug = 'acme/assets';
     const store = new LocalStore(slug);
     createMarkdown(store, 'Guide', '# usage');
-    store.createBinaryFile('art/logo.png', Buffer.from('png-data', 'utf8').toString('base64'), 'image/png');
+    createBinary(store, 'art/logo.png', Buffer.from('png-data', 'utf8').toString('base64'), 'image/png');
     markRepoLinked(slug);
 
     mockGetSessionToken.mockReturnValue('token');

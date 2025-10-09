@@ -159,7 +159,7 @@ describe('syncBidirectional', () => {
 
   test('tracks remote binary renames by sha/hash', async () => {
     const payload = Buffer.from('asset', 'utf8').toString('base64');
-    const id = store.createBinaryFile('logo.png', payload, 'image/png');
+    const id = createBinary(store, 'logo.png', payload, 'image/png');
     await syncBidirectional(store, 'user/repo');
     const before = store.loadFile(id);
     expect(before?.lastSyncedHash).toBeDefined();
@@ -254,4 +254,8 @@ function createMarkdown(store: LocalStore, title: string, text: string, dir = ''
     kind: 'markdown',
     mime: 'text/markdown',
   });
+}
+
+function createBinary(store: LocalStore, path: string, base64: string, mime: string) {
+  return store.createFile({ path, content: base64, kind: 'binary', mime });
 }

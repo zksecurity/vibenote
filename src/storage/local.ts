@@ -350,15 +350,6 @@ export class LocalStore {
     emitRepoChange(this.slug);
   }
 
-  createBinaryFile(path: string, base64: string, mime?: string): string {
-    return this.createFile({
-      path,
-      content: base64,
-      kind: 'binary',
-      mime,
-    });
-  }
-
   createFile(params: {
     path: string;
     content: string;

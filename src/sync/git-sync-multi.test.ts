@@ -18,6 +18,10 @@ function createMarkdown(store: LocalStore, title: string, text: string, dir = ''
   });
 }
 
+function createBinary(store: LocalStore, path: string, base64: string, mime: string) {
+  return store.createFile({ path, content: base64, kind: 'binary', mime });
+}
+
 vi.mock('../auth/app-auth', () => authModule);
 
 const globalAny = globalThis as {
@@ -252,7 +256,7 @@ describe('syncBidirectional multi-device', () => {
   test('device two pulls newly created binary asset', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
-    storeOne.createBinaryFile('assets/logo.png', Buffer.from('logo').toString('base64'), 'image/png');
+    createBinary(storeOne, 'assets/logo.png', Buffer.from('logo').toString('base64'), 'image/png');
     await syncBidirectional(storeOne, REPO_SLUG);
     expect(remotePaths(remote)).toEqual(['assets/logo.png']);
 
@@ -267,7 +271,7 @@ describe('syncBidirectional multi-device', () => {
   test('renaming a binary asset propagates to other devices', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
-    storeOne.createBinaryFile('logo.png', Buffer.from('logo').toString('base64'), 'image/png');
+    createBinary(storeOne, 'logo.png', Buffer.from('logo').toString('base64'), 'image/png');
     await syncBidirectional(storeOne, REPO_SLUG);
     expect(remotePaths(remote)).toEqual(['logo.png']);
 
@@ -288,7 +292,7 @@ describe('syncBidirectional multi-device', () => {
   test('device two removes a binary asset deleted on device one', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
-    storeOne.createBinaryFile('assets/chart.svg', Buffer.from('<svg/>').toString('base64'), 'image/svg+xml');
+    createBinary(storeOne, 'assets/chart.svg', Buffer.from('<svg/>').toString('base64'), 'image/svg+xml');
     await syncBidirectional(storeOne, REPO_SLUG);
     expect(remotePaths(remote)).toEqual(['assets/chart.svg']);
 
