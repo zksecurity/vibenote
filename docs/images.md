@@ -19,7 +19,7 @@
 - Local storage now preserves binary file payloads (base64 + MIME) while `listNotes` keeps non-Markdown assets hidden from the UI; helper APIs (`listFiles`, `loadFile`) exposed for upcoming sync/UI steps.
 - Git sync now lists/pulls/pushes tracked image assets alongside Markdown while retaining merge behaviour for notes only; regression tests cover the new flows.
 - Data layer surfaces combined file metadata (markdown + images) to consumers, while UI continues filtering to notes for now.
-- Repo sidebar now derives entries from the combined file list (showing extensions) while still presenting only markdown notes; added regression coverage for mixed file state.
+- Repo sidebar now derives entries from the combined file list (showing extensions) while binary selections open an interim asset viewer placeholder; added regression coverage for mixed file state.
 
 ## Decisions
 - Image extensions: `png`, `jpg`, `jpeg`, `gif`, `webp`, `svg`, `avif` (confirmed 2025-10-08).  

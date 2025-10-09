@@ -2,6 +2,7 @@
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import { FileTree, type FileEntry } from './FileTree';
 import { Editor } from './Editor';
+import { AssetViewer } from './AssetViewer';
 import { RepoSwitcher } from './RepoSwitcher';
 import { Toggle } from './Toggle';
 import { GitHubIcon, ExternalLinkIcon, NotesIcon, CloseIcon, SyncIcon } from './RepoIcons';
@@ -249,8 +250,8 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
             <div className="sidebar-header">
               <div className="sidebar-title">
                 <div className="sidebar-title-main">
-                  <span>Notes</span>
-                  <span className="note-count">{notes.length}</span>
+                  <span>Files</span>
+                  <span className="note-count">{repoFiles.length}</span>
                 </div>
                 <button
                   className="btn icon only-mobile"
@@ -340,14 +341,18 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
                 )}
                 {doc !== undefined ? (
                   <div className="workspace-panels">
-                    <Editor
-                      key={doc.id}
-                      doc={doc}
-                      readOnly={!canEdit}
-                      onChange={(path, text) => {
-                        actions.updateNoteText(path, text);
-                      }}
-                    />
+                    {doc.kind === 'markdown' ? (
+                      <Editor
+                        key={doc.id}
+                        doc={doc}
+                        readOnly={!canEdit}
+                        onChange={(path, text) => {
+                          actions.updateNoteText(path, text);
+                        }}
+                      />
+                    ) : (
+                      <AssetViewer key={doc.id} file={doc} />
+                    )}
                   </div>
                 ) : (
                   <div className="empty-state">
@@ -447,20 +452,19 @@ function FileSidebar(props: FileSidebarProps) {
     onDeleteFolder,
   } = props;
 
-  const markdownFiles = useMemo(
-    () => files.filter((file) => file.kind === 'markdown'),
-    [files]
-  );
-
   const treeFiles = useMemo<FileEntry[]>(
     () =>
-      markdownFiles.map((file) => ({
+      files.map((file) => ({
         name: file.path.slice(file.path.lastIndexOf('/') + 1),
         path: file.path,
         dir: file.dir,
-        title: file.path.slice(file.path.lastIndexOf('/') + 1).replace(/\.md$/i, ''),
+        title:
+          file.kind === 'markdown'
+            ? file.path.slice(file.path.lastIndexOf('/') + 1).replace(/\.md$/i, '')
+            : undefined,
+        editable: file.kind === 'markdown',
       })),
-    [markdownFiles]
+    [files]
   );
 
   // make sure that for every folder, its parent folders is also included (otherwise expanding doesn't work)
@@ -502,7 +506,7 @@ function FileSidebar(props: FileSidebarProps) {
   function selectedDir() {
     if (selection?.kind === 'folder') return selection.path;
     if (selection?.kind === 'file') {
-      return markdownFiles.find((f) => normalizePath(f.path) === normalizePath(selection.path))?.dir ?? '';
+      return files.find((f) => normalizePath(f.path) === normalizePath(selection.path))?.dir ?? '';
     }
     return '';
   }

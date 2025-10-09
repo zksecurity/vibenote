@@ -6,6 +6,7 @@ export type FileEntry = {
   path: string; // dir + name
   dir: string; // '' for root
   title?: string; // extension-trimmed title for editing
+  editable: boolean;
 };
 
 type Selection = { kind: 'folder' | 'file'; path: string } | null;
@@ -36,7 +37,7 @@ type FolderNode = {
   name: string;
   children: (FolderNode | FileNode)[];
 };
-type FileNode = { kind: 'file'; name: string; dir: string; path: string; title?: string };
+type FileNode = { kind: 'file'; name: string; dir: string; path: string; title?: string; editable: boolean };
 
 export function FileTree(props: FileTreeProps) {
   // Rebuild the nested node structure whenever the note list changes.
@@ -153,7 +154,7 @@ export function FileTree(props: FileTreeProps) {
       e.preventDefault();
       if (selected.kind === 'file') {
         const f = props.files.find((x) => normalizePath(x.path) === normalizePath(selected.path));
-        if (!f) return;
+        if (!f || !f.editable) return;
         setEditing({ kind: 'file', path: f.path });
         const initial = f.title ?? trimMarkdownExtension(f.name);
         setEditText(initial);
@@ -164,7 +165,11 @@ export function FileTree(props: FileTreeProps) {
       }
     } else if (e.key === 'Delete') {
       e.preventDefault();
-      if (selected.kind === 'file') props.onDeleteFile(selected.path);
+      if (selected.kind === 'file') {
+        const f = props.files.find((x) => normalizePath(x.path) === normalizePath(selected.path));
+        if (!f || !f.editable) return;
+        props.onDeleteFile(selected.path);
+      }
       else if (selected.path !== '') props.onDeleteFolder(selected.path);
     } else if (e.key === 'Enter') {
       if (selected.kind === 'file') props.onSelectFile(selected.path);
@@ -247,8 +252,17 @@ export function FileTree(props: FileTreeProps) {
       setEditText('');
       return;
     }
-    if (context.kind === 'file' && context.path) props.onRenameFile(context.path, name);
-    else if (context.kind === 'folder' && context.path) props.onRenameFolder(context.path, name);
+    if (context.kind === 'file' && context.path) {
+      const entry = props.files.find((f) => normalizePath(f.path) === normalizePath(context.path));
+      if (!entry || !entry.editable) {
+        setEditing(null);
+        setEditText('');
+        return;
+      }
+      props.onRenameFile(context.path, name);
+    } else if (context.kind === 'folder' && context.path) {
+      props.onRenameFolder(context.path, name);
+    }
     setEditing(null);
     setEditText('');
   };
@@ -575,16 +589,21 @@ function Row(props: {
     props.selected?.kind === 'file' && normalizePath(props.selected.path) === normalizePath(node.path);
   const isEditing =
     props.editing?.kind === 'file' && normalizePath(props.editing.path) === normalizePath(node.path);
+  const isEditable = node.editable !== false;
   return (
     <div
       className={`tree-row ${isActive || isSelected ? 'is-active' : ''}`}
       style={{ paddingLeft: 6 + depth * 10 }}
       onClick={() => props.onSelectFile(node.path)}
       onContextMenu={(e) => {
+        if (!isEditable) return;
         e.preventDefault();
         props.onRequestMenu({ kind: 'file', path: node.path });
       }}
-      onPointerDown={(e) => startLongPress(e, { kind: 'file', path: node.path })}
+      onPointerDown={(e) => {
+        if (!isEditable) return;
+        startLongPress(e, { kind: 'file', path: node.path });
+      }}
       onDoubleClick={() => props.onSelectFile(node.path)}
     >
       <span className="tree-disclosure-spacer" />
@@ -615,12 +634,15 @@ function Row(props: {
       ) : (
         <span className="tree-title">{node.name}</span>
       )}
-      {isMenuHere && (
+      {isMenuHere && isEditable && (
         <div className="tree-menu" onClick={(e) => e.stopPropagation()}>
           <button
             className="btn small subtle"
             onClick={() => {
-              props.onStartEdit({ kind: 'file', path: node.path }, node.name);
+              props.onStartEdit(
+                { kind: 'file', path: node.path },
+                node.title ?? trimMarkdownExtension(node.name)
+              );
               props.onCloseMenu();
             }}
           >
@@ -712,7 +734,7 @@ function buildTree(files: FileEntry[], folders: string[]): FolderNode {
   for (let d of folders) addFolder(d);
   for (let f of files) {
     const parent = addFolder(f.dir);
-    parent.children.push({ kind: 'file', name: f.name, dir: f.dir, path: f.path, title: f.title });
+    parent.children.push({ kind: 'file', name: f.name, dir: f.dir, path: f.path, title: f.title, editable: f.editable });
   }
   // Sort like GitHub: folders A→Z, then files A→Z
   const sortNode = (n: FolderNode) => {

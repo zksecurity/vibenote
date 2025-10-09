@@ -10,6 +10,7 @@ import {
   type FileMeta,
   type NoteMeta,
   type NoteDoc,
+  type RepoFileDoc,
   clearAllLocalData,
   getLastActiveNoteId,
   setLastActiveNoteId,
@@ -72,7 +73,7 @@ type RepoDataState = {
   manageUrl: string | undefined;
 
   // repo content
-  doc: NoteDoc | undefined;
+  doc: RepoFileDoc | undefined;
   activePath: string | undefined;
   files: FileMeta[];
   notes: RepoNoteListItem[];
@@ -220,14 +221,26 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
 
   let activeId = activeNote?.id;
 
-  let localDoc = useMemo(() => {
-    if (!canEdit || activeId === undefined) return undefined;
-    return getRepoStore(slug).loadNote(activeId) ?? undefined;
-  }, [canEdit, activeId, localNotes]);
+  let resolvedPath = desiredPath ?? activeNote?.path;
 
-  let doc = canEdit ? localDoc : readOnlyDoc;
+  let activeFileMeta = useMemo(() => {
+    if (resolvedPath === undefined) return undefined;
+    return files.find((file) => normalizePath(file.path) === normalizePath(resolvedPath));
+  }, [files, resolvedPath]);
 
-  let activePath = doc?.path ?? activeNote?.path ?? desiredPath;
+  let localDoc = useMemo<RepoFileDoc | undefined>(() => {
+    if (!canEdit) return undefined;
+    if (!activeFileMeta) return undefined;
+    let store = getRepoStore(slug);
+    if (activeFileMeta.kind === 'markdown') {
+      return store.loadNote(activeFileMeta.id) ?? undefined;
+    }
+    return store.loadFile(activeFileMeta.id) ?? undefined;
+  }, [canEdit, activeFileMeta, slug, files]);
+
+  let doc: RepoFileDoc | undefined = canEdit ? localDoc : readOnlyDoc;
+
+  let activePath = doc?.path ?? resolvedPath;
 
   // EFFECTS
   // please avoid adding more effects here, keep logic clean/separated
