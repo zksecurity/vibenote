@@ -11,6 +11,7 @@ import {
   type NoteMeta,
   type NoteDoc,
   type RepoFileDoc,
+  isMarkdownMeta,
   clearAllLocalData,
   getLastActiveNoteId,
   setLastActiveNoteId,
@@ -137,7 +138,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
 } {
   // ORIGINAL STATE AND MAIN HOOKS
   // Local storage wrapper
-  let { files: localFiles, notes: localNotes, folders: localFolders } = useLocalRepoSnapshot(slug);
+  let { files: localFiles, folders: localFolders } = useLocalRepoSnapshot(slug);
 
   // Store the current GitHub App session token to toggle authenticated features instantly.
   let [sessionToken, setSessionToken] = useState<string | undefined>(() => getAppSessionToken() ?? undefined);
@@ -203,8 +204,16 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     return localFiles;
   }, [isReadOnly, readOnlyNotes, localFiles]);
 
+  let localNoteMetas = useMemo<NoteMeta[]>(() => {
+    let next: NoteMeta[] = [];
+    for (let file of localFiles) {
+      if (isMarkdownMeta(file)) next.push(file);
+    }
+    return next;
+  }, [localFiles]);
+
   // Derive the notes/folders from whichever source is powering the tree.
-  let notes: RepoNoteListItem[] = isReadOnly ? readOnlyNotes : localNotes;
+  let notes: RepoNoteListItem[] = isReadOnly ? readOnlyNotes : localNoteMetas;
   let folders = isReadOnly ? readOnlyFolders : localFolders;
 
   // determine the active note
@@ -234,9 +243,6 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     if (!canEdit) return undefined;
     if (!activeFileMeta) return undefined;
     let store = getRepoStore(slug);
-    if (activeFileMeta.kind === 'markdown') {
-      return store.loadNote(activeFileMeta.id) ?? undefined;
-    }
     return store.loadFile(activeFileMeta.id) ?? undefined;
   }, [canEdit, activeFileMeta, slug, files]);
 
@@ -323,11 +329,16 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     setActivePath(nextPath);
   };
 
-  const resolveEditableNote = (path: string | undefined): NoteMeta | undefined => {
+  const resolveEditableFile = (path: string | undefined): FileMeta | undefined => {
     if (path === undefined) return undefined;
     let normalized = normalizePath(path);
-    let list = getRepoStore(slug).listNotes();
-    return list.find((note) => normalizePath(note.path) === normalized);
+    let list = getRepoStore(slug).listFiles();
+    return list.find((file) => normalizePath(file.path) === normalized);
+  };
+
+  const resolveEditableNote = (path: string | undefined): NoteMeta | undefined => {
+    let meta = resolveEditableFile(path);
+    return meta && isMarkdownMeta(meta) ? meta : undefined;
   };
 
   // "Connect GitHub" button in the header
@@ -422,10 +433,19 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   const createNote = (dir: string, name: string) => {
     if (!canEdit) return undefined;
     let store = getRepoStore(slug);
-    let id = store.createNote(name, '', dir);
-    let created = store.loadNote(id);
+    let trimmedDir = (dir ?? '').trim();
+    let basePath = trimmedDir === '' ? `${name}.md` : `${trimmedDir}/${name}.md`;
+    let id = store.createFile({
+      path: basePath,
+      dir: trimmedDir,
+      title: name,
+      content: '',
+      kind: 'markdown',
+      mime: 'text/markdown',
+    });
+    let created = store.loadFile(id);
     scheduleAutoSync();
-    if (created) {
+    if (created && created.kind === 'markdown') {
       ensureActivePath(created.path);
       return created.path;
     }
@@ -450,9 +470,8 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     if (!meta) return;
     try {
       let store = getRepoStore(slug);
-      store.renameNote(meta.id, title);
-      let updated = store.loadNote(meta.id);
-      if (updated) ensureActivePath(updated.path);
+      let nextPath = store.renameFile(meta.path, title);
+      if (nextPath) ensureActivePath(nextPath);
       scheduleAutoSync();
     } catch (error) {
       logError(error);
@@ -480,7 +499,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     let meta = resolveEditableNote(path);
     if (!meta) return;
     let store = getRepoStore(slug);
-    store.deleteNote(meta.id);
+    store.deleteFileById(meta.id);
     if (activePath !== undefined && pathsEqual(activePath, path)) {
       ensureActivePath(undefined);
     }
@@ -517,12 +536,12 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   const deleteFolder = (dir: string) => {
     if (!canEdit) return;
     let localStore = getRepoStore(slug);
-    let notes = localStore.listNotes();
-    let hasNotes = notes.some((note) => {
-      let directory = note.dir ?? '';
+    let files = localStore.listFiles();
+    let hasFiles = files.some((file) => {
+      let directory = file.dir ?? '';
       return directory === dir || directory.startsWith(dir + '/');
     });
-    if (hasNotes && !window.confirm('Delete folder and all contained notes?')) return;
+    if (hasFiles && !window.confirm('Delete folder and all contained files?')) return;
     localStore.deleteFolder(dir);
     if (activePath !== undefined && isPathInsideDir(activePath, dir)) {
       ensureActivePath(undefined);

@@ -377,20 +377,35 @@ export class LocalStore {
   }): string {
     let id = crypto.randomUUID();
     let normPath = normalizeFilePath(params.path);
-    let kind = params.kind ?? inferKindFromPath(normPath);
+    let inferredKind = inferKindFromPath(normPath);
+    let kind: FileKind = params.kind ?? (inferredKind ?? 'markdown');
+    let updatedAt = Date.now();
     let dir = normalizeDir(params.dir ?? extractDir(normPath));
-    let title = params.title ?? (kind === 'markdown' ? basename(normPath).replace(/\.md$/i, '') : basename(normPath));
-    let mime = params.mime ?? (kind === 'markdown' ? DEFAULT_MARKDOWN_MIME : inferMimeFromPath(normPath));
+    let title: string;
+    let finalPath: string;
+    let mime: string;
+    if (kind === 'markdown') {
+      let baseTitle = params.title ?? (normPath.toLowerCase().endsWith('.md') ? normPath.slice(0, -3).split('/').pop() ?? normPath : basename(normPath));
+      title = ensureValidTitle(baseTitle || 'Untitled');
+      finalPath = joinPath(dir, `${title}.md`);
+      mime = params.mime ?? DEFAULT_MARKDOWN_MIME;
+    } else {
+      let baseName = params.title ?? basename(normPath);
+      let safeName = ensureValidFileName(baseName);
+      title = safeName;
+      finalPath = joinPath(dir, safeName);
+      mime = params.mime ?? inferMimeFromPath(finalPath);
+    }
     let meta: RepoFileMeta = {
       id,
-      path: normPath,
+      path: finalPath,
       title,
       dir,
-      updatedAt: Date.now(),
+      updatedAt,
       kind,
       mime,
     };
-    debugLog(this.slug, 'createFile', { id, path: normPath, kind });
+    debugLog(this.slug, 'createFile', { id, path: finalPath, kind });
     this.persistNewFile(meta, params.content);
     emitRepoChange(this.slug);
     return id;

@@ -38,3 +38,4 @@
 - 2025-10-08 – Sidebar consumes the generalized file list and new tests guard mixed markdown/image repos.
 - 2025-10-09 – Unified repo file types (metadata + docs) under shared `RepoFileMeta`/`RepoFileDoc` while keeping storage format backward compatible.
 - 2025-10-09 – Consolidated local storage rename/update flows and taught sync rename detection to treat binary assets the same as markdown notes.
+- 2025-10-09 – Data layer now consumes the unified file APIs so UI actions no longer branch between note and asset helpers.
