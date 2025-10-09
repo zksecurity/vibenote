@@ -7,6 +7,7 @@
   - Broaden local storage metadata (notes + assets) while keeping Markdown helpers intact.  
   - Teach Git sync to track binary asset files (png/jpg/jpeg/webp/gif/svg/avif) end-to-end once the sync module is free to change.  
   - Keep UI limited to Markdown for now by filtering asset entries.
+  - Fold Markdown-first helpers so they operate on the shared file types (first up: unify LocalStore actions like create/rename/delete to stop branching on note vs asset).
 - **Step 2 – Surface Assets in UI**  
   - Expose combined file listings from the data layer.  
   - Render images in the file tree and repo view while preserving existing keyboard + context flows.  
@@ -35,3 +36,4 @@
 - 2025-10-08 – Wired Git sync to treat images as binary assets end-to-end and added coverage for asset pulls/restores.
 - 2025-10-08 – Plumbed file-level metadata through repo data hook, keeping UI filtered pending next step.
 - 2025-10-08 – Sidebar consumes the generalized file list and new tests guard mixed markdown/image repos.
+- 2025-10-09 – Unified repo file types (metadata + docs) under shared `RepoFileMeta`/`RepoFileDoc` while keeping storage format backward compatible.
