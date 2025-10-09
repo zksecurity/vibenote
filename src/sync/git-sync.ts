@@ -802,7 +802,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         debugLog(slug, 'sync:restore-remote-missing', { path: doc.path });
       } else {
         // Delete locally (will record a tombstone, which we clear below)
-        store.deleteNote(id);
+        store.deleteFileById(id);
         deletedLocal++;
         debugLog(slug, 'sync:delete-local-remote-missing', { path: doc.path });
       }

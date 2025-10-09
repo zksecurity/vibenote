@@ -300,19 +300,10 @@ export class LocalStore {
     };
   }
 
-  listNotes(): NoteMeta[] {
-    return this.listFiles().filter(isMarkdownMeta) as NoteMeta[];
-  }
-
   listFiles(): FileMeta[] {
     const snapshot = ensureRepoSubscribers(this.slug).snapshot;
     this.index = snapshot.files;
     return snapshot.files.slice();
-  }
-
-  loadNote(id: string): NoteDoc | null {
-    let doc = this.loadFile(id);
-    return doc && isMarkdownDoc(doc) ? doc : null;
   }
 
   loadFile(id: string): RepoFileDoc | null {
@@ -341,12 +332,22 @@ export class LocalStore {
   }
 
   saveNote(id: string, text: string) {
-    let doc = this.loadNote(id);
+    this.updateFileContent(id, text, DEFAULT_MARKDOWN_MIME, 'saveNote');
+  }
+
+  saveFileContent(id: string, content: string, mime?: string) {
+    this.updateFileContent(id, content, mime, 'saveFileContent');
+  }
+
+  private updateFileContent(id: string, content: string, mime: string | undefined, op: string) {
+    let doc = this.loadFile(id);
     if (!doc) return;
     let updatedAt = Date.now();
-    localStorage.setItem(this.noteKey(id), serializeFile({ ...doc, content: text, updatedAt }));
-    debugLog(this.slug, 'saveNote', { id, path: doc.path, updatedAt });
-    this.touchIndex(id, { updatedAt });
+    let next: RepoFileDoc = { ...doc, content, updatedAt };
+    if (mime) next.mime = mime;
+    localStorage.setItem(this.noteKey(id), serializeFile(next));
+    this.touchIndex(id, { updatedAt, mime: next.mime, kind: next.kind });
+    debugLog(this.slug, op, { id, path: doc.path, updatedAt });
     emitRepoChange(this.slug);
   }
 
@@ -401,13 +402,24 @@ export class LocalStore {
   renameFile(path: string, newName: string): string | undefined {
     let meta = this.findMetaByPath(path);
     if (!meta) return undefined;
-    let doc = this.loadFile(meta.id);
+    return this.renameFileById(meta.id, newName);
+  }
+
+  renameFileById(id: string, newName: string): string | undefined {
+    let doc = this.loadFile(id);
     if (!doc) return undefined;
-    if (isMarkdownDoc(doc)) {
-      let trimmed = newName.replace(/\.md$/i, '');
-      this.renameNote(meta.id, trimmed);
-      let updated = this.loadNote(meta.id);
-      return updated?.path;
+    let isMarkdown = isMarkdownDoc(doc);
+    if (isMarkdown) {
+      let safeTitle = ensureValidTitle(newName || 'Untitled');
+      let normDir = normalizeDir(doc.dir);
+      let toPath = joinPath(normDir, `${safeTitle}.md`);
+      if (toPath === doc.path) return doc.path;
+      let next = this.applyRename(
+        doc,
+        { title: safeTitle, dir: normDir, path: toPath, mime: DEFAULT_MARKDOWN_MIME },
+        'renameFile'
+      );
+      return next.path;
     }
     let safeName = ensureValidFileName(newName);
     let normDir = normalizeDir(doc.dir);
@@ -469,19 +481,6 @@ export class LocalStore {
     if (!meta) return false;
     this.deleteFileById(meta.id);
     return true;
-  }
-
-  renameNote(id: string, title: string) {
-    let doc = this.loadNote(id);
-    if (!doc) return;
-    let safe = ensureValidTitle(title || 'Untitled');
-    let normDir = normalizeDir(doc.dir);
-    let path = joinPath(normDir, `${safe}.md`);
-    this.applyRename(doc, { title: safe, dir: normDir, path, mime: DEFAULT_MARKDOWN_MIME }, 'renameNote');
-  }
-
-  deleteNote(id: string) {
-    this.deleteFileById(id);
   }
 
   deleteFileById(id: string) {
@@ -639,12 +638,12 @@ export class LocalStore {
     // Update notes under moved folder
     let idx = this.loadIndex();
     for (let meta of idx) {
-      let dir = normalizeDir(meta.dir);
-      if (dir === from || dir.startsWith(from + '/')) {
-        let rest = dir.slice(from.length);
-        let nextDir = normalizeDir(to + rest);
-        this.moveNoteToDir(meta.id, nextDir);
-      }
+    let dir = normalizeDir(meta.dir);
+    if (dir === from || dir.startsWith(from + '/')) {
+      let rest = dir.slice(from.length);
+      let nextDir = normalizeDir(to + rest);
+        this.moveFileToDir(meta.id, nextDir);
+    }
     }
     localStorage.setItem(this.foldersKey, JSON.stringify(Array.from(updated).sort()));
     debugLog(this.slug, 'folder:move', { from, to });
@@ -668,25 +667,30 @@ export class LocalStore {
     for (let meta of idx.slice()) {
       let dir = normalizeDir(meta.dir);
       if (dir === target || dir.startsWith(target + '/')) {
-        this.deleteNote(meta.id);
+        this.deleteFileById(meta.id);
       }
     }
     debugLog(this.slug, 'folder:delete', { dir: target });
     emitRepoChange(this.slug);
   }
 
-  moveNoteToDir(id: string, dir: string) {
-    let doc = this.loadNote(id);
+  moveFileToDir(id: string, dir: string) {
+    let doc = this.loadFile(id);
     if (!doc) return;
     let normDir = normalizeDir(dir);
-    let safeTitle = ensureValidTitle(doc.title);
-    let toPath = joinPath(normDir, `${safeTitle}.md`);
-    if (toPath === doc.path) return;
-    this.applyRename(
-      doc,
-      { title: safeTitle, dir: normDir, path: toPath, mime: DEFAULT_MARKDOWN_MIME },
-      'note:moveDir'
-    );
+    let nextPath: string;
+    let nextTitle: string;
+    let nextMime = doc.mime;
+    if (isMarkdownDoc(doc)) {
+      nextTitle = ensureValidTitle(doc.title);
+      nextPath = joinPath(normDir, `${nextTitle}.md`);
+      nextMime = DEFAULT_MARKDOWN_MIME;
+    } else {
+      nextTitle = doc.title;
+      nextPath = joinPath(normDir, ensureValidFileName(doc.title));
+    }
+    if (nextPath === doc.path && normDir === normalizeDir(doc.dir)) return;
+    this.applyRename(doc, { title: nextTitle, dir: normDir, path: nextPath, mime: nextMime }, 'moveFileToDir');
   }
 
   private findMetaByPath(path: string): FileMeta | null {

@@ -12,6 +12,7 @@ import {
   type NoteDoc,
   type RepoFileDoc,
   isMarkdownMeta,
+  isMarkdownDoc,
   clearAllLocalData,
   getLastActiveNoteId,
   setLastActiveNoteId,
@@ -205,11 +206,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   }, [isReadOnly, readOnlyNotes, localFiles]);
 
   let localNoteMetas = useMemo<NoteMeta[]>(() => {
-    let next: NoteMeta[] = [];
-    for (let file of localFiles) {
-      if (isMarkdownMeta(file)) next.push(file);
-    }
-    return next;
+    return localFiles.filter(isMarkdownMeta) as NoteMeta[];
   }, [localFiles]);
 
   // Derive the notes/folders from whichever source is powering the tree.
@@ -299,7 +296,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
         }
         let localStore = getRepoStore(slug);
         localStore.replaceWithRemote(files);
-        let synced = localStore.listNotes();
+        let synced = localStore.listFiles().filter(isMarkdownMeta);
         // if we are not on a specific path yet and there's no stored active id, show README.md
         if (desiredPath === undefined) {
           let storedId = getLastActiveNoteId(slug);
@@ -426,7 +423,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     if (!canEdit) return;
     let meta = resolveEditableNote(path);
     if (!meta) return;
-    getRepoStore(slug).saveNote(meta.id, text);
+    getRepoStore(slug).saveFileContent(meta.id, text, 'text/markdown');
     scheduleAutoSync();
   };
 
@@ -809,9 +806,10 @@ function useSync(params: { slug: string; canSync: boolean; defaultBranch?: strin
         let cfg = buildRemoteConfig(slug, defaultBranch);
         let localStore = getRepoStore(slug);
         let pending = localStore
-          .listNotes()
-          .map((meta) => localStore.loadNote(meta.id))
-          .filter((note): note is NoteDoc => note !== null)
+          .listFiles()
+          .filter(isMarkdownMeta)
+          .map((meta) => localStore.loadFile(meta.id))
+          .filter((note): note is NoteDoc => note !== null && isMarkdownDoc(note))
           .filter((note) => note.lastSyncedHash !== hashText(note.content))
           .map((note) => ({
             path: note.path,

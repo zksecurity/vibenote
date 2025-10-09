@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { LocalStore } from './local';
+import { LocalStore, isMarkdownMeta, isMarkdownDoc } from './local';
 
 function createMarkdown(store: LocalStore, title: string, text: string, dir = '') {
   return store.createFile({
@@ -12,6 +12,15 @@ function createMarkdown(store: LocalStore, title: string, text: string, dir = ''
   });
 }
 
+function listMarkdown(store: LocalStore) {
+  return store.listFiles().filter(isMarkdownMeta);
+}
+
+function loadMarkdown(store: LocalStore, id: string) {
+  let doc = store.loadFile(id);
+  return doc && isMarkdownDoc(doc) ? doc : null;
+}
+
 describe('LocalStore cross-tab resilience', () => {
   test('stale second instance does not resurrect a deleted note', () => {
     const slug = 'user/repo';
@@ -21,24 +30,19 @@ describe('LocalStore cross-tab resilience', () => {
 
     // Second tab created before deletion; holds its own in-memory index
     const b = new LocalStore(slug);
-    expect(
-      b
-        .listNotes()
-        .map((n) => n.id)
-        .sort()
-    ).toEqual([id1, id2].sort());
+    expect(listMarkdown(b).map((n) => n.id).sort()).toEqual([id1, id2].sort());
 
     // Tab A deletes note A
-    a.deleteNote(id1);
-    expect(a.listNotes().some((n) => n.id === id1)).toBe(false);
+    a.deleteFileById(id1);
+    expect(listMarkdown(a).some((n) => n.id === id1)).toBe(false);
 
     // Tab B performs edits to the remaining note; should NOT re-add deleted id1
-    const docB = b.loadNote(id2);
+    const docB = loadMarkdown(b, id2);
     expect(docB).not.toBeNull();
-    if (docB) b.saveNote(docB.id, docB.content + ' updated');
+    if (docB) b.saveFileContent(docB.id, docB.content + ' updated', 'text/markdown');
 
     // LocalStorage should still be without id1
     const c = new LocalStore(slug);
-    expect(c.listNotes().some((n) => n.id === id1)).toBe(false);
+    expect(listMarkdown(c).some((n) => n.id === id1)).toBe(false);
   });
 });

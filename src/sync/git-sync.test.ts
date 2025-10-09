@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import { LocalStore, listTombstones, findBySyncedHash } from '../storage/local';
+import { LocalStore, listTombstones, findBySyncedHash, isMarkdownMeta, isMarkdownDoc } from '../storage/local';
 import { MockRemoteRepo } from '../test/mock-remote';
 
 const authModule = vi.hoisted(() => ({
@@ -40,8 +40,8 @@ describe('syncBidirectional', () => {
     await syncBidirectional(store, 'user/repo');
     expectParity(store, remote);
     expect(listTombstones(store.slug)).toHaveLength(0);
-    const firstDoc = store.loadNote(firstId);
-    const secondDoc = store.loadNote(secondId);
+    const firstDoc = loadMarkdown(store, firstId);
+    const secondDoc = loadMarkdown(store, secondId);
     expect(firstDoc?.path).toBe('First.md');
     expect(secondDoc?.path).toBe('Second.md');
   });
@@ -49,20 +49,20 @@ describe('syncBidirectional', () => {
   test('applies local deletions to remote without resurrection', async () => {
     const id = createMarkdown(store, 'Ghost', 'haunt me');
     await syncBidirectional(store, 'user/repo');
-    store.deleteNote(id);
+    store.deleteFileById(id);
     await syncBidirectional(store, 'user/repo');
     expectParity(store, remote);
-    expect(store.listNotes()).toHaveLength(0);
+    expect(listMarkdown(store)).toHaveLength(0);
     expect(listTombstones(store.slug)).toHaveLength(0);
   });
 
   test('renames move files remotely', async () => {
     const id = createMarkdown(store, 'Original', 'rename me');
     await syncBidirectional(store, 'user/repo');
-    store.renameNote(id, 'Renamed');
+    store.renameFileById(id, 'Renamed');
     await syncBidirectional(store, 'user/repo');
     expectParity(store, remote);
-    const notes = store.listNotes();
+    const notes = listMarkdown(store);
     expect(notes).toHaveLength(1);
     expect(notes[0]?.path).toBe('Renamed.md');
     expect([...remote.snapshot().keys()]).toEqual(['Renamed.md']);
@@ -72,7 +72,7 @@ describe('syncBidirectional', () => {
     const id = createMarkdown(store, 'test', 'body');
     await syncBidirectional(store, 'user/repo');
     expect([...remote.snapshot().keys()]).toEqual(['test.md']);
-    store.renameNote(id, 'test2');
+    store.renameFileById(id, 'test2');
     await syncBidirectional(store, 'user/repo');
     const remoteFiles = [...remote.snapshot().keys()].sort();
     expect(remoteFiles).toEqual(['test2.md']);
@@ -83,15 +83,12 @@ describe('syncBidirectional', () => {
     const id = createMarkdown(store, 'draft', 'original body');
     await syncBidirectional(store, 'user/repo');
     remote.setFile('draft.md', 'remote update');
-    store.renameNote(id, 'draft-renamed');
+    store.renameFileById(id, 'draft-renamed');
     await syncBidirectional(store, 'user/repo');
     const paths = [...remote.snapshot().keys()].sort();
     expect(paths).toEqual(['draft-renamed.md', 'draft.md']);
     expectParity(store, remote);
-    const localPaths = store
-      .listNotes()
-      .map((n) => n.path)
-      .sort();
+    const localPaths = listMarkdown(store).map((n) => n.path).sort();
     expect(localPaths).toEqual(['draft-renamed.md', 'draft.md']);
   });
 
@@ -99,9 +96,9 @@ describe('syncBidirectional', () => {
     remote.setFile('Remote.md', '# remote');
     await syncBidirectional(store, 'user/repo');
     expectParity(store, remote);
-    const notes = store.listNotes();
+    const notes = listMarkdown(store);
     expect(notes).toHaveLength(1);
-    const doc = store.loadNote(notes[0]?.id ?? '');
+    const doc = loadMarkdown(store, notes[0]?.id ?? '');
     expect(doc?.content).toBe('# remote');
   });
 
@@ -111,7 +108,7 @@ describe('syncBidirectional', () => {
     remote.deleteDirect('Shared.md');
     await syncBidirectional(store, 'user/repo');
     expectParity(store, remote);
-    expect(store.listNotes()).toHaveLength(0);
+    expect(listMarkdown(store)).toHaveLength(0);
   });
 
   test('syncs tracked image files while ignoring unrelated blobs', async () => {
@@ -136,9 +133,9 @@ describe('syncBidirectional', () => {
   test('pulls nested Markdown files', async () => {
     remote.setFile('nested/Nested.md', '# nested');
     await syncBidirectional(store, 'user/repo');
-    const notes = store.listNotes();
+    const notes = listMarkdown(store);
     expect(notes).toHaveLength(1);
-    const doc = store.loadNote(notes[0]?.id ?? '');
+    const doc = loadMarkdown(store, notes[0]?.id ?? '');
     expect(doc?.path).toBe('nested/Nested.md');
     expect(doc?.dir).toBe('nested');
     expect(doc?.content).toBe('# nested');
@@ -204,8 +201,7 @@ describe('syncBidirectional', () => {
     remote.setFile('README.md', 'root readme');
     remote.setFile('sub/README.md', 'sub readme');
     await syncBidirectional(store, 'user/repo');
-    const paths = store
-      .listNotes()
+    const paths = listMarkdown(store)
       .map((n) => n.path)
       .sort();
     expect(paths).toEqual(['README.md', 'sub/README.md']);
@@ -258,4 +254,13 @@ function createMarkdown(store: LocalStore, title: string, text: string, dir = ''
 
 function createBinary(store: LocalStore, path: string, base64: string, mime: string) {
   return store.createFile({ path, content: base64, kind: 'binary', mime });
+}
+
+function listMarkdown(store: LocalStore) {
+  return store.listFiles().filter(isMarkdownMeta);
+}
+
+function loadMarkdown(store: LocalStore, id: string) {
+  let doc = store.loadFile(id);
+  return doc && isMarkdownDoc(doc) ? doc : null;
 }
