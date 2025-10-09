@@ -21,7 +21,10 @@ import {
   updateNoteText,
   updateBinaryContent,
   moveNotePath,
+  moveFilePath,
   debugLog,
+  isMarkdownDoc,
+  isBinaryDoc,
 } from '../storage/local';
 import { mergeMarkdown } from '../merge/merge';
 
@@ -543,12 +546,14 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       let local = findByPath(storeSlug, entry.path);
 
       if (!local) {
-        let renamed = entry.sha ? findByRemoteSha(storeSlug, entry.sha) : null;
+        let renamedRecord = entry.sha ? findByRemoteSha(storeSlug, entry.sha) : null;
+        let renamed = renamedRecord && isMarkdownDoc(renamedRecord.doc) ? renamedRecord : null;
         if (!renamed) {
           remoteFile = await pullNote(config, entry.path);
           if (!remoteFile) continue;
           remoteTextHash = hashText(remoteFile.text || '');
-          renamed = findBySyncedHash(storeSlug, remoteTextHash);
+          let syncedRecord = findBySyncedHash(storeSlug, remoteTextHash);
+          renamed = syncedRecord && isMarkdownDoc(syncedRecord.doc) ? syncedRecord : null;
         }
         if (renamed && renamed.doc.path !== entry.path) {
           moveNotePath(storeSlug, renamed.id, entry.path);
@@ -658,17 +663,36 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
     }
 
     // Binary assets
-    const localFile = findFileByPath(storeSlug, entry.path);
+    let localFile = findFileByPath(storeSlug, entry.path);
+    let fetchedBinary: RemoteFileData | null = null;
     if (!localFile) {
       if (renameSources.has(entry.path) || deleteSources.has(entry.path)) continue;
-      const rf = await pullRepoFile(config, entry.path);
-      if (!rf) continue;
-      const id = store.createBinaryFile(rf.path, rf.binaryBase64 ?? '', rf.mime);
-      markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: hashText(rf.binaryBase64 ?? '') });
-      remoteMap.set(entry.path, { path: entry.path, sha: rf.sha, kind: 'binary', mime: rf.mime });
-      pulled++;
-      debugLog(slug, 'sync:pull:new-binary', { path: entry.path });
-      continue;
+      let renamedRecord = entry.sha ? findByRemoteSha(storeSlug, entry.sha) : null;
+      let renamed = renamedRecord && isBinaryDoc(renamedRecord.doc) ? renamedRecord : null;
+      if (!renamed) {
+        fetchedBinary = await pullRepoFile(config, entry.path);
+        if (!fetchedBinary) continue;
+        let remoteHash = hashText(fetchedBinary.binaryBase64 ?? '');
+        let syncedRecord = findBySyncedHash(storeSlug, remoteHash);
+        renamed = syncedRecord && isBinaryDoc(syncedRecord.doc) ? syncedRecord : null;
+      }
+      if (renamed && renamed.doc.path !== entry.path) {
+        moveFilePath(storeSlug, renamed.id, entry.path);
+        localFile = findFileByPath(storeSlug, entry.path);
+      }
+      if (!localFile) {
+        if (!fetchedBinary) {
+          fetchedBinary = await pullRepoFile(config, entry.path);
+          if (!fetchedBinary) continue;
+        }
+        const rf = fetchedBinary;
+        const id = store.createBinaryFile(rf.path, rf.binaryBase64 ?? '', rf.mime);
+        markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: hashText(rf.binaryBase64 ?? '') });
+        remoteMap.set(entry.path, { path: entry.path, sha: rf.sha, kind: 'binary', mime: rf.mime });
+        pulled++;
+        debugLog(slug, 'sync:pull:new-binary', { path: entry.path });
+        continue;
+      }
     }
 
     const { id, doc } = localFile;
@@ -692,7 +716,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       continue;
     }
 
-    const rf = await pullRepoFile(config, entry.path);
+    const rf = fetchedBinary ?? (await pullRepoFile(config, entry.path));
     if (!rf) continue;
     const remoteBase64 = rf.binaryBase64 ?? '';
     const remoteHash = hashText(remoteBase64);

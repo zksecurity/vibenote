@@ -911,15 +911,14 @@ export function findFileByPath(slug: string, path: string): { id: string; doc: R
 export function findByRemoteSha(
   slug: string,
   remoteSha: string | undefined
-): { id: string; doc: NoteDoc } | null {
+): { id: string; doc: RepoFileDoc } | null {
   if (!remoteSha) return null;
   let idx = loadIndexForSlug(slug);
-  for (let note of idx) {
-    let dr = localStorage.getItem(`${repoKey(slug, 'note')}:${note.id}`);
-    let doc = deserializeNote(dr);
-    if (doc === null) continue;
+  for (let meta of idx) {
+    let doc = loadFileForKey(slug, meta.id);
+    if (!doc) continue;
     if (doc.lastRemoteSha === remoteSha) {
-      return { id: note.id, doc };
+      return { id: meta.id, doc };
     }
   }
   return null;
@@ -929,38 +928,56 @@ export function findByRemoteSha(
 export function findBySyncedHash(
   slug: string,
   syncedHash: string | undefined
-): { id: string; doc: NoteDoc } | null {
+): { id: string; doc: RepoFileDoc } | null {
   if (!syncedHash) return null;
   let idx = loadIndexForSlug(slug);
-  for (let note of idx) {
-    let dr = localStorage.getItem(`${repoKey(slug, 'note')}:${note.id}`);
-    let doc = deserializeNote(dr);
-    if (doc === null) continue;
+  for (let meta of idx) {
+    let doc = loadFileForKey(slug, meta.id);
+    if (!doc) continue;
     if (doc.lastSyncedHash === syncedHash) {
-      return { id: note.id, doc };
+      return { id: meta.id, doc };
     }
   }
   return null;
 }
 
 export function moveNotePath(slug: string, id: string, toPath: string) {
-  let doc = loadFileForKey(slug, id);
-  if (!doc || !isMarkdownDoc(doc)) return;
-  let key = `${repoKey(slug, 'note')}:${id}`;
-  let updatedAt = Date.now();
-  let nextDir = extractDir(toPath);
-  let next: NoteDoc = { ...doc, path: toPath, dir: nextDir, updatedAt };
-  localStorage.setItem(key, serializeFile(next));
-  let idx = loadIndexForSlug(slug);
-  let j = idx.findIndex((n) => n.id === id);
-  if (j >= 0) {
-    let merged = normalizeMeta({ ...idx[j]!, path: toPath, dir: nextDir, updatedAt });
-    if (merged) idx[j] = merged;
-  }
-  localStorage.setItem(repoKey(slug, 'index'), serializeIndex(idx));
+  let normalizedPath = normalizeFilePath(toPath);
+  if (!normalizedPath.toLowerCase().endsWith('.md')) return;
+  mutateFileDoc(
+    slug,
+    id,
+    (doc) => {
+      if (!isMarkdownDoc(doc)) return null;
+      let updatedAt = Date.now();
+      let dir = extractDir(normalizedPath);
+      return {
+        doc: { ...doc, path: normalizedPath, dir, updatedAt },
+        indexPatch: { path: normalizedPath, dir },
+      };
+    },
+    'moveNotePath'
+  );
   rebuildFolderIndex(slug);
-  debugLog(slug, 'moveNotePath', { id, toPath });
-  emitRepoChange(slug);
+}
+
+export function moveFilePath(slug: string, id: string, toPath: string) {
+  let normalizedPath = normalizeFilePath(toPath);
+  mutateFileDoc(
+    slug,
+    id,
+    (doc) => {
+      if (doc.path === normalizedPath) return null;
+      let dir = extractDir(normalizedPath);
+      let updatedAt = Date.now();
+      return {
+        doc: { ...doc, path: normalizedPath, dir, updatedAt },
+        indexPatch: { path: normalizedPath, dir },
+      };
+    },
+    'moveFilePath'
+  );
+  rebuildFolderIndex(slug);
 }
 
 function loadIndexForSlug(slug: string): FileMeta[] {
