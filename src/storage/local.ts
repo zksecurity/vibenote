@@ -283,6 +283,7 @@ export class LocalStore {
     }
     localStorage.removeItem(this.noteKey(id));
     this.index = idx;
+    rebuildFolderIndex(this.slug);
     debugLog(this.slug, 'deleteNote', { id, path: doc?.path });
     emitRepoChange(this.slug);
   }
@@ -668,6 +669,42 @@ export function findByPath(slug: string, path: string): { id: string; doc: NoteD
   return null;
 }
 
+export function findByRemoteSha(slug: string, remoteSha: string | undefined): { id: string; doc: NoteDoc } | null {
+  if (!remoteSha) return null;
+  let idx = loadIndexForSlug(slug);
+  for (let note of idx) {
+    let dr = localStorage.getItem(`${repoKey(slug, 'note')}:${note.id}`);
+    if (!dr) continue;
+    try {
+      let doc = JSON.parse(dr) as NoteDoc;
+      if (doc.lastRemoteSha === remoteSha) {
+        return { id: note.id, doc };
+      }
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+export function findBySyncedHash(slug: string, syncedHash: string | undefined): { id: string; doc: NoteDoc } | null {
+  if (!syncedHash) return null;
+  let idx = loadIndexForSlug(slug);
+  for (let note of idx) {
+    let dr = localStorage.getItem(`${repoKey(slug, 'note')}:${note.id}`);
+    if (!dr) continue;
+    try {
+      let doc = JSON.parse(dr) as NoteDoc;
+      if (doc.lastSyncedHash === syncedHash) {
+        return { id: note.id, doc };
+      }
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
 export function moveNotePath(slug: string, id: string, toPath: string) {
   let key = `${repoKey(slug, 'note')}:${id}`;
   let docRaw = localStorage.getItem(key);
@@ -689,6 +726,7 @@ export function moveNotePath(slug: string, id: string, toPath: string) {
     idx[j] = { id: old.id, path: toPath, title: old.title, dir: nextDir, updatedAt };
   }
   localStorage.setItem(repoKey(slug, 'index'), JSON.stringify(idx));
+  rebuildFolderIndex(slug);
   debugLog(slug, 'moveNotePath', { id, toPath });
   emitRepoChange(slug);
 }
@@ -701,6 +739,21 @@ function loadIndexForSlug(slug: string): NoteMeta[] {
   } catch {
     return [];
   }
+}
+
+function rebuildFolderIndex(slug: string) {
+  // Recompute folder metadata so cross-device sync drops empty directories.
+  let idx = loadIndexForSlug(slug);
+  let folderSet = new Set<string>();
+  for (let note of idx) {
+    let dir = normalizeDir(note.dir);
+    if (dir === '') continue;
+    for (let ancestor of ancestorsOf(dir)) folderSet.add(ancestor);
+  }
+  localStorage.setItem(
+    repoKey(slug, FOLDERS_SUFFIX),
+    JSON.stringify(Array.from(folderSet).sort())
+  );
 }
 
 function loadFoldersForSlug(slug: string): string[] {

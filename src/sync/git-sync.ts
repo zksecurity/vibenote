@@ -14,6 +14,8 @@ import {
   listTombstones,
   removeTombstones,
   findByPath,
+  findByRemoteSha,
+  findBySyncedHash,
   markSynced,
   updateNoteText,
   moveNotePath,
@@ -425,12 +427,29 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
 
   // Process remote files: pull new or changed, merge when both changed
   for (const e of entries) {
-    const local = findByPath(storeSlug, e.path);
+    let remoteFile: RemoteFile | null = null;
+    let remoteTextHash: string | null = null;
+    let local = findByPath(storeSlug, e.path);
+    if (!local) {
+      let renamed = e.sha ? findByRemoteSha(storeSlug, e.sha) : null;
+      if (!renamed) {
+        remoteFile = await pullNote(config, e.path);
+        if (!remoteFile) continue;
+        remoteTextHash = hashText(remoteFile.text || '');
+        renamed = findBySyncedHash(storeSlug, remoteTextHash);
+      }
+      if (renamed && renamed.doc.path !== e.path) {
+        moveNotePath(storeSlug, renamed.id, e.path);
+        local = findByPath(storeSlug, e.path);
+      }
+    }
     if (!local) {
       if (renameSources.has(e.path) || deleteSources.has(e.path)) continue;
       // New remote file → pull
-      const rf = await pullNote(config, e.path);
+      const rf = remoteFile ?? (await pullNote(config, e.path));
       if (!rf) continue;
+      remoteFile = rf;
+      remoteTextHash = remoteTextHash ?? hashText(rf.text || '');
       // Create local note using the store so index stays consistent
       const title = e.path.slice(e.path.lastIndexOf('/') + 1).replace(/\.md$/i, '');
       const dir = (() => {
@@ -439,7 +458,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       })();
       const id = store.createNote(title, rf.text, dir);
       // Mark sync metadata
-      markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: hashText(rf.text) });
+      markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: remoteTextHash ?? hashText(rf.text) });
       pulled++;
       debugLog(slug, 'sync:pull:new', { path: e.path });
       continue;
@@ -461,18 +480,40 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       }
     } else {
       // Remote changed; fetch remote content
-      const rf = await pullNote(config, e.path);
+      const rf = remoteFile ?? (await pullNote(config, e.path));
       if (!rf) continue;
       const base = lastRemoteSha ? await fetchBlob(config, lastRemoteSha) : '';
       const localText = doc.text || '';
       const localHash = hashText(localText);
       const remoteHash = hashText(rf.text || '');
+      const baseHash = hashText(base ?? '');
       if (remoteHash === localHash) {
         markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: localHash });
         debugLog(slug, 'sync:remote-equal-local', { path: doc.path });
         continue;
       }
-      if (doc.lastSyncedHash !== hashText(localText)) {
+      const remoteMatchesBase = doc.lastSyncedHash !== undefined && remoteHash === doc.lastSyncedHash;
+      const localChangedFromBase = doc.lastSyncedHash !== localHash;
+      if (remoteMatchesBase && localChangedFromBase) {
+        debugLog(slug, 'sync:push:rename-detected', {
+          path: doc.path,
+          remoteHash,
+          baseHash,
+          localHash,
+          lastRemoteSha,
+          remoteSha: rf.sha,
+        });
+        const newSha = await putFile(
+          config,
+          { path: doc.path, text: localText, baseSha: e.sha },
+          'vibenote: update notes'
+        );
+        markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: localHash });
+        pushed++;
+        debugLog(slug, 'sync:push:remote-rename-only', { path: doc.path });
+        continue;
+      }
+      if (doc.lastSyncedHash !== localHash) {
         // both changed → merge
         const mergedText = mergeMarkdown(base ?? '', localText, rf.text);
         if (mergedText !== localText) {
