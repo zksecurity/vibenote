@@ -288,12 +288,9 @@ describe('syncBidirectional multi-device', () => {
 
     let storeTwo = useDevice(deviceTwo);
     storeTwo.saveNote(noteId, 'offline edit after rename');
-    console.log('before sync', storeTwo.loadNote(noteId));
-    console.log('remote pre-sync', remote.snapshot());
     await syncBidirectional(storeTwo, REPO_SLUG);
 
     let updated = storeTwo.loadNote(noteId);
-    console.log('after sync', updated);
     expect(updated?.path).toBe('guides/Doc.md');
     expect(updated?.text).toBe('offline edit after rename');
     expect(remote.snapshot().get('guides/Doc.md')).toBe('offline edit after rename');

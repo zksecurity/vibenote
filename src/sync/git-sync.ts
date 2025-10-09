@@ -486,12 +486,34 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       const localText = doc.text || '';
       const localHash = hashText(localText);
       const remoteHash = hashText(rf.text || '');
+      const baseHash = hashText(base ?? '');
       if (remoteHash === localHash) {
         markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: localHash });
         debugLog(slug, 'sync:remote-equal-local', { path: doc.path });
         continue;
       }
-      if (doc.lastSyncedHash !== hashText(localText)) {
+      const remoteMatchesBase = doc.lastSyncedHash !== undefined && remoteHash === doc.lastSyncedHash;
+      const localChangedFromBase = doc.lastSyncedHash !== localHash;
+      if (remoteMatchesBase && localChangedFromBase) {
+        debugLog(slug, 'sync:push:rename-detected', {
+          path: doc.path,
+          remoteHash,
+          baseHash,
+          localHash,
+          lastRemoteSha,
+          remoteSha: rf.sha,
+        });
+        const newSha = await putFile(
+          config,
+          { path: doc.path, text: localText, baseSha: e.sha },
+          'vibenote: update notes'
+        );
+        markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: localHash });
+        pushed++;
+        debugLog(slug, 'sync:push:remote-rename-only', { path: doc.path });
+        continue;
+      }
+      if (doc.lastSyncedHash !== localHash) {
         // both changed → merge
         const mergedText = mergeMarkdown(base ?? '', localText, rf.text);
         if (mergedText !== localText) {
