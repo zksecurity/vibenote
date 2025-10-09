@@ -942,19 +942,18 @@ export function findBySyncedHash(
 }
 
 export function moveNotePath(slug: string, id: string, toPath: string) {
-  let normalized = normalizeFilePath(toPath);
-  if (!normalized.toLowerCase().endsWith('.md')) return;
+  let normalizedPath = normalizeFilePath(toPath);
+  if (!normalizedPath.toLowerCase().endsWith('.md')) return;
   mutateFileDoc(
     slug,
     id,
     (doc) => {
       if (!isMarkdownDoc(doc)) return null;
-      if (doc.path === normalized) return null;
       let updatedAt = Date.now();
-      let dir = extractDir(normalized);
+      let dir = extractDir(normalizedPath);
       return {
-        doc: { ...doc, path: normalized, dir, updatedAt },
-        indexPatch: { path: normalized, dir },
+        doc: { ...doc, path: normalizedPath, dir, updatedAt },
+        indexPatch: { path: normalizedPath, dir },
       };
     },
     'moveNotePath'
@@ -963,17 +962,17 @@ export function moveNotePath(slug: string, id: string, toPath: string) {
 }
 
 export function moveFilePath(slug: string, id: string, toPath: string) {
-  let normalized = normalizeFilePath(toPath);
+  let normalizedPath = normalizeFilePath(toPath);
   mutateFileDoc(
     slug,
     id,
     (doc) => {
-      if (doc.path === normalized) return null;
+      if (doc.path === normalizedPath) return null;
+      let dir = extractDir(normalizedPath);
       let updatedAt = Date.now();
-      let dir = extractDir(normalized);
       return {
-        doc: { ...doc, path: normalized, dir, updatedAt },
-        indexPatch: { path: normalized, dir },
+        doc: { ...doc, path: normalizedPath, dir, updatedAt },
+        indexPatch: { path: normalizedPath, dir },
       };
     },
     'moveFilePath'

@@ -681,8 +681,11 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         localFile = findFileByPath(storeSlug, entry.path);
       }
       if (!localFile) {
-        const rf = fetchedBinary ?? (await pullRepoFile(config, entry.path));
-        if (!rf) continue;
+        if (!fetchedBinary) {
+          fetchedBinary = await pullRepoFile(config, entry.path);
+          if (!fetchedBinary) continue;
+        }
+        const rf = fetchedBinary;
         const id = store.createBinaryFile(rf.path, rf.binaryBase64 ?? '', rf.mime);
         markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: hashText(rf.binaryBase64 ?? '') });
         remoteMap.set(entry.path, { path: entry.path, sha: rf.sha, kind: 'binary', mime: rf.mime });
@@ -713,7 +716,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       continue;
     }
 
-    const rf = await pullRepoFile(config, entry.path);
+    const rf = fetchedBinary ?? (await pullRepoFile(config, entry.path));
     if (!rf) continue;
     const remoteBase64 = rf.binaryBase64 ?? '';
     const remoteHash = hashText(remoteBase64);
