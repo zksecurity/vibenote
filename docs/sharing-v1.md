@@ -5,7 +5,7 @@
 - `PUBLIC_VIEWER_BASE_URL` – Base URL for the public viewer (e.g. `https://public.vibenote.dev`). Used when building share links.
 - `PUBLIC_VIEWER_ORIGINS` – Comma separated list of origins allowed to call the viewer endpoints (defaults to `http://localhost:5173`).
 - `SHARE_STORE_FILE` – Path to the JSON file that stores share metadata. Defaults to `./server/data/shares.json`.
-- `GIST_SERVICE_TOKEN` – GitHub token (with `gist` scope) belonging to the service account that owns generated gists.
+- Gists are created with the sharing user’s own `gist`-scoped access token (no global service token required).
 
 ## Size Limits
 
@@ -32,4 +32,3 @@
 ## Telemetry Hooks
 
 - TODO: For v1 we log at INFO when links are created or revoked. Counter metrics (`share_created`, `share_viewed`, `share_revoked`) should be wired into the future telemetry service once available.
-

@@ -251,10 +251,10 @@ New route: `/s/:shareId`
 
 ## GitHub Integration Notes
 
-- Use **user OAuth token** with `gist` scope for gist creation **OR** a **service user** PAT with `gist` scope (pick one and document).
-
-  - If using user OAuth: store minimal refresh token (existing infra).
-  - If using service user: record `createdBy.githubLogin` and mark gist owner accordingly in description.
+- Obtain `gist` scope from the user during the GitHub App OAuth flow (add it to the `scope` parameter).
+- Store the resulting access/refresh tokens in the existing encrypted session store.
+- All gist create/update/delete calls must use that user access token so the share stays under their account and can be refreshed.
+- If the token lacks `gist`, reject share requests with a friendly message prompting the user to reconnect and grant the scope.
 
 - Gist composition:
 
@@ -272,6 +272,7 @@ New route: `/s/:shareId`
 
 - **No content** stored server-side (only the mapping + small derived metadata).
 - **No gistId in client**; only `shareId`.
+- Gists are owned by the sharing user; we never mint gists with shared service credentials.
 - CORS locked to `public.vibenote.dev` (and app origin for management APIs).
 - `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`, `Content-Security-Policy` minimal (no inline scripts if possible).
 - Rate limit:
@@ -377,7 +378,7 @@ That’s it — ship v1.
 
 ## Additional Notes From Implementation
 
-- Secret gists are created with a dedicated service token (`GIST_SERVICE_TOKEN`) while the originating user’s OAuth token is only used to read repository content.
+- Secret gists are created and updated with the sharing user’s GitHub OAuth access token (requires `gist` scope); no shared service credential is used.
 - Asset discovery keeps every raw reference so query-string variations all rewrite to the canonical gist filenames; binary assets are stored as base64 in the gist and decoded on proxy.
 - Share metadata is stored in a JSON-backed file store (`SHARE_STORE_FILE`) that mirrors the existing session-store pattern and supports soft-disable without deleting rows.
 - Viewer bundles live under `src/viewer` with a standalone `viewer.html`; Vercel routes `/s/*` directly to the viewer bundle so the main SPA keeps its own routing.
