@@ -317,6 +317,26 @@ export class LocalStore {
     return deserializeFile(raw);
   }
 
+  private persistNewFile(
+    meta: RepoFileMeta,
+    content: string,
+    extras?: { lastRemoteSha?: string; lastSyncedHash?: string }
+  ): RepoFileDoc {
+    let doc: RepoFileDoc = {
+      ...meta,
+      content,
+      lastRemoteSha: extras?.lastRemoteSha,
+      lastSyncedHash: extras?.lastSyncedHash,
+    };
+    let idx = this.loadIndex();
+    idx.push(meta);
+    localStorage.setItem(this.indexKey, serializeIndex(idx));
+    localStorage.setItem(this.noteKey(meta.id), serializeFile(doc));
+    this.index = idx;
+    ensureFolderForSlug(this.slug, meta.dir);
+    return doc;
+  }
+
   saveNote(id: string, text: string) {
     let doc = this.loadNote(id);
     if (!doc) return;
@@ -333,23 +353,18 @@ export class LocalStore {
     let displayTitle = title.trim() || 'Untitled';
     let normDir = normalizeDir(dir);
     let path = joinPath(normDir, `${safe}.md`);
+    let updatedAt = Date.now();
     let meta: NoteMeta = {
       id,
       path,
       title: displayTitle,
       dir: normDir,
-      updatedAt: Date.now(),
+      updatedAt,
       kind: 'markdown',
       mime: DEFAULT_MARKDOWN_MIME,
     };
-    let doc: NoteDoc = { ...meta, content: text };
-    let idx = this.loadIndex();
-    idx.push(meta);
-    localStorage.setItem(this.indexKey, serializeIndex(idx));
-    localStorage.setItem(this.noteKey(id), serializeFile(doc));
-    this.index = idx;
-    this.addFolder(normDir);
     debugLog(this.slug, 'createNote', { id, path, title: displayTitle });
+    this.persistNewFile(meta, text);
     emitRepoChange(this.slug);
     return id;
   }
@@ -369,19 +384,8 @@ export class LocalStore {
       kind: 'binary',
       mime: mime ?? inferMimeFromPath(normPath),
     };
-    let doc: RepoFileDoc = {
-      ...meta,
-      content: base64,
-      lastRemoteSha: undefined,
-      lastSyncedHash: undefined,
-    };
-    let idx = this.loadIndex();
-    idx.push(meta);
-    localStorage.setItem(this.indexKey, serializeIndex(idx));
-    localStorage.setItem(this.noteKey(id), serializeFile(doc));
-    this.index = idx;
-    ensureFolderForSlug(this.slug, dir);
     debugLog(this.slug, 'createBinary', { id, path: normPath });
+    this.persistNewFile(meta, base64);
     emitRepoChange(this.slug);
     return id;
   }
@@ -398,6 +402,49 @@ export class LocalStore {
     return this.renameBinary(meta.id, newName);
   }
 
+  private applyRename(
+    doc: RepoFileDoc,
+    target: { title: string; dir: string; path: string; mime: string },
+    op: string
+  ): RepoFileDoc {
+    let fromPath = doc.path;
+    let updatedAt = Date.now();
+    let next: RepoFileDoc = {
+      ...doc,
+      title: target.title,
+      dir: target.dir,
+      path: target.path,
+      mime: target.mime,
+      updatedAt,
+    };
+    let pathChanged = fromPath !== target.path;
+    if (pathChanged) {
+      delete next.lastRemoteSha;
+      delete next.lastSyncedHash;
+    }
+    localStorage.setItem(this.noteKey(doc.id), serializeFile(next));
+    this.touchIndex(doc.id, {
+      title: target.title,
+      dir: target.dir,
+      path: target.path,
+      updatedAt,
+      kind: next.kind,
+      mime: next.mime,
+    });
+    ensureFolderForSlug(this.slug, target.dir);
+    if (pathChanged) {
+      recordRenameTombstone(this.slug, {
+        from: fromPath,
+        to: target.path,
+        lastRemoteSha: doc.lastRemoteSha,
+        renamedAt: updatedAt,
+      });
+    }
+    debugLog(this.slug, op, { id: doc.id, fromPath, toPath: target.path, pathChanged });
+    emitRepoChange(this.slug);
+    return next;
+  }
+
   deleteFile(path: string): boolean {
     let meta = this.findMetaByPath(path);
     if (!meta) return false;
@@ -408,29 +455,10 @@ export class LocalStore {
   renameNote(id: string, title: string) {
     let doc = this.loadNote(id);
     if (!doc) return;
-    let fromPath = doc.path;
     let safe = ensureValidTitle(title || 'Untitled');
     let normDir = normalizeDir(doc.dir);
     let path = joinPath(normDir, `${safe}.md`);
-    let updatedAt = Date.now();
-    let next: NoteDoc = { ...doc, title: safe, path, dir: normDir, updatedAt };
-    let pathChanged = fromPath !== path;
-    if (pathChanged) {
-      delete next.lastRemoteSha;
-      delete next.lastSyncedHash;
-    }
-    localStorage.setItem(this.noteKey(id), serializeFile(next));
-    this.touchIndex(id, { title: safe, path, dir: normDir, updatedAt });
-    if (pathChanged) {
-      recordRenameTombstone(this.slug, {
-        from: fromPath,
-        to: path,
-        lastRemoteSha: doc.lastRemoteSha,
-        renamedAt: updatedAt,
-      });
-    }
-    debugLog(this.slug, 'renameNote', { id, fromPath, toPath: path, pathChanged });
-    emitRepoChange(this.slug);
+    this.applyRename(doc, { title: safe, dir: normDir, path, mime: DEFAULT_MARKDOWN_MIME }, 'renameNote');
   }
 
   private renameBinary(id: string, newName: string): string | undefined {
@@ -440,34 +468,8 @@ export class LocalStore {
     let normDir = normalizeDir(doc.dir);
     let toPath = joinPath(normDir, safeName);
     if (toPath === doc.path) return doc.path;
-    let updatedAt = Date.now();
-    let next: RepoFileDoc = {
-      ...doc,
-      title: safeName,
-      path: toPath,
-      dir: normDir,
-      updatedAt,
-      lastRemoteSha: undefined,
-      lastSyncedHash: undefined,
-    };
-    localStorage.setItem(this.noteKey(id), serializeFile(next));
-    this.touchIndex(id, {
-      title: safeName,
-      path: toPath,
-      dir: normDir,
-      updatedAt,
-      kind: 'binary',
-      mime: doc.mime,
-    });
-    ensureFolderForSlug(this.slug, normDir);
-    recordRenameTombstone(this.slug, {
-      from: doc.path,
-      to: toPath,
-      lastRemoteSha: doc.lastRemoteSha,
-      renamedAt: updatedAt,
-    });
-    emitRepoChange(this.slug);
-    return toPath;
+    let next = this.applyRename(doc, { title: safeName, dir: normDir, path: toPath, mime: doc.mime }, 'renameBinary');
+    return next.path;
   }
 
   deleteNote(id: string) {
@@ -716,14 +718,6 @@ export class LocalStore {
       }
     }
     localStorage.setItem(this.foldersKey, JSON.stringify(Array.from(folderSet).sort()));
-  }
-
-  private addFolder(dir: string) {
-    let d = normalizeDir(dir);
-    if (d === '') return;
-    let set = new Set<string>(this.listFolders());
-    for (let a of ancestorsOf(d)) set.add(a);
-    localStorage.setItem(this.foldersKey, JSON.stringify(Array.from(set).sort()));
   }
 
   private noteKey(id: string): string {
