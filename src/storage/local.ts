@@ -659,27 +659,11 @@ export class LocalStore {
   moveNoteToDir(id: string, dir: string) {
     let doc = this.loadNote(id);
     if (!doc) return;
-    let fromPath = doc.path;
     let normDir = normalizeDir(dir);
-    let toPath = joinPath(normDir, `${ensureValidTitle(doc.title)}.md`);
-    if (toPath === fromPath) return;
-    let updatedAt = Date.now();
-    let next: NoteDoc = { ...doc, dir: normDir, path: toPath, updatedAt };
-    delete next.lastRemoteSha;
-    delete next.lastSyncedHash;
-    localStorage.setItem(this.noteKey(id), serializeFile(next));
-    this.touchIndex(id, { dir: normDir, path: toPath, updatedAt });
-    recordRenameTombstone(this.slug, {
-      from: fromPath,
-      to: toPath,
-      lastRemoteSha: doc.lastRemoteSha,
-      renamedAt: updatedAt,
-    });
-    // Ensure folder index contains target and ancestors
-    let folders = new Set(this.listFolders());
-    for (let a of ancestorsOf(normDir)) folders.add(a);
-    localStorage.setItem(this.foldersKey, JSON.stringify(Array.from(folders).sort()));
-    debugLog(this.slug, 'note:moveDir', { id, toDir: normDir });
+    let safeTitle = ensureValidTitle(doc.title);
+    let toPath = joinPath(normDir, `${safeTitle}.md`);
+    if (toPath === doc.path) return;
+    this.applyRename(doc, { title: safeTitle, dir: normDir, path: toPath, mime: DEFAULT_MARKDOWN_MIME }, 'note:moveDir');
   }
 
   private findMetaByPath(path: string): FileMeta | null {
@@ -862,40 +846,43 @@ export function markSynced(slug: string, id: string, patch: { remoteSha?: string
 }
 
 export function updateNoteText(slug: string, id: string, text: string) {
-  let key = `${repoKey(slug, 'note')}:${id}`;
-  let doc = loadFileForKey(slug, id);
-  if (!doc || !isMarkdownDoc(doc)) return;
-  let updatedAt = Date.now();
-  let next: NoteDoc = { ...doc, content: text, updatedAt };
-  localStorage.setItem(key, serializeFile(next));
-  touchIndexUpdatedAt(slug, id, updatedAt, { kind: 'markdown', mime: DEFAULT_MARKDOWN_MIME });
-  debugLog(slug, 'updateNoteText', { id, updatedAt });
-  emitRepoChange(slug);
+  mutateFileDoc(
+    slug,
+    id,
+    (doc) => {
+      if (!isMarkdownDoc(doc)) return null;
+      let updatedAt = Date.now();
+      let next: NoteDoc = { ...doc, content: text, updatedAt };
+      return { doc: next };
+    },
+    'updateNoteText'
+  );
 }
 
 export function updateBinaryContent(slug: string, id: string, base64: string, mime?: string) {
-  let key = `${repoKey(slug, 'note')}:${id}`;
-  let doc = loadFileForKey(slug, id);
-  if (!doc) return;
-  let updatedAt = Date.now();
-  let inferredMime = mime ?? doc.mime ?? inferMimeFromPath(doc.path);
-  let next: RepoFileDoc;
-  if (isBinaryDoc(doc)) {
-    next = { ...doc, content: base64, mime: inferredMime, updatedAt };
-  } else {
-    next = {
-      ...doc,
-      updatedAt,
-      kind: 'binary',
-      mime: inferredMime,
-      content: base64,
-    };
-  }
-  next.lastSyncedHash = hashText(base64);
-  localStorage.setItem(key, serializeFile(next));
-  touchIndexUpdatedAt(slug, id, updatedAt, { kind: next.kind, mime: next.mime });
-  debugLog(slug, 'updateBinary', { id, updatedAt });
-  emitRepoChange(slug);
+  mutateFileDoc(
+    slug,
+    id,
+    (doc) => {
+      let updatedAt = Date.now();
+      let inferredMime = mime ?? doc.mime ?? inferMimeFromPath(doc.path);
+      let next: RepoFileDoc;
+      if (isBinaryDoc(doc)) {
+        next = { ...doc, content: base64, mime: inferredMime, updatedAt };
+      } else {
+        next = {
+          ...doc,
+          updatedAt,
+          kind: 'binary',
+          mime: inferredMime,
+          content: base64,
+        };
+      }
+      next.lastSyncedHash = hashText(base64);
+      return { doc: next };
+    },
+    'updateBinary'
+  );
 }
 
 export function findByPath(slug: string, path: string): { id: string; doc: NoteDoc } | null {
@@ -1013,6 +1000,29 @@ function touchIndexUpdatedAt(slug: string, id: string, updatedAt: number, patch?
     if (merged) idx[i] = merged;
   }
   localStorage.setItem(repoKey(slug, 'index'), serializeIndex(idx));
+}
+
+type DocMutationResult = { doc: RepoFileDoc; indexPatch?: Partial<FileMeta> } | null;
+
+function mutateFileDoc(
+  slug: string,
+  id: string,
+  mutate: (doc: RepoFileDoc) => DocMutationResult,
+  op: string
+) {
+  let key = `${repoKey(slug, 'note')}:${id}`;
+  let current = loadFileForKey(slug, id);
+  if (!current) return;
+  let result = mutate(current);
+  if (!result) return;
+  let next = result.doc;
+  let updatedAt =
+    typeof next.updatedAt === 'number' && Number.isFinite(next.updatedAt) ? next.updatedAt : Date.now();
+  let indexPatch: Partial<FileMeta> = { kind: next.kind, mime: next.mime, ...result.indexPatch };
+  localStorage.setItem(key, serializeFile(next));
+  touchIndexUpdatedAt(slug, id, updatedAt, indexPatch);
+  debugLog(slug, op, { id, updatedAt });
+  emitRepoChange(slug);
 }
 
 function loadFileForKey(slug: string, id: string): RepoFileDoc | null {
