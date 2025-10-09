@@ -5,6 +5,22 @@ export type FileKind = 'markdown' | 'binary';
 
 const DEFAULT_MARKDOWN_MIME = 'text/markdown' as const;
 
+type StoredFileMeta = {
+  id: string;
+  path: string;
+  title: string;
+  dir: string;
+  updatedAt: number;
+  kind?: FileKind;
+  mime?: string;
+};
+
+type StoredFile = StoredFileMeta & {
+  text: string;
+  lastRemoteSha?: string;
+  lastSyncedHash?: string;
+};
+
 export type FileMeta = {
   id: string;
   path: string;
@@ -304,13 +320,8 @@ export class LocalStore {
       mime: mime ?? inferMimeFromPath(normPath),
     };
     let doc: RepoFileDoc = {
-      id,
-      path: normPath,
-      title,
-      dir,
-      updatedAt: now,
+      ...meta,
       kind: 'binary',
-      mime: meta.mime,
       binaryBase64: base64,
       lastRemoteSha: undefined,
       lastSyncedHash: undefined,
@@ -318,7 +329,19 @@ export class LocalStore {
     let idx = this.loadIndex();
     idx.push(meta);
     localStorage.setItem(this.indexKey, JSON.stringify(idx));
-    localStorage.setItem(this.noteKey(id), JSON.stringify(doc));
+    const stored: StoredFile = {
+      id,
+      path: normPath,
+      title,
+      dir,
+      updatedAt: now,
+      kind: 'binary',
+      mime: doc.mime,
+      text: base64,
+      lastRemoteSha: undefined,
+      lastSyncedHash: undefined,
+    };
+    localStorage.setItem(this.noteKey(id), JSON.stringify({ ...stored, binaryBase64: base64 }));
     this.index = idx;
     ensureFolderForSlug(this.slug, dir);
     debugLog(this.slug, 'createBinary', { id, path: normPath });
@@ -381,10 +404,28 @@ export class LocalStore {
     let toPath = joinPath(normDir, safeName);
     if (toPath === doc.path) return doc.path;
     let updatedAt = Date.now();
-    let next: RepoFileDoc = { ...doc, title: safeName, path: toPath, dir: normDir, updatedAt };
-    delete next.lastRemoteSha;
-    delete next.lastSyncedHash;
-    localStorage.setItem(this.noteKey(id), JSON.stringify(next));
+    let next: RepoFileDoc = {
+      ...doc,
+      title: safeName,
+      path: toPath,
+      dir: normDir,
+      updatedAt,
+      lastRemoteSha: undefined,
+      lastSyncedHash: undefined,
+    };
+    const stored: StoredFile = {
+      id,
+      path: toPath,
+      title: safeName,
+      dir: normDir,
+      updatedAt,
+      kind: 'binary',
+      mime: next.mime,
+      text: next.binaryBase64,
+      lastRemoteSha: undefined,
+      lastSyncedHash: undefined,
+    };
+    localStorage.setItem(this.noteKey(id), JSON.stringify({ ...stored, binaryBase64: next.binaryBase64 }));
     this.touchIndex(id, {
       title: safeName,
       path: toPath,
@@ -814,7 +855,21 @@ export function markSynced(slug: string, id: string, patch: { remoteSha?: string
   let next: RepoFileDoc = { ...doc };
   if (patch.remoteSha !== undefined) next.lastRemoteSha = patch.remoteSha;
   if (patch.syncedHash !== undefined) next.lastSyncedHash = patch.syncedHash;
-  localStorage.setItem(key, JSON.stringify(next));
+  const stored: StoredFile = {
+    id: next.id,
+    path: next.path,
+    title: next.title,
+    dir: next.dir,
+    updatedAt: next.updatedAt,
+    kind: next.kind,
+    mime: next.mime,
+    text: next.kind === 'binary' ? next.binaryBase64 : next.text,
+    lastRemoteSha: next.lastRemoteSha,
+    lastSyncedHash: next.lastSyncedHash,
+  };
+  const serialized =
+    next.kind === 'binary' ? { ...stored, binaryBase64: next.binaryBase64 } : stored;
+  localStorage.setItem(key, JSON.stringify(serialized));
   debugLog(slug, 'markSynced', { id, patch });
   emitRepoChange(slug);
 }
@@ -854,7 +909,19 @@ export function updateBinaryContent(slug: string, id: string, base64: string, mi
     };
   }
   next.lastSyncedHash = hashText(base64);
-  localStorage.setItem(key, JSON.stringify(next));
+  const stored: StoredFile = {
+    id: next.id,
+    path: next.path,
+    title: next.title,
+    dir: next.dir,
+    updatedAt,
+    kind: next.kind,
+    mime: next.mime,
+    text: base64,
+    lastRemoteSha: next.lastRemoteSha,
+    lastSyncedHash: next.lastSyncedHash,
+  };
+  localStorage.setItem(key, JSON.stringify({ ...stored, binaryBase64: base64 }));
   touchIndexUpdatedAt(slug, id, updatedAt, { kind: next.kind, mime: next.mime });
   debugLog(slug, 'updateBinary', { id, updatedAt });
   emitRepoChange(slug);
@@ -1039,37 +1106,48 @@ function inferMimeFromPath(path: string): string {
 
 function normalizeMeta(raw: unknown): FileMeta | null {
   if (!raw || typeof raw !== 'object') return null;
-  let obj = raw as Partial<FileMeta> & { title?: unknown; dir?: unknown; kind?: unknown; mime?: unknown };
-  if (typeof obj.id !== 'string') return null;
-  if (typeof obj.path !== 'string') return null;
-  let path = obj.path.replace(/^\/+/g, '').replace(/\/+$/g, '') || obj.path;
-  let dir = typeof obj.dir === 'string' ? normalizeDir(obj.dir) : extractDir(path);
-  let updatedAt = typeof obj.updatedAt === 'number' && Number.isFinite(obj.updatedAt) ? obj.updatedAt : Date.now();
-  let title = typeof obj.title === 'string' && obj.title.trim() ? obj.title : basename(path);
-  let inferredKind = obj.kind === 'binary' || obj.kind === 'markdown' ? obj.kind : inferKindFromPath(path) ?? 'markdown';
-  let mime = typeof obj.mime === 'string' && obj.mime.trim() ? obj.mime : inferredKind === 'markdown' ? DEFAULT_MARKDOWN_MIME : inferMimeFromPath(path);
-  if (inferredKind === 'markdown' && !title.toLowerCase().endsWith('.md')) {
-    title = path.slice(path.lastIndexOf('/') + 1).replace(/\.md$/i, '') || title;
+  let stored = raw as StoredFileMeta;
+  if (typeof stored.id !== 'string') return null;
+  if (typeof stored.path !== 'string') return null;
+  let path = stored.path.replace(/^\/+/g, '').replace(/\/+$/g, '') || stored.path;
+  let dir = normalizeDir(typeof stored.dir === 'string' ? stored.dir : extractDir(path));
+  let updatedAt =
+    typeof stored.updatedAt === 'number' && Number.isFinite(stored.updatedAt) ? stored.updatedAt : Date.now();
+  let inferredKind =
+    stored.kind === 'markdown' || stored.kind === 'binary' ? stored.kind : inferKindFromPath(path) ?? 'markdown';
+  let baseTitle =
+    typeof stored.title === 'string' && stored.title.trim() ? stored.title : basename(path);
+  if (inferredKind === 'markdown' && baseTitle.toLowerCase().endsWith('.md')) {
+    baseTitle = baseTitle.replace(/\.md$/i, '');
   }
-  return { id: obj.id, path, title, dir, updatedAt, kind: inferredKind, mime };
+  let mime =
+    typeof stored.mime === 'string' && stored.mime.trim()
+      ? stored.mime
+      : inferredKind === 'markdown'
+        ? DEFAULT_MARKDOWN_MIME
+        : inferMimeFromPath(path);
+  return { id: stored.id, path, title: baseTitle, dir, updatedAt, kind: inferredKind, mime };
 }
 
 function normalizeDoc(raw: unknown): RepoFileDoc | null {
-  let meta = normalizeMeta(raw);
+  if (!raw || typeof raw !== 'object') return null;
+  let stored = raw as StoredFile;
+  let meta = normalizeMeta(stored);
   if (!meta) return null;
-  let base = {
-    ...meta,
-    lastRemoteSha:
-      typeof (raw as any)?.lastRemoteSha === 'string' ? String((raw as any).lastRemoteSha) : undefined,
-    lastSyncedHash:
-      typeof (raw as any)?.lastSyncedHash === 'string' ? String((raw as any).lastSyncedHash) : undefined,
-  };
+  let lastRemoteSha =
+    typeof stored.lastRemoteSha === 'string' ? stored.lastRemoteSha : undefined;
+  let lastSyncedHash =
+    typeof stored.lastSyncedHash === 'string' ? stored.lastSyncedHash : undefined;
+  let text =
+    typeof stored.text === 'string'
+      ? stored.text
+      : typeof (raw as any)?.binaryBase64 === 'string'
+        ? String((raw as any).binaryBase64)
+        : '';
   if (meta.kind === 'markdown') {
-    let text = typeof (raw as any)?.text === 'string' ? String((raw as any).text) : '';
-    return { ...base, kind: 'markdown', text };
+    return { ...meta, kind: 'markdown', text, lastRemoteSha, lastSyncedHash };
   }
-  let binaryBase64 = typeof (raw as any)?.binaryBase64 === 'string' ? String((raw as any).binaryBase64) : '';
-  return { ...base, kind: 'binary', binaryBase64 };
+  return { ...meta, kind: 'binary', binaryBase64: text, lastRemoteSha, lastSyncedHash };
 }
 
 function ensureValidTitle(title: string): string {
