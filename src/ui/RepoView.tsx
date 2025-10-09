@@ -8,7 +8,7 @@ import { Toggle } from './Toggle';
 import { GitHubIcon, ExternalLinkIcon, NotesIcon, CloseIcon, SyncIcon } from './RepoIcons';
 import { useRepoData } from '../data';
 import type { FileKind, FileMeta } from '../storage/local';
-import { getExpandedFolders, setExpandedFolders } from '../storage/local';
+import { getExpandedFolders, setExpandedFolders, isMarkdownDoc, isBinaryDoc } from '../storage/local';
 import type { RepoRoute, Route } from './routing';
 import { normalizePath, pathsEqual } from '../lib/util';
 
@@ -341,7 +341,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
                 )}
                 {doc !== undefined ? (
                   <div className="workspace-panels">
-                    {doc.kind === 'markdown' ? (
+                    {isMarkdownDoc(doc) ? (
                       <Editor
                         key={doc.id}
                         doc={doc}
@@ -350,9 +350,9 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
                           actions.updateNoteText(path, text);
                         }}
                       />
-                    ) : (
+                    ) : isBinaryDoc(doc) ? (
                       <AssetViewer key={doc.id} file={doc} />
-                    )}
+                    ) : null}
                   </div>
                 ) : (
                   <div className="empty-state">

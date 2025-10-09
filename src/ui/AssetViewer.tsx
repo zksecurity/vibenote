@@ -1,8 +1,8 @@
 // Placeholder viewer for binary files (images and other assets).
-import type { RepoFileDoc } from '../storage/local';
+import type { BinaryFileDoc } from '../storage/local';
 
 type AssetViewerProps = {
-  file: Extract<RepoFileDoc, { kind: 'binary' }>;
+  file: BinaryFileDoc;
 };
 
 export function AssetViewer({ file }: AssetViewerProps) {
@@ -19,4 +19,3 @@ export function AssetViewer({ file }: AssetViewerProps) {
     </div>
   );
 }
-

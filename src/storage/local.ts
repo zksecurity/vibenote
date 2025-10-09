@@ -27,7 +27,7 @@ type StoredFile = StoredFileMeta & {
   lastSyncedHash?: string;
 };
 
-export type FileMeta = {
+export type RepoFileMeta = {
   id: string;
   path: string;
   title: string;
@@ -37,24 +37,36 @@ export type FileMeta = {
   mime: string;
 };
 
-export type NoteMeta = FileMeta & { kind: 'markdown' };
-
-export type NoteDoc = NoteMeta & {
-  text: string;
-  binaryBase64?: undefined;
+export type RepoFileDoc = RepoFileMeta & {
+  content: string; // markdown uses UTF-8 text, binary uses base64 payloads
   lastRemoteSha?: string;
   lastSyncedHash?: string;
 };
 
-export type RepoFileDoc =
-  | NoteDoc
-  | (FileMeta & {
-      kind: 'binary';
-      text?: undefined;
-      binaryBase64: string;
-      lastRemoteSha?: string;
-      lastSyncedHash?: string;
-    });
+export type MarkdownFileMeta = RepoFileMeta & { kind: 'markdown'; mime: typeof DEFAULT_MARKDOWN_MIME };
+export type MarkdownFileDoc = RepoFileDoc & { kind: 'markdown'; mime: typeof DEFAULT_MARKDOWN_MIME };
+export type BinaryFileMeta = RepoFileMeta & { kind: 'binary' };
+export type BinaryFileDoc = RepoFileDoc & { kind: 'binary' };
+
+export type FileMeta = RepoFileMeta;
+export type NoteMeta = MarkdownFileMeta;
+export type NoteDoc = MarkdownFileDoc;
+
+export function isMarkdownMeta(meta: RepoFileMeta): meta is MarkdownFileMeta {
+  return meta.kind === 'markdown';
+}
+
+export function isBinaryMeta(meta: RepoFileMeta): meta is BinaryFileMeta {
+  return meta.kind === 'binary';
+}
+
+export function isMarkdownDoc(doc: RepoFileDoc): doc is MarkdownFileDoc {
+  return doc.kind === 'markdown';
+}
+
+export function isBinaryDoc(doc: RepoFileDoc): doc is BinaryFileDoc {
+  return doc.kind === 'binary';
+}
 
 function serializeIndex(index: FileMeta[]): string {
   // important: written metadata stays compatible with `StoredFileMeta`
@@ -90,7 +102,8 @@ function deserializeFile(raw: string | null): RepoFileDoc | null {
  */
 function deserializeNote(raw: string | null): NoteDoc | null {
   let doc = deserializeFile(raw);
-  return doc?.kind === 'markdown' ? doc : null;
+  if (!doc) return null;
+  return isMarkdownDoc(doc) ? doc : null;
 }
 
 export { debugLog };
@@ -190,7 +203,7 @@ function readRepoSnapshot(slug: string): RepoStoreSnapshot {
   const files = loadIndexForSlug(slug)
     .slice()
     .sort((a, b) => b.updatedAt - a.updatedAt);
-  const notes = files.filter((meta): meta is NoteMeta => meta.kind === 'markdown');
+  const notes = files.filter(isMarkdownMeta);
   const folders = loadFoldersForSlug(slug);
   return {
     files: Object.freeze(files) as FileMeta[],
@@ -308,7 +321,7 @@ export class LocalStore {
     let doc = this.loadNote(id);
     if (!doc) return;
     let updatedAt = Date.now();
-    localStorage.setItem(this.noteKey(id), serializeFile({ ...doc, text, updatedAt }));
+    localStorage.setItem(this.noteKey(id), serializeFile({ ...doc, content: text, updatedAt }));
     debugLog(this.slug, 'saveNote', { id, path: doc.path, updatedAt });
     this.touchIndex(id, { updatedAt });
     emitRepoChange(this.slug);
@@ -329,7 +342,7 @@ export class LocalStore {
       kind: 'markdown',
       mime: DEFAULT_MARKDOWN_MIME,
     };
-    let doc: NoteDoc = { ...meta, text };
+    let doc: NoteDoc = { ...meta, content: text };
     let idx = this.loadIndex();
     idx.push(meta);
     localStorage.setItem(this.indexKey, serializeIndex(idx));
@@ -358,8 +371,7 @@ export class LocalStore {
     };
     let doc: RepoFileDoc = {
       ...meta,
-      kind: 'binary',
-      binaryBase64: base64,
+      content: base64,
       lastRemoteSha: undefined,
       lastSyncedHash: undefined,
     };
@@ -423,7 +435,7 @@ export class LocalStore {
 
   private renameBinary(id: string, newName: string): string | undefined {
     let doc = this.loadFile(id);
-    if (!doc || doc.kind !== 'binary') return undefined;
+    if (!doc || !isBinaryDoc(doc)) return undefined;
     let safeName = ensureValidFileName(newName);
     let normDir = normalizeDir(doc.dir);
     let toPath = joinPath(normDir, safeName);
@@ -519,14 +531,8 @@ export class LocalStore {
         let title = basename(file.path);
         let meta: FileMeta = { id, path: file.path, title, dir, updatedAt: now, kind: 'binary', mime };
         let doc: RepoFileDoc = {
-          id,
-          path: file.path,
-          title,
-          dir,
-          updatedAt: now,
-          kind: 'binary',
-          mime,
-          binaryBase64: base64,
+          ...meta,
+          content: base64,
           lastRemoteSha: file.sha,
           lastSyncedHash: hashText(base64),
         };
@@ -547,7 +553,7 @@ export class LocalStore {
       };
       let doc: NoteDoc = {
         ...meta,
-        text,
+        content: text,
         lastRemoteSha: file.sha,
         lastSyncedHash: hashText(text),
       };
@@ -864,9 +870,9 @@ export function markSynced(slug: string, id: string, patch: { remoteSha?: string
 export function updateNoteText(slug: string, id: string, text: string) {
   let key = `${repoKey(slug, 'note')}:${id}`;
   let doc = loadFileForKey(slug, id);
-  if (!doc || doc.kind !== 'markdown') return;
+  if (!doc || !isMarkdownDoc(doc)) return;
   let updatedAt = Date.now();
-  let next: NoteDoc = { ...doc, text, updatedAt };
+  let next: NoteDoc = { ...doc, content: text, updatedAt };
   localStorage.setItem(key, serializeFile(next));
   touchIndexUpdatedAt(slug, id, updatedAt, { kind: 'markdown', mime: DEFAULT_MARKDOWN_MIME });
   debugLog(slug, 'updateNoteText', { id, updatedAt });
@@ -880,19 +886,15 @@ export function updateBinaryContent(slug: string, id: string, base64: string, mi
   let updatedAt = Date.now();
   let inferredMime = mime ?? doc.mime ?? inferMimeFromPath(doc.path);
   let next: RepoFileDoc;
-  if (doc.kind === 'binary') {
-    next = { ...doc, binaryBase64: base64, mime: inferredMime, updatedAt };
+  if (isBinaryDoc(doc)) {
+    next = { ...doc, content: base64, mime: inferredMime, updatedAt };
   } else {
     next = {
-      id: doc.id,
-      path: doc.path,
-      title: doc.title,
-      dir: doc.dir,
+      ...doc,
       updatedAt,
       kind: 'binary',
       mime: inferredMime,
-      binaryBase64: base64,
-      lastRemoteSha: doc.lastRemoteSha,
+      content: base64,
     };
   }
   next.lastSyncedHash = hashText(base64);
@@ -907,7 +909,7 @@ export function findByPath(slug: string, path: string): { id: string; doc: NoteD
   for (let meta of idx) {
     if (meta.path !== path) continue;
     let doc = loadFileForKey(slug, meta.id);
-    if (!doc || doc.kind !== 'markdown') continue;
+    if (!doc || !isMarkdownDoc(doc)) continue;
     return { id: meta.id, doc };
   }
   return null;
@@ -962,7 +964,7 @@ export function findBySyncedHash(
 
 export function moveNotePath(slug: string, id: string, toPath: string) {
   let doc = loadFileForKey(slug, id);
-  if (!doc || doc.kind !== 'markdown') return;
+  if (!doc || !isMarkdownDoc(doc)) return;
   let key = `${repoKey(slug, 'note')}:${id}`;
   let updatedAt = Date.now();
   let nextDir = extractDir(toPath);
@@ -1099,7 +1101,7 @@ function toStoredFile(doc: RepoFileDoc): StoredFile {
     updatedAt: doc.updatedAt,
     kind: doc.kind,
     mime: doc.mime,
-    text: doc.kind === 'markdown' ? doc.text : doc.binaryBase64,
+    text: doc.content,
     lastRemoteSha: doc.lastRemoteSha,
     lastSyncedHash: doc.lastSyncedHash,
   };
@@ -1112,16 +1114,8 @@ function normalizeFile(raw: unknown): RepoFileDoc | null {
   if (!meta) return null;
   let lastRemoteSha = typeof stored.lastRemoteSha === 'string' ? stored.lastRemoteSha : undefined;
   let lastSyncedHash = typeof stored.lastSyncedHash === 'string' ? stored.lastSyncedHash : undefined;
-  let text =
-    typeof stored.text === 'string'
-      ? stored.text
-      : typeof (raw as any)?.binaryBase64 === 'string'
-      ? String((raw as any).binaryBase64)
-      : '';
-  if (meta.kind === 'markdown') {
-    return { ...meta, kind: 'markdown', text, lastRemoteSha, lastSyncedHash };
-  }
-  return { ...meta, kind: 'binary', binaryBase64: text, lastRemoteSha, lastSyncedHash };
+  let content = typeof stored.text === 'string' ? stored.text : '';
+  return { ...meta, content, lastRemoteSha, lastSyncedHash };
 }
 
 function ensureValidTitle(title: string): string {

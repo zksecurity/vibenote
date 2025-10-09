@@ -24,7 +24,7 @@ describe('LocalStore cross-tab resilience', () => {
     // Tab B performs edits to the remaining note; should NOT re-add deleted id1
     const docB = b.loadNote(id2);
     expect(docB).not.toBeNull();
-    if (docB) b.saveNote(docB.id, docB.text + ' updated');
+    if (docB) b.saveNote(docB.id, docB.content + ' updated');
 
     // LocalStorage should still be without id1
     const c = new LocalStore(slug);

@@ -102,7 +102,7 @@ describe('syncBidirectional', () => {
     const notes = store.listNotes();
     expect(notes).toHaveLength(1);
     const doc = store.loadNote(notes[0]?.id ?? '');
-    expect(doc?.text).toBe('# remote');
+    expect(doc?.content).toBe('# remote');
   });
 
   test('removes notes when deleted remotely', async () => {
@@ -128,7 +128,7 @@ describe('syncBidirectional', () => {
     expect(imageMeta).toBeDefined();
     if (imageMeta) {
       const imageDoc = store.loadFile(imageMeta.id);
-      expect(imageDoc?.binaryBase64).toBe(Buffer.from('asset', 'utf8').toString('base64'));
+      expect(imageDoc?.content).toBe(Buffer.from('asset', 'utf8').toString('base64'));
     }
     expectParity(store, remote);
   });
@@ -141,7 +141,7 @@ describe('syncBidirectional', () => {
     const doc = store.loadNote(notes[0]?.id ?? '');
     expect(doc?.path).toBe('nested/Nested.md');
     expect(doc?.dir).toBe('nested');
-    expect(doc?.text).toBe('# nested');
+    expect(doc?.content).toBe('# nested');
   });
 
   test('pulls binary image assets from remote', async () => {
@@ -152,7 +152,7 @@ describe('syncBidirectional', () => {
     expect(asset).toBeDefined();
     if (!asset) return;
     const doc = store.loadFile(asset.id);
-    expect(doc?.binaryBase64).toBe(Buffer.from('image-data', 'utf8').toString('base64'));
+    expect(doc?.content).toBe(Buffer.from('image-data', 'utf8').toString('base64'));
     expect(doc?.kind ?? 'binary').toBe('binary');
     expectParity(store, remote);
   });
@@ -195,10 +195,10 @@ function expectParity(store: LocalStore, remote: MockRemoteRepo) {
     const doc = store.loadFile(meta.id);
     if (!doc) continue;
     if (doc.kind === 'binary') {
-      const decoded = Buffer.from(doc.binaryBase64, 'base64').toString('utf8');
+      const decoded = Buffer.from(doc.content, 'base64').toString('utf8');
       localMap.set(meta.path, decoded);
     } else {
-      localMap.set(meta.path, doc.text);
+      localMap.set(meta.path, doc.content);
     }
   }
   const remoteMap = remote.snapshot();

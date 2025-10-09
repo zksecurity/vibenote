@@ -576,7 +576,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
 
       const { id, doc } = local;
       const lastRemoteSha = doc.lastRemoteSha;
-      const localText = doc.text || '';
+      const localText = doc.content;
       const localHash = hashText(localText);
 
       if (entry.sha === lastRemoteSha) {
@@ -673,7 +673,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
 
     const { id, doc } = localFile;
     const lastRemoteSha = doc.lastRemoteSha;
-    const localBinary = doc.binaryBase64 ?? '';
+    const localBinary = doc.content;
     const localHash = hashText(localBinary);
 
     if (entry.sha === lastRemoteSha) {
@@ -736,11 +736,11 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       let localHash = '';
       if (doc.kind === 'binary') {
         docKind = 'binary';
-        localBinary = doc.binaryBase64;
+        localBinary = doc.content;
         localHash = hashText(localBinary);
       } else {
         docKind = 'markdown';
-        localText = doc.text;
+        localText = doc.content;
         localHash = hashText(localText);
       }
       const changedLocally = doc.lastSyncedHash !== localHash;
@@ -816,12 +816,12 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         if (doc.kind === 'binary') {
           nextSha = await putFile(
             config,
-            { path: doc.path, binaryBase64: doc.binaryBase64 },
+            { path: doc.path, binaryBase64: doc.content },
             'vibenote: update assets'
           );
           markSynced(storeSlug, id, {
             remoteSha: nextSha,
-            syncedHash: hashText(doc.binaryBase64),
+            syncedHash: hashText(doc.content),
           });
           remoteMap.set(t.to, {
             path: t.to,
@@ -830,8 +830,8 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
             mime: doc.mime ?? inferMimeFromPath(doc.path),
           });
         } else {
-          nextSha = await putFile(config, { path: doc.path, text: doc.text ?? '' }, 'vibenote: update notes');
-          markSynced(storeSlug, id, { remoteSha: nextSha, syncedHash: hashText(doc.text ?? '') });
+          nextSha = await putFile(config, { path: doc.path, text: doc.content }, 'vibenote: update notes');
+          markSynced(storeSlug, id, { remoteSha: nextSha, syncedHash: hashText(doc.content) });
           remoteMap.set(t.to, { path: t.to, sha: nextSha, kind: 'markdown', mime: MARKDOWN_MIME });
         }
         pushed++;
@@ -894,7 +894,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
               syncedHash: hashText(remoteFile.binaryBase64 ?? ''),
             });
           } else {
-            if ((existing.doc.text || '') !== (remoteFile.text ?? '')) {
+            if (existing.doc.content !== (remoteFile.text ?? '')) {
               updateNoteText(storeSlug, existing.id, remoteFile.text ?? '');
             }
             markSynced(storeSlug, existing.id, {

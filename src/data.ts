@@ -793,10 +793,10 @@ function useSync(params: { slug: string; canSync: boolean; defaultBranch?: strin
           .listNotes()
           .map((meta) => localStore.loadNote(meta.id))
           .filter((note): note is NoteDoc => note !== null)
-          .filter((note) => note.lastSyncedHash !== hashText(note.text))
+          .filter((note) => note.lastSyncedHash !== hashText(note.content))
           .map((note) => ({
             path: note.path,
-            text: note.text,
+            text: note.content,
             baseSha: note.lastRemoteSha,
             message: 'vibenote: background sync',
           }));

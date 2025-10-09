@@ -15,17 +15,17 @@ type Props = {
 };
 
 export function Editor({ doc, onChange, readOnly = false }: Props) {
-  const [text, setText] = useState(doc.text);
+  const [text, setText] = useState(doc.content);
 
   // Reset editor when switching to a different note
   useEffect(() => {
-    setText(doc.text);
+    setText(doc.content);
   }, [doc.id]);
 
   // Reflect external updates to the same note (e.g., after sync/merge)
   useEffect(() => {
-    if (text !== doc.text) setText(doc.text);
-  }, [doc.text]);
+    if (text !== doc.content) setText(doc.content);
+  }, [doc.content]);
 
   const onInput = (val: string) => {
     if (readOnly) return;

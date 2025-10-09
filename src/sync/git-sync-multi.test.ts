@@ -210,12 +210,12 @@ describe('syncBidirectional multi-device', () => {
 
     let renamed = storeTwo.loadNote(draftId);
     expect(renamed?.path).toBe('Draft Renamed.md');
-    expect(renamed?.text).toBe('shared body');
+    expect(renamed?.content).toBe('shared body');
     expect(renamed?.id).toBe(draftId);
 
     let clone = storeTwo.loadNote(cloneId);
     expect(clone?.path).toBe('Clone.md');
-    expect(clone?.text).toBe('clone offline edits');
+    expect(clone?.content).toBe('clone offline edits');
     expect(clone?.id).toBe(cloneId);
   });
 
@@ -356,7 +356,7 @@ describe('syncBidirectional multi-device', () => {
 
     let updated = storeTwo.loadNote(noteId);
     expect(updated?.path).toBe('guides/Doc.md');
-    expect(updated?.text).toBe('offline edit after rename');
+    expect(updated?.content).toBe('offline edit after rename');
     expect(remote.snapshot().get('guides/Doc.md')).toBe('offline edit after rename');
   });
 

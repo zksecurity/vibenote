@@ -203,7 +203,7 @@ describe('useRepoData', () => {
     });
 
     await waitFor(() => expect(result.current.state.doc?.path).toBe(welcomePath));
-    expect(result.current.state.doc?.text).toContain('Welcome to VibeNote');
+    expect(result.current.state.doc?.content).toContain('Welcome to VibeNote');
     expect(recordRecent).not.toHaveBeenCalled();
   });
 
@@ -228,7 +228,7 @@ describe('useRepoData', () => {
     });
 
     await waitFor(() => expect(result.current.data.state.activePath).toBe(alpha.path));
-    expect(result.current.data.state.doc?.text).toBe('alpha text');
+    expect(result.current.data.state.doc?.content).toBe('alpha text');
     expect(result.current.routeState.notePath).toBe(alpha.path);
 
     await act(async () => {
@@ -300,7 +300,7 @@ describe('useRepoData', () => {
     const { result } = renderRepoData({ slug, route, recordRecent });
 
     await waitFor(() => expect(result.current.state.activePath).toBe('guides/Intro.md'));
-    await waitFor(() => expect(result.current.state.doc?.text).toBe('# Intro'));
+    await waitFor(() => expect(result.current.state.doc?.content).toBe('# Intro'));
     expect(mockPullNote).toHaveBeenCalledWith(expect.anything(), 'guides/Intro.md');
   });
 
@@ -364,7 +364,7 @@ describe('useRepoData', () => {
     });
 
     const storedAfterEdit = new LocalStore(slug).loadNote(noteId);
-    expect(storedAfterEdit?.text).toBe('updated text');
+    expect(storedAfterEdit?.content).toBe('updated text');
 
     await act(async () => {
       await result.current.actions.syncNow();
@@ -426,7 +426,7 @@ describe('useRepoData', () => {
       result.current.actions.selectNote('docs/alpha.md');
     });
 
-    await waitFor(() => expect(result.current.state.doc?.text).toBe('# docs/alpha.md'));
+    await waitFor(() => expect(result.current.state.doc?.content).toBe('# docs/alpha.md'));
     expect(mockPullNote).toHaveBeenCalledTimes(1);
 
     mockPullNote.mockClear();
@@ -440,7 +440,7 @@ describe('useRepoData', () => {
       result.current.actions.selectNote('docs/alpha.md');
     });
 
-    await waitFor(() => expect(result.current.state.doc?.text).toBe('# updated remote'));
+    await waitFor(() => expect(result.current.state.doc?.content).toBe('# updated remote'));
     expect(mockPullNote).toHaveBeenCalledTimes(1);
   });
 

@@ -90,7 +90,7 @@ function useReadOnlyNotes(params: {
         path: entry.path,
         title: entry.title,
         dir: entry.dir,
-        text: remote.text,
+        content: remote.text,
         updatedAt: Date.now(),
         lastRemoteSha: remote.sha,
         lastSyncedHash: hashText(remote.text),
