@@ -274,7 +274,14 @@ export class LocalStore {
     // that layout should be documented clearly in the form of types and zod schemas
     this.backfillFolders();
     if (slug === 'new' && this.index.length === 0) {
-      this.createNote('Welcome', WELCOME_NOTE);
+      this.createFile({
+        path: 'Welcome.md',
+        title: 'Welcome',
+        dir: '',
+        content: WELCOME_NOTE,
+        kind: 'markdown',
+        mime: DEFAULT_MARKDOWN_MIME,
+      });
       this.index = this.loadIndex();
     }
     ensureRepoSubscribers(this.slug);
@@ -343,21 +350,6 @@ export class LocalStore {
     emitRepoChange(this.slug);
   }
 
-  createNote(title = 'Untitled', text = '', dir: string = ''): string {
-    let safe = ensureValidTitle(title || 'Untitled');
-    let displayTitle = title.trim() || 'Untitled';
-    let normDir = normalizeDir(dir);
-    let path = joinPath(normDir, `${safe}.md`);
-    return this.createFile({
-      path,
-      title: displayTitle,
-      dir: normDir,
-      content: text,
-      kind: 'markdown',
-      mime: DEFAULT_MARKDOWN_MIME,
-    });
-  }
-
   createBinaryFile(path: string, base64: string, mime?: string): string {
     return this.createFile({
       path,
@@ -378,14 +370,18 @@ export class LocalStore {
     let id = crypto.randomUUID();
     let normPath = normalizeFilePath(params.path);
     let inferredKind = inferKindFromPath(normPath);
-    let kind: FileKind = params.kind ?? (inferredKind ?? 'markdown');
+    let kind: FileKind = params.kind ?? inferredKind ?? 'markdown';
     let updatedAt = Date.now();
     let dir = normalizeDir(params.dir ?? extractDir(normPath));
     let title: string;
     let finalPath: string;
     let mime: string;
     if (kind === 'markdown') {
-      let baseTitle = params.title ?? (normPath.toLowerCase().endsWith('.md') ? normPath.slice(0, -3).split('/').pop() ?? normPath : basename(normPath));
+      let baseTitle =
+        params.title ??
+        (normPath.toLowerCase().endsWith('.md')
+          ? normPath.slice(0, -3).split('/').pop() ?? normPath
+          : basename(normPath));
       title = ensureValidTitle(baseTitle || 'Untitled');
       finalPath = joinPath(dir, `${title}.md`);
       mime = params.mime ?? DEFAULT_MARKDOWN_MIME;
@@ -426,7 +422,11 @@ export class LocalStore {
     let normDir = normalizeDir(doc.dir);
     let toPath = joinPath(normDir, safeName);
     if (toPath === doc.path) return doc.path;
-    let next = this.applyRename(doc, { title: safeName, dir: normDir, path: toPath, mime: doc.mime }, 'renameFile');
+    let next = this.applyRename(
+      doc,
+      { title: safeName, dir: normDir, path: toPath, mime: doc.mime },
+      'renameFile'
+    );
     return next.path;
   }
 
@@ -520,7 +520,14 @@ export class LocalStore {
       if (key === this.indexKey || key.startsWith(prefix)) toRemove.push(key);
     }
     for (let key of toRemove) localStorage.removeItem(key);
-    let id = this.createNote('Welcome', WELCOME_NOTE);
+    let id = this.createFile({
+      path: 'Welcome.md',
+      title: 'Welcome',
+      dir: '',
+      content: WELCOME_NOTE,
+      kind: 'markdown',
+      mime: DEFAULT_MARKDOWN_MIME,
+    });
     this.index = this.loadIndex();
     emitRepoChange(this.slug);
     return id;
@@ -684,7 +691,11 @@ export class LocalStore {
     let safeTitle = ensureValidTitle(doc.title);
     let toPath = joinPath(normDir, `${safeTitle}.md`);
     if (toPath === doc.path) return;
-    this.applyRename(doc, { title: safeTitle, dir: normDir, path: toPath, mime: DEFAULT_MARKDOWN_MIME }, 'note:moveDir');
+    this.applyRename(
+      doc,
+      { title: safeTitle, dir: normDir, path: toPath, mime: DEFAULT_MARKDOWN_MIME },
+      'note:moveDir'
+    );
   }
 
   private findMetaByPath(path: string): FileMeta | null {

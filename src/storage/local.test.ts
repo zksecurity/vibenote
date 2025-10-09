@@ -1,12 +1,23 @@
 import { describe, expect, test } from 'vitest';
 import { LocalStore } from './local';
 
+function createMarkdown(store: LocalStore, title: string, text: string, dir = '') {
+  return store.createFile({
+    path: dir ? `${dir}/${title}.md` : `${title}.md`,
+    dir,
+    title,
+    content: text,
+    kind: 'markdown',
+    mime: 'text/markdown',
+  });
+}
+
 describe('LocalStore cross-tab resilience', () => {
   test('stale second instance does not resurrect a deleted note', () => {
     const slug = 'user/repo';
     const a = new LocalStore(slug);
-    const id1 = a.createNote('A', 'aaa');
-    const id2 = a.createNote('B', 'bbb');
+    const id1 = createMarkdown(a, 'A', 'aaa');
+    const id2 = createMarkdown(a, 'B', 'bbb');
 
     // Second tab created before deletion; holds its own in-memory index
     const b = new LocalStore(slug);

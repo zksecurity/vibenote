@@ -1,13 +1,24 @@
 import { describe, expect, test } from 'vitest';
 import { LocalStore } from './local';
 
+function createMarkdown(store: LocalStore, title: string, text: string, dir = '') {
+  return store.createFile({
+    path: dir ? `${dir}/${title}.md` : `${title}.md`,
+    dir,
+    title,
+    content: text,
+    kind: 'markdown',
+    mime: 'text/markdown',
+  });
+}
+
 describe('LocalStore folder operations', () => {
   test('create/rename/move/delete folder updates notes and index', () => {
     let store = new LocalStore('user/repo');
     store.createFolder('', 'a');
     store.createFolder('a', 'b');
-    let id1 = store.createNote('One', '1', 'a');
-    let id2 = store.createNote('Two', '2', 'a/b');
+  let id1 = createMarkdown(store, 'One', '1', 'a');
+  let id2 = createMarkdown(store, 'Two', '2', 'a/b');
     expect(store.listFolders().sort()).toEqual(['a', 'a/b']);
 
     // Rename folder a -> x

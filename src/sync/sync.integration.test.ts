@@ -13,7 +13,7 @@ describe('syncBidirectional integration', () => {
   test('renaming a folder moves all contained files on the remote', async () => {
     const slug = 'acme/notes';
 
-    const remote = new MockRemoteRepo();
+const remote = new MockRemoteRepo();
     remote.configure('acme', 'notes');
     remote.allowToken('access-token');
     remote.setFile('docs/Alpha.md', 'alpha text');
@@ -25,8 +25,8 @@ describe('syncBidirectional integration', () => {
 
     try {
       const store = new LocalStore(slug);
-      store.createNote('Alpha', 'alpha text', 'docs');
-      store.createNote('Beta', 'beta text', 'docs');
+      createMarkdown(store, 'Alpha', 'alpha text', 'docs');
+      createMarkdown(store, 'Beta', 'beta text', 'docs');
       markRepoLinked(slug);
 
       await syncBidirectional(store, slug);
@@ -48,3 +48,13 @@ describe('syncBidirectional integration', () => {
     }
   });
 });
+function createMarkdown(store: LocalStore, title: string, text: string, dir = '') {
+  return store.createFile({
+    path: dir ? `${dir}/${title}.md` : `${title}.md`,
+    dir,
+    title,
+    content: text,
+    kind: 'markdown',
+    mime: 'text/markdown',
+  });
+}

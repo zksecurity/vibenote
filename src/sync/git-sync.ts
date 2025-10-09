@@ -571,7 +571,12 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
           const i = entry.path.lastIndexOf('/');
           return i >= 0 ? entry.path.slice(0, i) : '';
         })();
-        const id = store.createNote(title, rf.text, dir);
+        const id = store.createFile({
+          path: entry.path,
+          content: rf.text,
+          kind: 'markdown',
+          mime: MARKDOWN_MIME,
+        });
         markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: remoteTextHash });
         remoteMap.set(entry.path, { path: entry.path, sha: rf.sha, kind: 'markdown', mime: MARKDOWN_MIME });
         pulled++;
@@ -944,7 +949,12 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
           } else {
             const title = basename(t.from).replace(/\.md$/i, '');
             const dir = t.from.includes('/') ? t.from.slice(0, t.from.lastIndexOf('/')) : '';
-            const newId = store.createNote(title, remoteFile.text ?? '', dir);
+            const newId = store.createFile({
+              path: remoteFile.path,
+              content: remoteFile.text ?? '',
+              kind: 'markdown',
+              mime: MARKDOWN_MIME,
+            });
             moveNotePath(storeSlug, newId, t.from);
             markSynced(storeSlug, newId, {
               remoteSha: remoteFile.sha,

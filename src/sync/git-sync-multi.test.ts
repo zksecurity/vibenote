@@ -7,6 +7,17 @@ const authModule = vi.hoisted(() => ({
   ensureFreshAccessToken: vi.fn().mockResolvedValue('test-token'),
 }));
 
+function createMarkdown(store: LocalStore, title: string, text: string, dir = '') {
+  return store.createFile({
+    path: dir ? `${dir}/${title}.md` : `${title}.md`,
+    dir,
+    title,
+    content: text,
+    kind: 'markdown',
+    mime: 'text/markdown',
+  });
+}
+
 vi.mock('../auth/app-auth', () => authModule);
 
 const globalAny = globalThis as {
@@ -136,7 +147,7 @@ describe('syncBidirectional multi-device', () => {
   test('device two pulls newly created note', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
-    storeOne.createNote('Fresh', 'body');
+    createMarkdown(storeOne, 'Fresh', 'body');
     await syncBidirectional(storeOne, REPO_SLUG);
     expect(remotePaths(remote)).toEqual(['Fresh.md']);
 
@@ -151,7 +162,7 @@ describe('syncBidirectional multi-device', () => {
   test('rename on device one propagates to device two', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
-    let noteId = storeOne.createNote('Draft', 'seed content');
+    let noteId = createMarkdown(storeOne, 'Draft', 'seed content');
     await syncBidirectional(storeOne, REPO_SLUG);
 
     let deviceTwo = createDevice('device-two', deviceOne.storage);
@@ -171,7 +182,7 @@ describe('syncBidirectional multi-device', () => {
   test('renaming on device one with edits on device two does not keep the old path', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
-    let noteId = storeOne.createNote('Draft', 'seed content');
+    let noteId = createMarkdown(storeOne, 'Draft', 'seed content');
     await syncBidirectional(storeOne, REPO_SLUG);
 
     let deviceTwo = createDevice('device-two', deviceOne.storage);
@@ -192,8 +203,8 @@ describe('syncBidirectional multi-device', () => {
   test('rename chooses the correct note when another note shares the same content', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
-    let cloneId = storeOne.createNote('Clone', 'shared body');
-    let draftId = storeOne.createNote('Draft', 'shared body');
+    let cloneId = createMarkdown(storeOne, 'Clone', 'shared body');
+    let draftId = createMarkdown(storeOne, 'Draft', 'shared body');
     await syncBidirectional(storeOne, REPO_SLUG);
 
     let deviceTwo = createDevice('device-two', deviceOne.storage);
@@ -222,7 +233,7 @@ describe('syncBidirectional multi-device', () => {
   test('device two removes a note deleted on device one', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
-    let noteId = storeOne.createNote('Shared', 'shared text');
+    let noteId = createMarkdown(storeOne, 'Shared', 'shared text');
     await syncBidirectional(storeOne, REPO_SLUG);
     let deviceTwo = createDevice('device-two', deviceOne.storage);
 
@@ -298,7 +309,7 @@ describe('syncBidirectional multi-device', () => {
   test('device two with local edits resurrects a note removed on device one', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
-    let noteId = storeOne.createNote('Keep', 'shared text');
+    let noteId = createMarkdown(storeOne, 'Keep', 'shared text');
     await syncBidirectional(storeOne, REPO_SLUG);
     let deviceTwo = createDevice('device-two', deviceOne.storage);
 
@@ -320,7 +331,7 @@ describe('syncBidirectional multi-device', () => {
   test('folder rename on device one updates paths on device two', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
-    storeOne.createNote('Doc', 'body', 'docs');
+    createMarkdown(storeOne, 'Doc', 'body', 'docs');
     await syncBidirectional(storeOne, REPO_SLUG);
     expect(notePaths(storeOne)).toEqual(['docs/Doc.md']);
     let deviceTwo = createDevice('device-two', deviceOne.storage);
@@ -341,7 +352,7 @@ describe('syncBidirectional multi-device', () => {
   test('folder rename preserves offline edits on device two', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
-    let noteId = storeOne.createNote('Doc', 'body', 'docs');
+    let noteId = createMarkdown(storeOne, 'Doc', 'body', 'docs');
     await syncBidirectional(storeOne, REPO_SLUG);
 
     let deviceTwo = createDevice('device-two', deviceOne.storage);
@@ -363,8 +374,8 @@ describe('syncBidirectional multi-device', () => {
   test('folder deletion on device one removes its notes on device two', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
-    storeOne.createNote('Doc', 'body', 'docs');
-    storeOne.createNote('Nested', 'body', 'docs/nested');
+    createMarkdown(storeOne, 'Doc', 'body', 'docs');
+    createMarkdown(storeOne, 'Nested', 'body', 'docs/nested');
     await syncBidirectional(storeOne, REPO_SLUG);
     expect(notePaths(storeOne)).toEqual(['docs/Doc.md', 'docs/nested/Nested.md']);
     let deviceTwo = createDevice('device-two', deviceOne.storage);
