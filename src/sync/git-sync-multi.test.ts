@@ -99,6 +99,13 @@ function notePaths(store: LocalStore): string[] {
     .sort();
 }
 
+function filePaths(store: LocalStore): string[] {
+  return store
+    .listFiles()
+    .map((file) => file.path)
+    .sort();
+}
+
 function remotePaths(repo: MockRemoteRepo): string[] {
   return [...repo.snapshot().keys()].sort();
 }
@@ -228,6 +235,63 @@ describe('syncBidirectional multi-device', () => {
     await syncBidirectional(storeTwo, REPO_SLUG);
 
     expect(notePaths(storeTwo)).toEqual([]);
+    expect(remotePaths(remote)).toEqual([]);
+  });
+
+  test('device two pulls newly created binary asset', async () => {
+    let deviceOne = createDevice('device-one');
+    let storeOne = deviceOne.store;
+    storeOne.createBinaryFile('assets/logo.png', Buffer.from('logo').toString('base64'), 'image/png');
+    await syncBidirectional(storeOne, REPO_SLUG);
+    expect(remotePaths(remote)).toEqual(['assets/logo.png']);
+
+    let deviceTwo = createDevice('device-two');
+    let storeTwo = deviceTwo.store;
+    await syncBidirectional(storeTwo, REPO_SLUG);
+
+    expect(filePaths(storeTwo)).toEqual(['assets/logo.png']);
+    expect(remotePaths(remote)).toEqual(['assets/logo.png']);
+  });
+
+  test('renaming a binary asset propagates to other devices', async () => {
+    let deviceOne = createDevice('device-one');
+    let storeOne = deviceOne.store;
+    storeOne.createBinaryFile('logo.png', Buffer.from('logo').toString('base64'), 'image/png');
+    await syncBidirectional(storeOne, REPO_SLUG);
+    expect(remotePaths(remote)).toEqual(['logo.png']);
+
+    let deviceTwo = createDevice('device-two', deviceOne.storage);
+
+    storeOne = useDevice(deviceOne);
+    storeOne.renameFile('logo.png', 'brand.png');
+    await syncBidirectional(storeOne, REPO_SLUG);
+    expect(remotePaths(remote)).toEqual(['brand.png']);
+
+    let storeTwo = useDevice(deviceTwo);
+    await syncBidirectional(storeTwo, REPO_SLUG);
+
+    expect(filePaths(storeTwo)).toEqual(['brand.png']);
+    expect(remotePaths(remote)).toEqual(['brand.png']);
+  });
+
+  test('device two removes a binary asset deleted on device one', async () => {
+    let deviceOne = createDevice('device-one');
+    let storeOne = deviceOne.store;
+    storeOne.createBinaryFile('assets/chart.svg', Buffer.from('<svg/>').toString('base64'), 'image/svg+xml');
+    await syncBidirectional(storeOne, REPO_SLUG);
+    expect(remotePaths(remote)).toEqual(['assets/chart.svg']);
+
+    let deviceTwo = createDevice('device-two', deviceOne.storage);
+
+    storeOne = useDevice(deviceOne);
+    storeOne.deleteFile('assets/chart.svg');
+    await syncBidirectional(storeOne, REPO_SLUG);
+    expect(remotePaths(remote)).toEqual([]);
+
+    let storeTwo = useDevice(deviceTwo);
+    await syncBidirectional(storeTwo, REPO_SLUG);
+
+    expect(filePaths(storeTwo)).toEqual([]);
     expect(remotePaths(remote)).toEqual([]);
   });
 

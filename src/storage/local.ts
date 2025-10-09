@@ -313,14 +313,14 @@ export class LocalStore {
       mime: meta.mime,
       binaryBase64: base64,
       lastRemoteSha: undefined,
-      lastSyncedHash: hashText(base64),
+      lastSyncedHash: undefined,
     };
     let idx = this.loadIndex();
     idx.push(meta);
     localStorage.setItem(this.indexKey, JSON.stringify(idx));
     localStorage.setItem(this.noteKey(id), JSON.stringify(doc));
     this.index = idx;
-    if (dir !== '') this.addFolder(dir);
+    ensureFolderForSlug(this.slug, dir);
     debugLog(this.slug, 'createBinary', { id, path: normPath });
     emitRepoChange(this.slug);
     return id;
@@ -393,6 +393,7 @@ export class LocalStore {
       kind: 'binary',
       mime: doc.mime,
     });
+    ensureFolderForSlug(this.slug, normDir);
     recordRenameTombstone(this.slug, {
       from: doc.path,
       to: toPath,
@@ -999,6 +1000,14 @@ function loadFileForKey(slug: string, id: string): RepoFileDoc | null {
   } catch {
     return null;
   }
+}
+
+function ensureFolderForSlug(slug: string, dir: string) {
+  let folders = new Set(loadFoldersForSlug(slug));
+  if (dir !== '') {
+    for (let ancestor of ancestorsOf(dir)) folders.add(ancestor);
+  }
+  localStorage.setItem(repoKey(slug, FOLDERS_SUFFIX), JSON.stringify(Array.from(folders).sort()));
 }
 
 function basename(p: string) {
