@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import { LocalStore, listTombstones } from '../storage/local';
+import { LocalStore, listTombstones, findBySyncedHash } from '../storage/local';
 import { MockRemoteRepo } from '../test/mock-remote';
 
 const authModule = vi.hoisted(() => ({
@@ -154,6 +154,29 @@ describe('syncBidirectional', () => {
     const doc = store.loadFile(asset.id);
     expect(doc?.content).toBe(Buffer.from('image-data', 'utf8').toString('base64'));
     expect(doc?.kind ?? 'binary').toBe('binary');
+    expectParity(store, remote);
+  });
+
+  test('tracks remote binary renames by sha/hash', async () => {
+    const payload = Buffer.from('asset', 'utf8').toString('base64');
+    const id = store.createBinaryFile('logo.png', payload, 'image/png');
+    await syncBidirectional(store, 'user/repo');
+    const before = store.loadFile(id);
+    expect(before?.lastSyncedHash).toBeDefined();
+    remote.deleteDirect('logo.png');
+    remote.setFile('assets/logo.png', payload);
+    if (before?.lastSyncedHash) {
+      const lookup = findBySyncedHash(store.slug, before.lastSyncedHash);
+      expect(lookup?.id).toBe(id);
+    }
+
+    await syncBidirectional(store, 'user/repo');
+
+    const paths = store.listFiles().map((f) => f.path).sort();
+    expect(paths).toContain('assets/logo.png');
+    expect(paths).not.toContain('logo.png');
+    const renamedFile = store.listFiles().find((f) => f.path === 'assets/logo.png');
+    expect(renamedFile).toBeDefined();
     expectParity(store, remote);
   });
 
