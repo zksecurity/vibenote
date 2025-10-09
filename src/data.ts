@@ -102,7 +102,9 @@ type RepoDataActions = {
   createNote: (dir: string, name: string) => string | undefined;
   createFolder: (parentDir: string, name: string) => void;
   renameNote: (path: string, title: string) => void;
+  renameFile: (path: string, name: string) => void;
   deleteNote: (path: string) => void;
+  deleteFile: (path: string) => void;
   renameFolder: (dir: string, newName: string) => void;
   deleteFolder: (dir: string) => void;
   updateNoteText: (path: string, text: string) => void;
@@ -458,6 +460,21 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     }
   };
 
+  const renameFile = (path: string, name: string) => {
+    if (!canEdit) return;
+    try {
+      let store = getRepoStore(slug);
+      let nextPath = store.renameFile(path, name);
+      if (nextPath && activePath !== undefined && pathsEqual(activePath, path)) {
+        ensureActivePath(nextPath);
+      }
+      scheduleAutoSync();
+    } catch (error) {
+      logError(error);
+      setSyncMessage('Invalid file name.');
+    }
+  };
+
   const deleteNote = (path: string) => {
     if (!canEdit) return;
     let meta = resolveEditableNote(path);
@@ -468,6 +485,22 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       ensureActivePath(undefined);
     }
     scheduleAutoSync();
+  };
+
+  const deleteFile = (path: string) => {
+    if (!canEdit) return;
+    try {
+      let store = getRepoStore(slug);
+      let removed = store.deleteFile(path);
+      if (!removed) return;
+      if (activePath !== undefined && pathsEqual(activePath, path)) {
+        ensureActivePath(undefined);
+      }
+      scheduleAutoSync();
+    } catch (error) {
+      logError(error);
+      setSyncMessage('Unable to delete file.');
+    }
   };
 
   const renameFolder = (dir: string, newName: string) => {
@@ -530,7 +563,9 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     createNote,
     createFolder,
     renameNote,
+    renameFile,
     deleteNote,
+    deleteFile,
     renameFolder,
     deleteFolder,
     updateNoteText,

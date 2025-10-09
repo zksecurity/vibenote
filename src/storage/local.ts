@@ -326,6 +326,25 @@ export class LocalStore {
     return id;
   }
 
+  renameFile(path: string, newName: string): string | undefined {
+    let meta = this.findMetaByPath(path);
+    if (!meta) return undefined;
+    if (meta.kind === 'markdown') {
+      let trimmed = newName.replace(/\.md$/i, '');
+      this.renameNote(meta.id, trimmed);
+      let updated = this.loadNote(meta.id);
+      return updated?.path;
+    }
+    return this.renameBinary(meta.id, newName);
+  }
+
+  deleteFile(path: string): boolean {
+    let meta = this.findMetaByPath(path);
+    if (!meta) return false;
+    this.deleteNote(meta.id);
+    return true;
+  }
+
   renameNote(id: string, title: string) {
     let doc = this.loadNote(id);
     if (!doc) return;
@@ -354,8 +373,38 @@ export class LocalStore {
     emitRepoChange(this.slug);
   }
 
+  private renameBinary(id: string, newName: string): string | undefined {
+    let doc = this.loadFile(id);
+    if (!doc || doc.kind !== 'binary') return undefined;
+    let safeName = ensureValidFileName(newName);
+    let normDir = normalizeDir(doc.dir);
+    let toPath = joinPath(normDir, safeName);
+    if (toPath === doc.path) return doc.path;
+    let updatedAt = Date.now();
+    let next: RepoFileDoc = { ...doc, title: safeName, path: toPath, dir: normDir, updatedAt };
+    delete next.lastRemoteSha;
+    delete next.lastSyncedHash;
+    localStorage.setItem(this.noteKey(id), JSON.stringify(next));
+    this.touchIndex(id, {
+      title: safeName,
+      path: toPath,
+      dir: normDir,
+      updatedAt,
+      kind: 'binary',
+      mime: doc.mime,
+    });
+    recordRenameTombstone(this.slug, {
+      from: doc.path,
+      to: toPath,
+      lastRemoteSha: doc.lastRemoteSha,
+      renamedAt: updatedAt,
+    });
+    emitRepoChange(this.slug);
+    return toPath;
+  }
+
   deleteNote(id: string) {
-    let doc = this.loadNote(id);
+    let doc = this.loadFile(id);
     let idx = this.loadIndex().filter((n) => n.id !== id);
     localStorage.setItem(this.indexKey, JSON.stringify(idx));
     if (doc) {
@@ -569,6 +618,15 @@ export class LocalStore {
     debugLog(this.slug, 'note:moveDir', { id, toDir: normDir });
   }
 
+  private findMetaByPath(path: string): FileMeta | null {
+    let normalized = normalizeFilePath(path);
+    let idx = this.loadIndex();
+    for (let meta of idx) {
+      if (normalizeFilePath(meta.path) === normalized) return meta;
+    }
+    return null;
+  }
+
   private loadIndex(): FileMeta[] {
     let raw = localStorage.getItem(this.indexKey);
     if (!raw) return [];
@@ -637,6 +695,10 @@ function normalizeDir(dir: string): string {
   d = d.replace(/(^\/+|\/+?$)/g, '');
   if (d === '.' || d === '..') d = '';
   return d;
+}
+
+function normalizeFilePath(path: string): string {
+  return path.replace(/^\/+/, '');
 }
 
 function ensureValidFolderName(name: string): string {
@@ -956,6 +1018,13 @@ function ensureValidTitle(title: string): string {
     throw new Error('Invalid title: contains illegal characters');
   }
   return t;
+}
+
+function ensureValidFileName(name: string): string {
+  let trimmed = name.trim();
+  if (!trimmed || trimmed === '.' || trimmed === '..') throw new Error('Invalid file name');
+  if (/[\\/\0]/.test(trimmed)) throw new Error('Invalid file name');
+  return trimmed;
 }
 
 function joinPath(dir: string, file: string) {

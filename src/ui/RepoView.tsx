@@ -7,7 +7,7 @@ import { RepoSwitcher } from './RepoSwitcher';
 import { Toggle } from './Toggle';
 import { GitHubIcon, ExternalLinkIcon, NotesIcon, CloseIcon, SyncIcon } from './RepoIcons';
 import { useRepoData } from '../data';
-import type { FileMeta } from '../storage/local';
+import type { FileKind, FileMeta } from '../storage/local';
 import { getExpandedFolders, setExpandedFolders } from '../storage/local';
 import type { RepoRoute, Route } from './routing';
 import { normalizePath, pathsEqual } from '../lib/util';
@@ -271,8 +271,8 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
               onSelect={onSelect}
               onCreateNote={actions.createNote}
               onCreateFolder={actions.createFolder}
-              onRenameNote={actions.renameNote}
-              onDeleteNote={actions.deleteNote}
+              onRenameFile={(path, name, _kind) => actions.renameFile(path, name)}
+              onDeleteFile={actions.deleteFile}
               onRenameFolder={actions.renameFolder}
               onDeleteFolder={actions.deleteFolder}
             />
@@ -430,8 +430,8 @@ type FileSidebarProps = {
   onSelect: (path: string | undefined) => void;
   onCreateNote: (dir: string, name: string) => string | undefined;
   onCreateFolder: (parentDir: string, name: string) => void;
-  onRenameNote: (path: string, title: string) => void;
-  onDeleteNote: (path: string) => void;
+  onRenameFile: (path: string, name: string, kind: FileKind) => void;
+  onDeleteFile: (path: string) => void;
   onRenameFolder: (dir: string, newName: string) => void;
   onDeleteFolder: (dir: string) => void;
 };
@@ -446,8 +446,8 @@ function FileSidebar(props: FileSidebarProps) {
     onSelect,
     onCreateNote,
     onCreateFolder,
-    onRenameNote,
-    onDeleteNote,
+    onRenameFile,
+    onDeleteFile,
     onRenameFolder,
     onDeleteFolder,
   } = props;
@@ -462,7 +462,7 @@ function FileSidebar(props: FileSidebarProps) {
           file.kind === 'markdown'
             ? file.path.slice(file.path.lastIndexOf('/') + 1).replace(/\.md$/i, '')
             : undefined,
-        editable: file.kind === 'markdown',
+        kind: file.kind,
       })),
     [files]
   );
@@ -542,8 +542,8 @@ function FileSidebar(props: FileSidebarProps) {
           onCollapsedChange={setCollapsedMap}
           onSelectionChange={setSelection}
           onSelectFile={onSelect}
-          onRenameFile={onRenameNote}
-          onDeleteFile={onDeleteNote}
+          onRenameFile={(path, name, kind) => onRenameFile(path, name, kind)}
+          onDeleteFile={onDeleteFile}
           onCreateFile={(dir, name) => {
             const createdPath = onCreateNote(dir, name);
             if (createdPath !== undefined) onSelect(createdPath);

@@ -1,12 +1,13 @@
 // File tree sidebar for browsing, editing, and managing repo notes.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import type { FileKind } from '../storage/local';
 
 export type FileEntry = {
   name: string; // filename including extension
   path: string; // dir + name
   dir: string; // '' for root
   title?: string; // extension-trimmed title for editing
-  editable: boolean;
+  kind: FileKind;
 };
 
 type Selection = { kind: 'folder' | 'file'; path: string } | null;
@@ -21,7 +22,7 @@ type FileTreeProps = {
   onCollapsedChange: (next: Record<string, boolean>) => void;
   onSelectionChange?: (sel: Selection) => void;
   onSelectFile: (path: string) => void;
-  onRenameFile: (path: string, newName: string) => void;
+  onRenameFile: (path: string, newName: string, kind: FileKind) => void;
   onDeleteFile: (path: string) => void;
   onCreateFile: (dir: string, name: string) => void;
   onCreateFolder: (parentDir: string, name: string) => void;
@@ -37,7 +38,7 @@ type FolderNode = {
   name: string;
   children: (FolderNode | FileNode)[];
 };
-type FileNode = { kind: 'file'; name: string; dir: string; path: string; title?: string; editable: boolean };
+type FileNode = { kind: 'file'; name: string; dir: string; path: string; title?: string; fileKind: FileKind };
 
 export function FileTree(props: FileTreeProps) {
   // Rebuild the nested node structure whenever the note list changes.
@@ -154,7 +155,7 @@ export function FileTree(props: FileTreeProps) {
       e.preventDefault();
       if (selected.kind === 'file') {
         const f = props.files.find((x) => normalizePath(x.path) === normalizePath(selected.path));
-        if (!f || !f.editable) return;
+        if (!f) return;
         setEditing({ kind: 'file', path: f.path });
         const initial = f.title ?? trimMarkdownExtension(f.name);
         setEditText(initial);
@@ -165,11 +166,7 @@ export function FileTree(props: FileTreeProps) {
       }
     } else if (e.key === 'Delete') {
       e.preventDefault();
-      if (selected.kind === 'file') {
-        const f = props.files.find((x) => normalizePath(x.path) === normalizePath(selected.path));
-        if (!f || !f.editable) return;
-        props.onDeleteFile(selected.path);
-      }
+      if (selected.kind === 'file') props.onDeleteFile(selected.path);
       else if (selected.path !== '') props.onDeleteFolder(selected.path);
     } else if (e.key === 'Enter') {
       if (selected.kind === 'file') props.onSelectFile(selected.path);
@@ -254,12 +251,12 @@ export function FileTree(props: FileTreeProps) {
     }
     if (context.kind === 'file' && context.path) {
       const entry = props.files.find((f) => normalizePath(f.path) === normalizePath(context.path));
-      if (!entry || !entry.editable) {
+      if (!entry) {
         setEditing(null);
         setEditText('');
         return;
       }
-      props.onRenameFile(context.path, name);
+      props.onRenameFile(context.path, name, entry.kind);
     } else if (context.kind === 'folder' && context.path) {
       props.onRenameFolder(context.path, name);
     }
@@ -589,19 +586,16 @@ function Row(props: {
     props.selected?.kind === 'file' && normalizePath(props.selected.path) === normalizePath(node.path);
   const isEditing =
     props.editing?.kind === 'file' && normalizePath(props.editing.path) === normalizePath(node.path);
-  const isEditable = node.editable !== false;
   return (
     <div
       className={`tree-row ${isActive || isSelected ? 'is-active' : ''}`}
       style={{ paddingLeft: 6 + depth * 10 }}
       onClick={() => props.onSelectFile(node.path)}
       onContextMenu={(e) => {
-        if (!isEditable) return;
         e.preventDefault();
         props.onRequestMenu({ kind: 'file', path: node.path });
       }}
       onPointerDown={(e) => {
-        if (!isEditable) return;
         startLongPress(e, { kind: 'file', path: node.path });
       }}
       onDoubleClick={() => props.onSelectFile(node.path)}
@@ -634,7 +628,7 @@ function Row(props: {
       ) : (
         <span className="tree-title">{node.name}</span>
       )}
-      {isMenuHere && isEditable && (
+      {isMenuHere && (
         <div className="tree-menu" onClick={(e) => e.stopPropagation()}>
           <button
             className="btn small subtle"
@@ -734,7 +728,14 @@ function buildTree(files: FileEntry[], folders: string[]): FolderNode {
   for (let d of folders) addFolder(d);
   for (let f of files) {
     const parent = addFolder(f.dir);
-    parent.children.push({ kind: 'file', name: f.name, dir: f.dir, path: f.path, title: f.title, editable: f.editable });
+    parent.children.push({
+      kind: 'file',
+      name: f.name,
+      dir: f.dir,
+      path: f.path,
+      title: f.title,
+      fileKind: f.kind,
+    });
   }
   // Sort like GitHub: folders A→Z, then files A→Z
   const sortNode = (n: FolderNode) => {
