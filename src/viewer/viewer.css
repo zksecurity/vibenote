@@ -1,0 +1,151 @@
+:root {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.viewer-shell {
+  min-height: 100vh;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 32px 20px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.viewer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.viewer-header h1 {
+  margin: 0;
+  font-size: 1.8rem;
+}
+
+.viewer-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  color: #475569;
+  font-size: 0.95rem;
+}
+
+.viewer-pill {
+  background: rgba(30, 64, 175, 0.1);
+  color: #1d4ed8;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.viewer-body {
+  flex: 1;
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+  padding: 32px clamp(16px, 4vw, 48px);
+}
+
+.viewer-note {
+  line-height: 1.6;
+  font-size: 1rem;
+}
+
+.viewer-note h1,
+.viewer-note h2,
+.viewer-note h3,
+.viewer-note h4 {
+  font-weight: 600;
+  margin-top: 32px;
+}
+
+.viewer-note img {
+  max-width: 100%;
+  border-radius: 12px;
+}
+
+.viewer-note pre {
+  overflow-x: auto;
+  background: #0f172a;
+  color: #f8fafc;
+  padding: 14px 18px;
+  border-radius: 12px;
+}
+
+.viewer-status {
+  margin: 40px 0;
+  font-size: 1.1rem;
+  color: #475569;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 999px;
+  padding: 10px 18px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  border: none;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.btn.secondary {
+  background: rgba(30, 64, 175, 0.1);
+  color: #1d4ed8;
+}
+
+.btn.secondary:hover {
+  background: rgba(37, 99, 235, 0.18);
+}
+
+.viewer-copy {
+  white-space: nowrap;
+}
+
+.viewer-footer {
+  font-size: 0.95rem;
+  color: #475569;
+  display: flex;
+  justify-content: center;
+}
+
+.viewer-footer a {
+  color: #1d4ed8;
+  text-decoration: none;
+}
+
+.viewer-footer a:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 640px) {
+  .viewer-shell {
+    padding: 24px 16px 32px;
+  }
+  .viewer-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .viewer-copy {
+    align-self: flex-start;
+  }
+  .viewer-body {
+    padding: 24px 16px;
+  }
+}

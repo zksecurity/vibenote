@@ -12,6 +12,15 @@ import {
   type SessionClaims,
 } from './api.ts';
 import { createSessionStore } from './session-store.ts';
+import { createShareStore } from './share-store.ts';
+import {
+  createShare,
+  resolveShare,
+  disableShare,
+  fetchSharedFile,
+  markExpiredShares,
+  ShareError,
+} from './share-service.ts';
 
 declare module 'express-serve-static-core' {
   interface Request {
@@ -25,6 +34,11 @@ const sessionStore = createSessionStore({
   encryptionKey: env.SESSION_ENCRYPTION_KEY,
 });
 await sessionStore.init();
+let shareStore = createShareStore({
+  filePath: env.SHARE_STORE_FILE,
+});
+await shareStore.init();
+let corsOrigins = Array.from(new Set([...env.ALLOWED_ORIGINS, ...env.PUBLIC_VIEWER_ORIGINS]));
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -32,7 +46,7 @@ app.use(
   cors({
     origin: (origin, cb) => {
       if (!origin) return cb(null, true);
-      if (env.ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+      if (corsOrigins.includes(origin)) return cb(null, true);
       return cb(new Error('CORS not allowed'));
     },
     credentials: true,
@@ -135,6 +149,115 @@ app.post('/v1/webhooks/github', (_req, res) => {
   res.status(204).end();
 });
 
+app.post('/api/share/gist', requireSession, async (req, res) => {
+  setShareSecurityHeaders(res, 'json');
+  try {
+    let claims = req.sessionUser;
+    if (!claims) {
+      return res.status(401).json({ error: 'missing session' });
+    }
+    let body = req.body ?? {};
+    let modeValue = typeof body.mode === 'string' ? body.mode : 'unlisted';
+    let includeAssets =
+      body.includeAssets === undefined ? undefined : body.includeAssets === null ? undefined : Boolean(body.includeAssets);
+    let expiresAt =
+      body.expiresAt === null ? null : typeof body.expiresAt === 'string' ? body.expiresAt : undefined;
+    let request = {
+      repo: typeof body.repo === 'string' ? body.repo : '',
+      path: typeof body.path === 'string' ? body.path : '',
+      mode: modeValue as any,
+      includeAssets,
+      expiresAt,
+    };
+    let result = await createShare(env, shareStore, sessionStore, claims.sessionId, claims.login, request);
+    res.status(201).json({
+      id: result.shared.id,
+      url: result.url,
+      title: result.shared.title ?? null,
+      createdAt: result.shared.createdAt,
+      expiresAt: result.shared.expiresAt ?? null,
+      mode: result.shared.mode,
+    });
+  } catch (error) {
+    if (handleShareError(res, error)) return;
+    res.status(500).json({ error: getErrorMessage(error) });
+  }
+});
+
+app.delete('/api/shares/:id', requireSession, async (req, res) => {
+  setShareSecurityHeaders(res, 'json');
+  try {
+    let claims = req.sessionUser;
+    if (!claims) {
+      return res.status(401).json({ error: 'missing session' });
+    }
+    let shareId = String(req.params.id ?? '').trim();
+    if (shareId.length === 0) {
+      return res.status(400).json({ error: 'invalid share id' });
+    }
+    let record = shareStore.getById(shareId);
+    if (!record) {
+      return res.status(204).end();
+    }
+    if (record.createdBy.userId !== claims.sub) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    await disableShare(shareStore, shareId);
+    res.status(204).end();
+  } catch (error) {
+    if (handleShareError(res, error)) return;
+    res.status(500).json({ error: getErrorMessage(error) });
+  }
+});
+
+app.get('/api/shares/:id/resolve', async (req, res) => {
+  setShareSecurityHeaders(res, 'json');
+  try {
+    let shareId = String(req.params.id ?? '').trim();
+    if (shareId.length === 0) {
+      return res.status(400).json({ error: 'invalid share id' });
+    }
+    let resolved = await resolveShare(shareStore, shareId);
+    if (!resolved) {
+      return res.status(404).json({ error: 'share not found' });
+    }
+    if (resolved.isDisabled) {
+      return res.status(410).json({ error: 'share unavailable', share: resolved });
+    }
+    res.json({ share: resolved });
+  } catch (error) {
+    if (handleShareError(res, error)) return;
+    res.status(500).json({ error: getErrorMessage(error) });
+  }
+});
+
+app.get('/api/gist-raw', async (req, res) => {
+  setShareSecurityHeaders(res, 'asset');
+  try {
+    let shareId = String(req.query.share ?? '').trim();
+    let fileName = String(req.query.file ?? '').trim();
+    if (shareId.length === 0 || fileName.length === 0) {
+      return res.status(400).json({ error: 'missing share or file' });
+    }
+    let result = await fetchSharedFile(env, shareStore, shareId, fileName);
+    if (result === null) {
+      return res.status(404).json({ error: 'share not found' });
+    }
+    let contentType =
+      result.mediaType ??
+      (result.isPrimary ? 'text/markdown; charset=utf-8' : 'application/octet-stream');
+    if (result.isPrimary && !contentType.includes('charset')) {
+      contentType = `${contentType}; charset=utf-8`;
+    }
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'private, max-age=60');
+    res.send(result.bytes);
+  } catch (error) {
+    if (handleShareError(res, error)) return;
+    res.status(500).json({ error: getErrorMessage(error) });
+  }
+});
+
 const server = app.listen(env.PORT, () => {
   console.log(`[vibenote] api listening on :${env.PORT}`);
 });
@@ -161,6 +284,12 @@ setInterval(() => {
   }
 }, 60 * 60 * 1000).unref();
 
+setInterval(() => {
+  markExpiredShares(shareStore).catch((error) => {
+    console.error('[vibenote] share prune failed', error);
+  });
+}, 60 * 60 * 1000).unref();
+
 function callbackURL(req: express.Request): string {
   return `${getProtocol(req)}://${getHost(req)}/v1/auth/github/callback`;
 }
@@ -180,6 +309,27 @@ function getHost(req: express.Request): string {
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
   return String(error);
+}
+
+function handleShareError(res: express.Response, error: unknown): boolean {
+  if (error instanceof ShareError) {
+    res.status(error.status).json({ error: error.message });
+    return true;
+  }
+  return false;
+}
+
+function setShareSecurityHeaders(res: express.Response, kind: 'json' | 'asset'): void {
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Frame-Options', 'DENY');
+  if (kind === 'asset') {
+    res.setHeader(
+      'Content-Security-Policy',
+      "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'"
+    );
+  } else {
+    res.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'; sandbox");
+  }
 }
 
 function normalizeReturnTo(value: string, allowedOrigins: string[]): string | null {

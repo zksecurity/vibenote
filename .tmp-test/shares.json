@@ -1,0 +1,21 @@
+[
+  {
+    "id": "share123",
+    "mode": "unlisted",
+    "gistId": "gist1",
+    "primaryFile": "note.md",
+    "primaryEncoding": "utf8",
+    "assets": [],
+    "title": "Doc",
+    "createdBy": {
+      "userId": "user1",
+      "githubLogin": "octocat"
+    },
+    "createdAt": "2025-10-09T15:10:45.483Z",
+    "isDisabled": true,
+    "metadata": {
+      "noteBytes": 10,
+      "assetBytes": 0
+    }
+  }
+]

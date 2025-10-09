@@ -1266,6 +1266,133 @@ textarea:focus-visible {
   box-shadow: var(--shadow-soft);
 }
 
+.share-modal {
+  gap: 20px;
+}
+
+.share-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.share-header h3 {
+  margin: 0;
+}
+
+.share-header p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.share-pill {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--surface-muted, rgba(148, 163, 184, 0.16));
+  border-radius: 12px;
+  padding: 2px 8px;
+  color: var(--muted-strong, var(--accent));
+}
+
+.share-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.share-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.share-field span {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.share-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+}
+
+.share-field input[type='date'] {
+  background: var(--surface-muted, #f1f5f9);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 8px);
+  padding: 8px 10px;
+  font-size: 0.95rem;
+}
+
+.share-error {
+  color: var(--accent);
+  font-size: 0.9rem;
+}
+
+.share-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.share-result {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.share-url {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.share-url input {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 8px);
+  padding: 8px 10px;
+  font-size: 0.95rem;
+  background: var(--surface-muted, #f8fafc);
+}
+
+.share-result dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.share-result dt {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.share-result dd {
+  margin: 4px 0 0;
+  font-weight: 600;
+}
+
+.share-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.share-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
 .repo-config-modal {
   gap: 20px;
 }

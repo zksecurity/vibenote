@@ -1,10 +1,102 @@
 // Backend adapter that resolves GitHub repo metadata and installation state.
-import { ensureFreshAccessToken, refreshAccessTokenNow, getApiBase } from '../auth/app-auth';
+import { ensureFreshAccessToken, refreshAccessTokenNow, getApiBase, getSessionToken } from '../auth/app-auth';
 import { fetchPublicRepoInfo } from './github-public';
 
-export { type RepoMetadata, getRepoMetadata, getInstallUrl };
+export { type RepoMetadata, type ShareLink, getRepoMetadata, getInstallUrl, createShareLink, disableShareLink };
 
 const GITHUB_API_BASE = 'https://api.github.com';
+
+type ShareLink = {
+  id: string;
+  url: string;
+  title: string | null;
+  createdAt: string;
+  expiresAt: string | null;
+  mode: 'unlisted';
+};
+
+type ShareCreateOptions = {
+  repo: string;
+  path: string;
+  includeAssets: boolean;
+  expiresAt?: string | null;
+};
+
+async function createShareLink(options: ShareCreateOptions): Promise<ShareLink> {
+  let sessionToken = getSessionToken();
+  if (!sessionToken) {
+    throw new Error('Sign in with GitHub to share this note.');
+  }
+  let base = getApiBase();
+  let payload = {
+    repo: options.repo,
+    path: options.path,
+    mode: 'unlisted' as const,
+    includeAssets: options.includeAssets,
+    expiresAt: options.expiresAt ?? null,
+  };
+  let res = await fetch(`${base}/api/share/gist`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${sessionToken}`,
+    },
+    body: JSON.stringify(payload),
+  });
+  let body = await parseJsonSafe(res);
+  if (!res.ok) {
+    let message = body && typeof body.error === 'string' ? body.error : 'Failed to create share link.';
+    throw new Error(message);
+  }
+  let share = normalizeShareLink(body);
+  if (!share) {
+    throw new Error('Share response was malformed.');
+  }
+  return share;
+}
+
+async function disableShareLink(shareId: string): Promise<void> {
+  let sessionToken = getSessionToken();
+  if (!sessionToken) {
+    throw new Error('Sign in to manage shares.');
+  }
+  let base = getApiBase();
+  let res = await fetch(`${base}/api/shares/${encodeURIComponent(shareId)}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${sessionToken}` },
+  });
+  if (!res.ok && res.status !== 404 && res.status !== 204) {
+    let body = await parseJsonSafe(res);
+    let message = body && typeof body.error === 'string' ? body.error : 'Failed to revoke share.';
+    throw new Error(message);
+  }
+}
+
+async function parseJsonSafe(res: Response): Promise<any> {
+  try {
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+function normalizeShareLink(raw: any): ShareLink | null {
+  if (!raw || typeof raw !== 'object') return null;
+  let id = typeof raw.id === 'string' ? raw.id : undefined;
+  let url = typeof raw.url === 'string' ? raw.url : undefined;
+  let createdAt = typeof raw.createdAt === 'string' ? raw.createdAt : undefined;
+  if (!id || !url || !createdAt) return null;
+  let expiresAtValue = raw.expiresAt;
+  let expiresAt =
+    typeof expiresAtValue === 'string'
+      ? expiresAtValue
+      : expiresAtValue === null || expiresAtValue === undefined
+      ? null
+      : null;
+  let titleValue = raw.title;
+  let title = typeof titleValue === 'string' ? titleValue : null;
+  return { id, url, title, createdAt, expiresAt, mode: 'unlisted' };
+}
 
 type RepoMetadata = {
   isPrivate: boolean | null;

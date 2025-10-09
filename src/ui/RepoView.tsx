@@ -4,11 +4,12 @@ import { FileTree, type FileEntry } from './FileTree';
 import { Editor } from './Editor';
 import { RepoSwitcher } from './RepoSwitcher';
 import { Toggle } from './Toggle';
-import { GitHubIcon, ExternalLinkIcon, NotesIcon, CloseIcon, SyncIcon } from './RepoIcons';
+import { GitHubIcon, ExternalLinkIcon, NotesIcon, CloseIcon, SyncIcon, ShareIcon } from './RepoIcons';
 import { useRepoData, type RepoNoteListItem } from '../data';
 import { getExpandedFolders, setExpandedFolders } from '../storage/local';
 import type { RepoRoute, Route } from './routing';
 import { normalizePath, pathsEqual } from '../lib/util';
+import { ShareModal } from './ShareModal';
 
 type RepoViewProps = {
   slug: string;
@@ -80,6 +81,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
   // Pure UI state: sidebar visibility and account menu.
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
 
   // Close the account dropdown when clicking anywhere else on the page.
   useEffect(() => {
@@ -92,6 +94,10 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
     document.addEventListener('click', onDoc);
     return () => document.removeEventListener('click', onDoc);
   }, []);
+
+  useEffect(() => {
+    setShareOpen(false);
+  }, [doc?.path]);
 
   const [showSwitcher, setShowSwitcher] = useState(false);
 
@@ -211,6 +217,16 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
             </button>
           ) : (
             <>
+              {doc !== undefined && canRead && route.kind === 'repo' && (
+                <button
+                  className="btn secondary share-btn"
+                  onClick={() => setShareOpen(true)}
+                  aria-label="Share note"
+                >
+                  <ShareIcon />
+                  <span>Share</span>
+                </button>
+              )}
               {canSync && (
                 <button
                   className={`btn secondary sync-btn ${syncing ? 'is-syncing' : ''}`}
@@ -400,6 +416,15 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
             </a>
           )}
         </div>
+      )}
+
+      {shareOpen && doc !== undefined && route.kind === 'repo' && (
+        <ShareModal
+          repoSlug={`${route.owner}/${route.repo}`}
+          notePath={doc.path}
+          noteTitle={doc.title}
+          onClose={() => setShareOpen(false)}
+        />
       )}
       {showSwitcher && (
         <RepoSwitcher
