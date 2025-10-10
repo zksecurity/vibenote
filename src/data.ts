@@ -8,11 +8,7 @@ import {
   getLastAutoSyncAt,
   recordAutoSyncRun,
   type FileMeta,
-  type NoteMeta,
-  type NoteDoc,
-  type RepoFileDoc,
-  isMarkdownMeta,
-  isMarkdownDoc,
+  type RepoFile,
   clearAllLocalData,
   getLastActiveFileId,
   setLastActiveFileId,
@@ -39,6 +35,7 @@ import {
   type SyncSummary,
   listRepoFiles,
   pullRepoFile,
+  type RemoteFile,
 } from './sync/git-sync';
 import { logError } from './lib/logging';
 import { useReadOnlyFiles } from './data/readonly-notes';
@@ -46,13 +43,11 @@ import { normalizePath } from './lib/util';
 import type { RepoRoute } from './ui/routing';
 
 export { useRepoData };
-export type { RepoAccessState, RepoDataInputs, RepoDataState, RepoDataActions, RepoNoteListItem };
+export type { RepoAccessState, RepoDataInputs, RepoDataState, RepoDataActions };
 
 const AUTO_SYNC_MIN_INTERVAL_MS = 60_000;
 const AUTO_SYNC_DEBOUNCE_MS = 10_000;
 const AUTO_SYNC_POLL_INTERVAL_MS = 180_000;
-
-type RepoNoteListItem = NoteMeta;
 
 type RepoDataState = {
   // session state
@@ -68,7 +63,7 @@ type RepoDataState = {
   manageUrl: string | undefined;
 
   // repo content
-  activeFile: RepoFileDoc | undefined;
+  activeFile: RepoFile | undefined;
   activePath: string | undefined;
   files: FileMeta[];
   folders: string[];
@@ -200,13 +195,13 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
 
   let activeId = activeFileMeta?.id;
 
-  let activeLocalFile = useMemo<RepoFileDoc | undefined>(() => {
+  let activeLocalFile = useMemo<RepoFile | undefined>(() => {
     if (!canEdit) return undefined;
     if (!activeId) return undefined;
     return getRepoStore(slug).loadFileById(activeId) ?? undefined;
   }, [canEdit, activeId]);
 
-  let activeFile: RepoFileDoc | undefined = canEdit ? activeLocalFile : activeReadOnlyFile;
+  let activeFile: RepoFile | undefined = canEdit ? activeLocalFile : activeReadOnlyFile;
 
   let activePath = activeFile?.path ?? activeFileMeta?.path ?? desiredPath;
 
@@ -252,14 +247,15 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       try {
         let cfg: RemoteConfig = buildRemoteConfig(slug, repoAccess.defaultBranch);
         let entries = await listRepoFiles(cfg);
-        let files: { path: string; text: string; sha?: string }[] = [];
+        let files: RemoteFile[] = [];
+        // TODO this should be done in parallel, or actually we shouldn't download all files
         for (let e of entries) {
           let rf = await pullRepoFile(cfg, e.path);
-          if (rf) files.push({ path: rf.path, text: rf.content, sha: rf.sha });
+          if (rf) files.push(rf);
         }
         let localStore = getRepoStore(slug);
         localStore.replaceWithRemote(files);
-        let synced = localStore.listFiles().filter(isMarkdownMeta);
+        let synced = localStore.listFiles();
         // if we are not on a specific path yet and there's no stored active id, show README.md
         if (desiredPath === undefined) {
           let storedId = getLastActiveFileId(slug);
@@ -723,9 +719,8 @@ function useSync(params: { slug: string; canSync: boolean; defaultBranch?: strin
         let localStore = getRepoStore(slug);
         let pending = localStore
           .listFiles()
-          .filter(isMarkdownMeta)
           .map((meta) => localStore.loadFileById(meta.id))
-          .filter((note): note is NoteDoc => note !== null && isMarkdownDoc(note))
+          .filter((note): note is RepoFile => note !== null)
           .filter((note) => note.lastSyncedHash !== hashText(note.content))
           .map((note) => ({
             path: note.path,

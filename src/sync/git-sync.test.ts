@@ -1,12 +1,6 @@
 import { Buffer } from 'node:buffer';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import {
-  LocalStore,
-  listTombstones,
-  findBySyncedHash,
-  isMarkdownMeta,
-  isMarkdownDoc,
-} from '../storage/local';
+import { LocalStore, listTombstones, findBySyncedHash } from '../storage/local';
 import { MockRemoteRepo } from '../test/mock-remote';
 
 const authModule = vi.hoisted(() => ({

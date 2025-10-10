@@ -23,8 +23,8 @@ import {
   moveNotePath,
   moveFilePath,
   debugLog,
-  isMarkdownDoc,
-  isBinaryDoc,
+  isMarkdownFile,
+  isBinaryFile,
 } from '../storage/local';
 import { mergeMarkdown } from '../merge/merge';
 
@@ -513,13 +513,13 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
 
       if (!local) {
         let renamedRecord = entry.sha ? findByRemoteSha(storeSlug, entry.sha) : null;
-        let renamed = renamedRecord && isMarkdownDoc(renamedRecord.doc) ? renamedRecord : null;
+        let renamed = renamedRecord && isMarkdownFile(renamedRecord.doc) ? renamedRecord : null;
         if (!renamed) {
           remoteFile = await pullRepoFile(config, entry.path);
           if (!remoteFile) continue;
           remoteTextHash = hashText(remoteFile.content || '');
           let syncedRecord = findBySyncedHash(storeSlug, remoteTextHash);
-          renamed = syncedRecord && isMarkdownDoc(syncedRecord.doc) ? syncedRecord : null;
+          renamed = syncedRecord && isMarkdownFile(syncedRecord.doc) ? syncedRecord : null;
         }
         if (renamed && renamed.doc.path !== entry.path) {
           moveNotePath(storeSlug, renamed.id, entry.path);
@@ -629,13 +629,13 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
     if (!localFile) {
       if (renameSources.has(entry.path) || deleteSources.has(entry.path)) continue;
       let renamedRecord = entry.sha ? findByRemoteSha(storeSlug, entry.sha) : null;
-      let renamed = renamedRecord && isBinaryDoc(renamedRecord.doc) ? renamedRecord : null;
+      let renamed = renamedRecord && isBinaryFile(renamedRecord.doc) ? renamedRecord : null;
       if (!renamed) {
         fetchedBinary = await pullRepoFile(config, entry.path);
         if (!fetchedBinary) continue;
         let remoteHash = hashText(fetchedBinary.content ?? '');
         let syncedRecord = findBySyncedHash(storeSlug, remoteHash);
-        renamed = syncedRecord && isBinaryDoc(syncedRecord.doc) ? syncedRecord : null;
+        renamed = syncedRecord && isBinaryFile(syncedRecord.doc) ? syncedRecord : null;
       }
       if (renamed && renamed.doc.path !== entry.path) {
         moveFilePath(storeSlug, renamed.id, entry.path);

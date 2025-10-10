@@ -1,10 +1,13 @@
 // Local storage persistence for repo files (markdown notes plus binary assets).
 import { normalizePath } from '../lib/util';
 import { logError } from '../lib/logging';
+import type { RemoteFile } from '../sync/git-sync';
 
 export type FileKind = 'markdown' | 'binary';
 
-export { basename, stripExtension, extractDir };
+export type { FileMeta, RepoFile, MarkdownFile, BinaryFile };
+
+export { basename, stripExtension, extractDir, isMarkdownFile, isBinaryFile };
 
 const DEFAULT_MARKDOWN_MIME = 'text/markdown' as const;
 
@@ -30,7 +33,7 @@ type StoredFile = StoredFileMeta & {
   lastSyncedHash?: string;
 };
 
-export type RepoFileMeta = {
+type FileMeta = {
   id: string;
   path: string;
   title: string;
@@ -40,34 +43,20 @@ export type RepoFileMeta = {
   mime: string;
 };
 
-export type RepoFileDoc = RepoFileMeta & {
+type RepoFile = FileMeta & {
   content: string; // markdown uses UTF-8 text, binary uses base64 payloads
   lastRemoteSha?: string;
   lastSyncedHash?: string;
 };
 
-export type MarkdownFileMeta = RepoFileMeta & { kind: 'markdown'; mime: typeof DEFAULT_MARKDOWN_MIME };
-export type MarkdownFileDoc = RepoFileDoc & { kind: 'markdown'; mime: typeof DEFAULT_MARKDOWN_MIME };
-export type BinaryFileMeta = RepoFileMeta & { kind: 'binary' };
-export type BinaryFileDoc = RepoFileDoc & { kind: 'binary' };
+type MarkdownFile = RepoFile & { kind: 'markdown' };
+type BinaryFile = RepoFile & { kind: 'binary' };
 
-export type FileMeta = RepoFileMeta;
-export type NoteMeta = MarkdownFileMeta;
-export type NoteDoc = MarkdownFileDoc;
-
-export function isMarkdownMeta(meta: RepoFileMeta): meta is MarkdownFileMeta {
-  return meta.kind === 'markdown';
-}
-
-export function isBinaryMeta(meta: RepoFileMeta): meta is BinaryFileMeta {
-  return meta.kind === 'binary';
-}
-
-export function isMarkdownDoc(doc: RepoFileDoc): doc is MarkdownFileDoc {
+function isMarkdownFile(doc: RepoFile): doc is MarkdownFile {
   return doc.kind === 'markdown';
 }
 
-export function isBinaryDoc(doc: RepoFileDoc): doc is BinaryFileDoc {
+function isBinaryFile(doc: RepoFile): doc is BinaryFile {
   return doc.kind === 'binary';
 }
 
@@ -86,11 +75,11 @@ function deserializeIndex(raw: string | null): FileMeta[] {
   }
 }
 
-function serializeFile(doc: RepoFileDoc): string {
+function serializeFile(doc: RepoFile): string {
   // important: written files stay compatible with `StoredFile`
   return JSON.stringify(toStoredFile(doc) satisfies StoredFile);
 }
-function deserializeFile(raw: string | null): RepoFileDoc | null {
+function deserializeFile(raw: string | null): RepoFile | null {
   if (raw === null) return null;
   // important: read files stay compatible with `StoredFile`
   try {
@@ -198,18 +187,15 @@ function readRepoSnapshot(slug: string): RepoStoreSnapshot {
   const files = loadIndexForSlug(slug)
     .slice()
     .sort((a, b) => b.updatedAt - a.updatedAt);
-  const notes = files.filter(isMarkdownMeta);
   const folders = loadFoldersForSlug(slug);
   return {
     files: Object.freeze(files) as FileMeta[],
-    notes: Object.freeze(notes) as NoteMeta[],
     folders: Object.freeze(folders) as string[],
   };
 }
 
 export type RepoStoreSnapshot = {
   files: FileMeta[];
-  notes: NoteMeta[];
   folders: string[];
 };
 
@@ -294,17 +280,17 @@ export class LocalStore {
     return snapshot.files.slice();
   }
 
-  loadFileById(id: string): RepoFileDoc | null {
+  loadFileById(id: string): RepoFile | null {
     let raw = localStorage.getItem(this.noteKey(id));
     return deserializeFile(raw);
   }
 
   private persistNewFile(
-    meta: RepoFileMeta,
+    meta: FileMeta,
     content: string,
     extras?: { lastRemoteSha?: string; lastSyncedHash?: string }
-  ): RepoFileDoc {
-    let doc: RepoFileDoc = {
+  ): RepoFile {
+    let doc: RepoFile = {
       ...meta,
       content,
       lastRemoteSha: extras?.lastRemoteSha,
@@ -329,7 +315,7 @@ export class LocalStore {
     let doc = this.loadFileById(id);
     if (!doc) return;
     let updatedAt = Date.now();
-    let next: RepoFileDoc = { ...doc, content, updatedAt };
+    let next: RepoFile = { ...doc, content, updatedAt };
     localStorage.setItem(this.noteKey(id), serializeFile(next));
     this.touchIndex(id, { updatedAt });
     debugLog(this.slug, 'saveFile', { id, path: doc.path, updatedAt });
@@ -346,7 +332,7 @@ export class LocalStore {
     let title = stripExtension(safeName);
     path = joinPath(dir, safeName);
     let mime = params.mime ?? inferMimeFromPath(path);
-    let meta: RepoFileMeta = { id, path, title, dir, updatedAt, kind, mime };
+    let meta: FileMeta = { id, path, title, dir, updatedAt, kind, mime };
     debugLog(this.slug, 'createFile', { id, path, kind });
     this.persistNewFile(meta, content);
     emitRepoChange(this.slug);
@@ -378,10 +364,10 @@ export class LocalStore {
   }
 
   // internal rename method that also supports moving files between folders
-  private applyRename(doc: RepoFileDoc, target: { title: string; dir: string; path: string }): RepoFileDoc {
+  private applyRename(doc: RepoFile, target: { title: string; dir: string; path: string }): RepoFile {
     let fromPath = doc.path;
     let updatedAt = Date.now();
-    let next: RepoFileDoc = { ...doc, title: target.title, dir: target.dir, path: target.path, updatedAt };
+    let next: RepoFile = { ...doc, title: target.title, dir: target.dir, path: target.path, updatedAt };
     let pathChanged = fromPath !== target.path;
     if (pathChanged) {
       delete next.lastRemoteSha;
@@ -434,16 +420,7 @@ export class LocalStore {
     emitRepoChange(this.slug);
   }
 
-  replaceWithRemote(
-    files: Array<{
-      path: string;
-      text?: string;
-      binaryBase64?: string;
-      mime?: string;
-      kind?: FileKind;
-      sha?: string;
-    }>
-  ) {
+  replaceWithRemote(files: Array<RemoteFile>) {
     let previous = this.loadIndex();
     for (let note of previous) {
       localStorage.removeItem(this.noteKey(note.id));
@@ -457,13 +434,13 @@ export class LocalStore {
       let dir = extractDir(file.path);
       if (dir !== '') folderSet.add(dir);
       if (kind === 'binary') {
-        let base64 = file.binaryBase64 ?? '';
+        let base64 = file.content ?? '';
         let mime = file.mime ?? inferMimeFromPath(file.path);
         let fileName = basename(file.path);
         let stripped = stripExtension(fileName);
         let title = ensureValidTitle(stripped || 'Untitled');
         let meta: FileMeta = { id, path: file.path, title, dir, updatedAt: now, kind: 'binary', mime };
-        let doc: RepoFileDoc = {
+        let doc: RepoFile = {
           ...meta,
           content: base64,
           lastRemoteSha: file.sha,
@@ -473,11 +450,11 @@ export class LocalStore {
         localStorage.setItem(this.noteKey(id), serializeFile(doc));
         continue;
       }
-      let text = file.text ?? '';
+      let text = file.content ?? '';
       let fileName = basename(file.path);
       let stripped = stripExtension(fileName);
       let title = ensureValidTitle(stripped || 'Untitled');
-      let meta: NoteMeta = {
+      let meta: FileMeta = {
         id,
         path: file.path,
         title,
@@ -486,7 +463,7 @@ export class LocalStore {
         kind: 'markdown',
         mime: DEFAULT_MARKDOWN_MIME,
       };
-      let doc: NoteDoc = {
+      let doc: RepoFile = {
         ...meta,
         content: text,
         lastRemoteSha: file.sha,
@@ -793,7 +770,7 @@ export function markSynced(slug: string, id: string, patch: { remoteSha?: string
   let key = `${repoKey(slug, 'note')}:${id}`;
   let doc = loadFileForKey(slug, id);
   if (!doc) return;
-  let next: RepoFileDoc = { ...doc };
+  let next: RepoFile = { ...doc };
   if (patch.remoteSha !== undefined) next.lastRemoteSha = patch.remoteSha;
   if (patch.syncedHash !== undefined) next.lastSyncedHash = patch.syncedHash;
   localStorage.setItem(key, serializeFile(next));
@@ -807,9 +784,9 @@ export function updateNoteText(slug: string, id: string, text: string) {
     slug,
     id,
     (doc) => {
-      if (!isMarkdownDoc(doc)) return null;
+      if (!isMarkdownFile(doc)) return null;
       let updatedAt = Date.now();
-      let next: NoteDoc = { ...doc, content: text, updatedAt };
+      let next: MarkdownFile = { ...doc, content: text, updatedAt };
       return { doc: next };
     },
     'updateNoteText'
@@ -824,8 +801,8 @@ export function updateBinaryContent(slug: string, id: string, base64: string, mi
     (doc) => {
       let updatedAt = Date.now();
       let inferredMime = mime ?? doc.mime ?? inferMimeFromPath(doc.path);
-      let next: RepoFileDoc;
-      if (isBinaryDoc(doc)) {
+      let next: RepoFile;
+      if (isBinaryFile(doc)) {
         next = { ...doc, content: base64, mime: inferredMime, updatedAt };
       } else {
         next = {
@@ -843,18 +820,18 @@ export function updateBinaryContent(slug: string, id: string, base64: string, mi
   );
 }
 
-export function findByPath(slug: string, path: string): { id: string; doc: NoteDoc } | null {
+export function findByPath(slug: string, path: string): { id: string; doc: MarkdownFile } | null {
   let idx = loadIndexForSlug(slug);
   for (let meta of idx) {
     if (meta.path !== path) continue;
     let doc = loadFileForKey(slug, meta.id);
-    if (!doc || !isMarkdownDoc(doc)) continue;
+    if (!doc || !isMarkdownFile(doc)) continue;
     return { id: meta.id, doc };
   }
   return null;
 }
 
-export function findFileByPath(slug: string, path: string): { id: string; doc: RepoFileDoc } | null {
+export function findFileByPath(slug: string, path: string): { id: string; doc: RepoFile } | null {
   let idx = loadIndexForSlug(slug);
   for (let meta of idx) {
     if (meta.path !== path) continue;
@@ -868,7 +845,7 @@ export function findFileByPath(slug: string, path: string): { id: string; doc: R
 export function findByRemoteSha(
   slug: string,
   remoteSha: string | undefined
-): { id: string; doc: RepoFileDoc } | null {
+): { id: string; doc: RepoFile } | null {
   if (!remoteSha) return null;
   let idx = loadIndexForSlug(slug);
   for (let meta of idx) {
@@ -884,7 +861,7 @@ export function findByRemoteSha(
 export function findBySyncedHash(
   slug: string,
   syncedHash: string | undefined
-): { id: string; doc: RepoFileDoc } | null {
+): { id: string; doc: RepoFile } | null {
   if (!syncedHash) return null;
   let idx = loadIndexForSlug(slug);
   for (let meta of idx) {
@@ -904,7 +881,7 @@ export function moveNotePath(slug: string, id: string, toPath: string) {
     slug,
     id,
     (doc) => {
-      if (!isMarkdownDoc(doc)) return null;
+      if (!isMarkdownFile(doc)) return null;
       let updatedAt = Date.now();
       let dir = extractDir(normalizedPath);
       return {
@@ -975,14 +952,9 @@ function touchIndexUpdatedAt(slug: string, id: string, updatedAt: number, patch?
   localStorage.setItem(repoKey(slug, 'index'), serializeIndex(idx));
 }
 
-type DocMutationResult = { doc: RepoFileDoc; indexPatch?: Partial<FileMeta> } | null;
+type DocMutationResult = { doc: RepoFile; indexPatch?: Partial<FileMeta> } | null;
 
-function mutateFileDoc(
-  slug: string,
-  id: string,
-  mutate: (doc: RepoFileDoc) => DocMutationResult,
-  op: string
-) {
+function mutateFileDoc(slug: string, id: string, mutate: (doc: RepoFile) => DocMutationResult, op: string) {
   let key = `${repoKey(slug, 'note')}:${id}`;
   let current = loadFileForKey(slug, id);
   if (!current) return;
@@ -998,7 +970,7 @@ function mutateFileDoc(
   emitRepoChange(slug);
 }
 
-function loadFileForKey(slug: string, id: string): RepoFileDoc | null {
+function loadFileForKey(slug: string, id: string): RepoFile | null {
   let raw = localStorage.getItem(`${repoKey(slug, 'note')}:${id}`);
   if (!raw) return null;
   try {
@@ -1079,7 +1051,7 @@ function normalizeMeta(raw: unknown): FileMeta | null {
   return { id: stored.id, path, title, dir, updatedAt, kind: inferredKind, mime };
 }
 
-function toStoredFile(doc: RepoFileDoc): StoredFile {
+function toStoredFile(doc: RepoFile): StoredFile {
   return {
     id: doc.id,
     path: doc.path,
@@ -1094,7 +1066,7 @@ function toStoredFile(doc: RepoFileDoc): StoredFile {
   };
 }
 
-function normalizeFile(raw: unknown): RepoFileDoc | null {
+function normalizeFile(raw: unknown): RepoFile | null {
   if (raw === null || typeof raw !== 'object') return null;
   let stored = raw as StoredFile;
   let meta = normalizeMeta(stored);

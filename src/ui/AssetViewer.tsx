@@ -1,8 +1,8 @@
 // Placeholder viewer for binary files (images and other assets).
-import type { BinaryFileDoc } from '../storage/local';
+import type { BinaryFile } from '../storage/local';
 
 type AssetViewerProps = {
-  file: BinaryFileDoc;
+  file: BinaryFile;
 };
 
 export function AssetViewer({ file }: AssetViewerProps) {
@@ -14,7 +14,9 @@ export function AssetViewer({ file }: AssetViewerProps) {
       </div>
       <div className="asset-viewer-body">
         <p>This asset preview is not available yet.</p>
-        <p className="asset-viewer-path">Path: <code>{file.path}</code></p>
+        <p className="asset-viewer-path">
+          Path: <code>{file.path}</code>
+        </p>
       </div>
     </div>
   );

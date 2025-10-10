@@ -1,6 +1,6 @@
 // Multi-device sync regression tests that exercise cross-device note and folder workflows.
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { LocalStore, resetRepoStore, isMarkdownMeta, isMarkdownDoc } from '../storage/local';
+import { LocalStore, resetRepoStore } from '../storage/local';
 import { MockRemoteRepo } from '../test/mock-remote';
 
 const authModule = vi.hoisted(() => ({

@@ -8,7 +8,7 @@ import { Toggle } from './Toggle';
 import { GitHubIcon, ExternalLinkIcon, NotesIcon, CloseIcon, SyncIcon } from './RepoIcons';
 import { useRepoData } from '../data';
 import type { FileKind, FileMeta } from '../storage/local';
-import { getExpandedFolders, setExpandedFolders, isMarkdownDoc, isBinaryDoc } from '../storage/local';
+import { getExpandedFolders, setExpandedFolders, isMarkdownFile, isBinaryFile } from '../storage/local';
 import type { RepoRoute, Route } from './routing';
 import { normalizePath, pathsEqual } from '../lib/util';
 
@@ -340,7 +340,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
                 )}
                 {activeFile !== undefined ? (
                   <div className="workspace-panels">
-                    {isMarkdownDoc(activeFile) ? (
+                    {isMarkdownFile(activeFile) ? (
                       <Editor
                         key={activeFile.id}
                         doc={activeFile}
@@ -349,7 +349,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
                           actions.saveFile(path, text);
                         }}
                       />
-                    ) : isBinaryDoc(activeFile) ? (
+                    ) : isBinaryFile(activeFile) ? (
                       <AssetViewer key={activeFile.id} file={activeFile} />
                     ) : null}
                   </div>

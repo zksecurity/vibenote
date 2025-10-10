@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { FileKind, FileMeta, NoteDoc } from '../storage/local';
+import type { FileKind, FileMeta, RepoFile } from '../storage/local';
 import { normalizePath } from '../lib/util';
 import { basename, extractDir, hashText, stripExtension } from '../storage/local';
 import { logError } from '../lib/logging';
@@ -15,7 +15,7 @@ function useReadOnlyFiles(params: {
 }) {
   let { slug, isReadOnly, defaultBranch, desiredPath } = params;
   let [files, setFiles] = useState<FileMeta[]>([]);
-  let [activeFile, setActiveFile] = useState<NoteDoc | undefined>(undefined);
+  let [activeFile, setActiveFile] = useState<RepoFile | undefined>(undefined);
   desiredPath = desiredPath === undefined ? undefined : normalizePath(desiredPath);
 
   // Drop read-only data once we gain write access or lose read access.
@@ -90,8 +90,8 @@ function useReadOnlyFiles(params: {
         updatedAt: Date.now(),
         lastRemoteSha: remote.sha,
         lastSyncedHash: hashText(remote.content),
-        kind: 'markdown',
-        mime: 'text/markdown',
+        kind: remote.kind,
+        mime: remote.mime,
       });
     } catch (error) {
       logError(error);
