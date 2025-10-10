@@ -271,7 +271,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
               onSelect={onSelect}
               onCreateNote={actions.createNote}
               onCreateFolder={actions.createFolder}
-              onRenameFile={(path, name, _kind) => actions.renameFile(path, name)}
+              onRenameFile={actions.renameFile}
               onDeleteFile={actions.deleteFile}
               onRenameFolder={actions.renameFolder}
               onDeleteFolder={actions.deleteFolder}
@@ -430,7 +430,7 @@ type FileSidebarProps = {
   onSelect: (path: string | undefined) => void;
   onCreateNote: (dir: string, name: string) => string | undefined;
   onCreateFolder: (parentDir: string, name: string) => void;
-  onRenameFile: (path: string, name: string, kind: FileKind) => void;
+  onRenameFile: (path: string, name: string) => void;
   onDeleteFile: (path: string) => void;
   onRenameFolder: (dir: string, newName: string) => void;
   onDeleteFolder: (dir: string) => void;
@@ -542,7 +542,7 @@ function FileSidebar(props: FileSidebarProps) {
           onCollapsedChange={setCollapsedMap}
           onSelectionChange={setSelection}
           onSelectFile={onSelect}
-          onRenameFile={(path, name, kind) => onRenameFile(path, name, kind)}
+          onRenameFile={onRenameFile}
           onDeleteFile={onDeleteFile}
           onCreateFile={(dir, name) => {
             const createdPath = onCreateNote(dir, name);

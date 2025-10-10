@@ -1,6 +1,6 @@
 // File tree sidebar for browsing, editing, and managing repo notes.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import type { FileKind } from '../storage/local';
+import { stripExtension, type FileKind } from '../storage/local';
 
 export type FileEntry = {
   name: string; // filename including extension
@@ -22,7 +22,7 @@ type FileTreeProps = {
   onCollapsedChange: (next: Record<string, boolean>) => void;
   onSelectionChange?: (sel: Selection) => void;
   onSelectFile: (path: string) => void;
-  onRenameFile: (path: string, newName: string, kind: FileKind) => void;
+  onRenameFile: (path: string, newName: string) => void;
   onDeleteFile: (path: string) => void;
   onCreateFile: (dir: string, name: string) => void;
   onCreateFolder: (parentDir: string, name: string) => void;
@@ -157,7 +157,7 @@ export function FileTree(props: FileTreeProps) {
         const f = props.files.find((x) => normalizePath(x.path) === normalizePath(selected.path));
         if (!f) return;
         setEditing({ kind: 'file', path: f.path });
-        const initial = f.title ?? trimMarkdownExtension(f.name);
+        const initial = f.title ?? stripExtension(f.name);
         setEditText(initial);
       } else {
         const name = selected.path.slice(selected.path.lastIndexOf('/') + 1);
@@ -256,7 +256,7 @@ export function FileTree(props: FileTreeProps) {
         setEditText('');
         return;
       }
-      props.onRenameFile(context.path, name, entry.kind);
+      props.onRenameFile(context.path, name);
     } else if (context.kind === 'folder' && context.path) {
       props.onRenameFolder(context.path, name);
     }
@@ -633,10 +633,7 @@ function Row(props: {
           <button
             className="btn small subtle"
             onClick={() => {
-              props.onStartEdit(
-                { kind: 'file', path: node.path },
-                node.title ?? trimMarkdownExtension(node.name)
-              );
+              props.onStartEdit({ kind: 'file', path: node.path }, node.title ?? stripExtension(node.name));
               props.onCloseMenu();
             }}
           >
@@ -756,8 +753,4 @@ function normalizeDir(dir: string): string {
   d = d.replace(/(^\/+|\/+?$)/g, '');
   if (d === '.' || d === '..') d = '';
   return d;
-}
-
-function trimMarkdownExtension(name: string): string {
-  return name.replace(/\.md$/i, '');
 }

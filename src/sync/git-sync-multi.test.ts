@@ -148,7 +148,7 @@ describe('syncBidirectional multi-device', () => {
     let deviceTwo = createDevice('device-two', deviceOne.storage);
 
     storeOne = useDevice(deviceOne);
-    storeOne.renameFileById(noteId, 'Draft Renamed');
+    storeOne.renameFileById(noteId, 'Draft Renamed.md');
     await syncBidirectional(storeOne, REPO_SLUG);
     expect(remotePaths(remote)).toEqual(['Draft Renamed.md']);
 
@@ -168,7 +168,7 @@ describe('syncBidirectional multi-device', () => {
     let deviceTwo = createDevice('device-two', deviceOne.storage);
 
     storeOne = useDevice(deviceOne);
-    storeOne.renameFileById(noteId, 'Draft Renamed');
+    storeOne.renameFileById(noteId, 'Draft Renamed.md');
     await syncBidirectional(storeOne, REPO_SLUG);
     expect(remotePaths(remote)).toEqual(['Draft Renamed.md']);
 
@@ -193,7 +193,7 @@ describe('syncBidirectional multi-device', () => {
     storeTwo.saveFileContent(cloneId, 'clone offline edits', 'text/markdown');
 
     storeOne = useDevice(deviceOne);
-    storeOne.renameFileById(draftId, 'Draft Renamed');
+    storeOne.renameFileById(draftId, 'Draft Renamed.md');
     await syncBidirectional(storeOne, REPO_SLUG);
 
     storeTwo = useDevice(deviceTwo);
@@ -254,7 +254,7 @@ describe('syncBidirectional multi-device', () => {
     let deviceTwo = createDevice('device-two', deviceOne.storage);
 
     storeOne = useDevice(deviceOne);
-    storeOne.renameFile('logo.png', 'brand.png');
+    storeOne.renameFile('logo.png', 'brand');
     await syncBidirectional(storeOne, REPO_SLUG);
     expect(remotePaths(remote)).toEqual(['brand.png']);
 

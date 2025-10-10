@@ -3,6 +3,8 @@ import { logError } from '../lib/logging';
 
 export type FileKind = 'markdown' | 'binary';
 
+export { stripExtension };
+
 const DEFAULT_MARKDOWN_MIME = 'text/markdown' as const;
 
 /**
@@ -361,45 +363,31 @@ export class LocalStore {
     return id;
   }
 
+  // `newName` refers to the file name EXCLUDING extension
   renameFile(path: string, newName: string): string | undefined {
     let meta = this.findMetaByPath(path);
     if (!meta) return undefined;
-    return this.renameFileById(meta.id, newName);
+    // get previous extension from path
+    let ext = extractExtensionWithDot(basename(meta.path));
+    return this.renameFileById(meta.id, newName + ext);
   }
 
-  renameFileById(id: string, newName: string): string | undefined {
+  // `newFileName` refers to the file name INCLUDING extension
+  renameFileById(id: string, newFileName: string): string | undefined {
     let doc = this.loadFile(id);
     if (!doc) return undefined;
-    let isMarkdown = isMarkdownDoc(doc);
-    if (isMarkdown) {
-      let safeTitle = ensureValidTitle(newName || 'Untitled');
-      let normDir = normalizeDir(doc.dir);
-      let toPath = joinPath(normDir, `${safeTitle}.md`);
-      if (toPath === doc.path) return doc.path;
-      let next = this.applyRename(
-        doc,
-        { title: safeTitle, dir: normDir, path: toPath, mime: DEFAULT_MARKDOWN_MIME },
-        'renameFile'
-      );
-      return next.path;
-    }
-    let safeName = ensureValidFileName(newName);
+    let safeName = ensureValidFileName(newFileName);
     let normDir = normalizeDir(doc.dir);
     let toPath = joinPath(normDir, safeName);
     if (toPath === doc.path) return doc.path;
-    let nextTitle = ensureValidTitle(stripExtension(safeName) || 'Untitled');
-    let next = this.applyRename(
-      doc,
-      { title: nextTitle, dir: normDir, path: toPath, mime: doc.mime },
-      'renameFile'
-    );
+    let nextTitle = stripExtension(safeName);
+    let next = this.applyRename(doc, { title: nextTitle, dir: normDir, path: toPath, mime: doc.mime });
     return next.path;
   }
 
   private applyRename(
     doc: RepoFileDoc,
-    target: { title: string; dir: string; path: string; mime: string },
-    op: string
+    target: { title: string; dir: string; path: string; mime: string }
   ): RepoFileDoc {
     let fromPath = doc.path;
     let updatedAt = Date.now();
@@ -434,7 +422,7 @@ export class LocalStore {
         renamedAt: updatedAt,
       });
     }
-    debugLog(this.slug, op, { id: doc.id, fromPath, toPath: target.path, pathChanged });
+    debugLog(this.slug, 'renameFile', { id: doc.id, fromPath, toPath: target.path, pathChanged });
     emitRepoChange(this.slug);
     return next;
   }
@@ -652,11 +640,7 @@ export class LocalStore {
       nextPath = joinPath(normDir, safeFileName);
     }
     if (nextPath === doc.path && normDir === normalizeDir(doc.dir)) return;
-    this.applyRename(
-      doc,
-      { title: nextTitle, dir: normDir, path: nextPath, mime: nextMime },
-      'moveFileToDir'
-    );
+    this.applyRename(doc, { title: nextTitle, dir: normDir, path: nextPath, mime: nextMime });
   }
 
   private findMetaByPath(path: string): FileMeta | null {
@@ -1062,6 +1046,12 @@ function stripExtension(baseName: string): string {
   let idx = baseName.lastIndexOf('.');
   if (idx < 0) return baseName;
   return baseName.slice(0, idx);
+}
+
+function extractExtensionWithDot(baseName: string): string {
+  let idx = baseName.lastIndexOf('.');
+  if (idx < 0) return '';
+  return baseName.slice(idx);
 }
 
 function inferKindFromPath(path: string): FileKind {

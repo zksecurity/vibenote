@@ -103,7 +103,6 @@ type RepoDataActions = {
   selectNote: (path: string | undefined) => Promise<void>;
   createNote: (dir: string, name: string) => string | undefined;
   createFolder: (parentDir: string, name: string) => void;
-  renameNote: (path: string, title: string) => void;
   renameFile: (path: string, name: string) => void;
   deleteNote: (path: string) => void;
   deleteFile: (path: string) => void;
@@ -454,21 +453,6 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     scheduleAutoSync();
   };
 
-  const renameNote = (path: string, title: string) => {
-    if (!canEdit) return;
-    let meta = resolveEditableNote(path);
-    if (!meta) return;
-    try {
-      let store = getRepoStore(slug);
-      let nextPath = store.renameFile(meta.path, title);
-      if (nextPath) ensureActivePath(nextPath);
-      scheduleAutoSync();
-    } catch (error) {
-      logError(error);
-      setSyncMessage('Invalid title. Avoid / and control characters.');
-    }
-  };
-
   const renameFile = (path: string, name: string) => {
     if (!canEdit) return;
     try {
@@ -571,7 +555,6 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     selectNote,
     createNote,
     createFolder,
-    renameNote,
     renameFile,
     deleteNote,
     deleteFile,

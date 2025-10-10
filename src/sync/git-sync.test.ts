@@ -65,7 +65,7 @@ describe('syncBidirectional', () => {
   test('renames move files remotely', async () => {
     const id = store.createFile('Original.md', 'rename me');
     await syncBidirectional(store, 'user/repo');
-    store.renameFileById(id, 'Renamed');
+    store.renameFileById(id, 'Renamed.md');
     await syncBidirectional(store, 'user/repo');
     expectParity(store, remote);
     const notes = store.listFiles();
@@ -78,7 +78,7 @@ describe('syncBidirectional', () => {
     const id = store.createFile('test.md', 'body');
     await syncBidirectional(store, 'user/repo');
     expect([...remote.snapshot().keys()]).toEqual(['test.md']);
-    store.renameFileById(id, 'test2');
+    store.renameFileById(id, 'test2.md');
     await syncBidirectional(store, 'user/repo');
     const remoteFiles = [...remote.snapshot().keys()].sort();
     expect(remoteFiles).toEqual(['test2.md']);
@@ -89,7 +89,7 @@ describe('syncBidirectional', () => {
     const id = store.createFile('draft.md', 'original body');
     await syncBidirectional(store, 'user/repo');
     remote.setFile('draft.md', 'remote update');
-    store.renameFileById(id, 'draft-renamed');
+    store.renameFileById(id, 'draft-renamed.md');
     await syncBidirectional(store, 'user/repo');
     const paths = [...remote.snapshot().keys()].sort();
     expect(paths).toEqual(['draft-renamed.md', 'draft.md']);
