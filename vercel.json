@@ -8,6 +8,7 @@
     { "src": "/assets/(.*)", "dest": "/assets/$1" },
     { "src": "/robots.txt", "dest": "/robots.txt" },
     { "src": "/sw.js", "dest": "/sw.js" },
+    { "src": "/s/(.*)", "dest": "/share.html" },
     { "src": "/(.*)", "dest": "/index.html" }
   ]
 }

@@ -42,7 +42,7 @@ Future versions will add snapshotting, expiring links, and optional restricted s
 
 ### Viewing a shared note
 
-- Visiting the link opens a **public viewer** (e.g., `public.vibenote.dev/s/abc123`).
+- Visiting the link opens a **public viewer** (e.g., `vibenote.dev/s/abc123`).
 - The viewer shows:
 
   - The note rendered in VibeNote’s Markdown style.
@@ -85,7 +85,7 @@ Future versions will add snapshotting, expiring links, and optional restricted s
 
 2. **Public Viewer (frontend)**
 
-   - A simple SPA under `public.vibenote.dev`.
+  - A simple SPA under `vibenote.dev`.
    - Renders the shared note using the same components as the main app.
    - Talks only to the share endpoints (no direct GitHub calls).
    - Provides read-only display, consistent styling, and basic metadata (title, date, etc.).
