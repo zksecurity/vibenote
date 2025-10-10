@@ -63,7 +63,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
     needsInstall,
     manageUrl,
 
-    doc,
+    activeFile,
     activePath,
     files,
     folders,
@@ -338,19 +338,19 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
                     )}
                   </div>
                 )}
-                {doc !== undefined ? (
+                {activeFile !== undefined ? (
                   <div className="workspace-panels">
-                    {isMarkdownDoc(doc) ? (
+                    {isMarkdownDoc(activeFile) ? (
                       <Editor
-                        key={doc.id}
-                        doc={doc}
+                        key={activeFile.id}
+                        doc={activeFile}
                         readOnly={!canEdit}
                         onChange={(path, text) => {
                           actions.saveFile(path, text);
                         }}
                       />
-                    ) : isBinaryDoc(doc) ? (
-                      <AssetViewer key={doc.id} file={doc} />
+                    ) : isBinaryDoc(activeFile) ? (
+                      <AssetViewer key={activeFile.id} file={activeFile} />
                     ) : null}
                   </div>
                 ) : (

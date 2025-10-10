@@ -41,25 +41,18 @@ import {
   listRepoFiles,
 } from './sync/git-sync';
 import { logError } from './lib/logging';
-import { useReadOnlyNotes, type ReadOnlyNote } from './data/readonly-notes';
+import { useReadOnlyFiles } from './data/readonly-notes';
 import { normalizePath } from './lib/util';
 import type { RepoRoute } from './ui/routing';
 
 export { useRepoData };
-export type {
-  RepoAccessState,
-  RepoDataInputs,
-  RepoDataState,
-  RepoDataActions,
-  RepoNoteListItem,
-  ReadOnlyNote,
-};
+export type { RepoAccessState, RepoDataInputs, RepoDataState, RepoDataActions, RepoNoteListItem };
 
 const AUTO_SYNC_MIN_INTERVAL_MS = 60_000;
 const AUTO_SYNC_DEBOUNCE_MS = 10_000;
 const AUTO_SYNC_POLL_INTERVAL_MS = 180_000;
 
-type RepoNoteListItem = NoteMeta | ReadOnlyNote;
+type RepoNoteListItem = NoteMeta;
 
 type RepoDataState = {
   // session state
@@ -75,7 +68,7 @@ type RepoDataState = {
   manageUrl: string | undefined;
 
   // repo content
-  doc: RepoFileDoc | undefined;
+  activeFile: RepoFileDoc | undefined;
   activePath: string | undefined;
   files: FileMeta[];
   folders: string[];
@@ -144,7 +137,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
 
   // Carry the latest sync status message shown across the workspace.
   // TODO make this disappear after a timeout
-  let [statusMessage, setSyncMessage] = useState<string | undefined>(undefined);
+  let [statusMessage, setStatusMessage] = useState<string | undefined>(undefined);
 
   // Track whether this repo slug has already been linked to GitHub sync.
   let [linked, setLinked] = useState(() => isRepoLinked(slug));
@@ -166,12 +159,12 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   // in readonly mode, we store nothing locally and just fetch content from github no demand
   let isReadOnly = repoAccess.level === 'read';
   let {
-    notes: readOnlyNotes,
-    doc: readOnlyDoc,
+    files: readOnlyFiles,
+    activeFile: activeReadOnlyFile,
     folders: readOnlyFolders,
-    selectDoc: selectReadOnlyDoc,
+    selectFile: selectReadOnlyFile,
     reset: resetReadOnlyState,
-  } = useReadOnlyNotes({ slug, isReadOnly, defaultBranch, desiredPath });
+  } = useReadOnlyFiles({ slug, isReadOnly, defaultBranch, desiredPath });
 
   // whether we treat the repo as locally writable
   // note that we are optimistic about write access until the access check completes,
@@ -187,23 +180,12 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     defaultBranch,
   });
 
-  // TODO: readonly has to support non-markdown files too
-  let readOnlyFiles: FileMeta[] = readOnlyNotes.map((note) => ({
-    id: note.id,
-    path: note.path,
-    title: note.title,
-    dir: note.dir,
-    updatedAt: 0,
-    kind: 'markdown',
-    mime: 'text/markdown',
-  }));
-
   // Derive the files/folders from whichever source is powering the tree.
   let files = isReadOnly ? readOnlyFiles : localFiles;
   let folders = isReadOnly ? readOnlyFolders : localFolders;
 
   // determine the active note
-  let activeFile = useMemo(() => {
+  let activeFileMeta = useMemo(() => {
     // if specified in the route, that takes precedence
     if (desiredPath !== undefined) return findByPath(files, desiredPath);
     if (!canEdit) return undefined;
@@ -216,17 +198,17 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     return undefined;
   }, [canEdit, files, desiredPath]);
 
-  let activeId = activeFile?.id;
+  let activeId = activeFileMeta?.id;
 
-  let localDoc = useMemo<RepoFileDoc | undefined>(() => {
+  let activeLocalFile = useMemo<RepoFileDoc | undefined>(() => {
     if (!canEdit) return undefined;
     if (!activeId) return undefined;
     return getRepoStore(slug).loadFileById(activeId) ?? undefined;
   }, [canEdit, activeId]);
 
-  let doc: RepoFileDoc | undefined = canEdit ? localDoc : readOnlyDoc;
+  let activeFile: RepoFileDoc | undefined = canEdit ? activeLocalFile : activeReadOnlyFile;
 
-  let activePath = doc?.path ?? activeFile?.path ?? desiredPath;
+  let activePath = activeFile?.path ?? activeFileMeta?.path ?? desiredPath;
 
   // EFFECTS
   // please avoid adding more effects here, keep logic clean/separated
@@ -238,10 +220,10 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
 
   // When the loaded doc changes path (e.g., rename or sync or restoring last active), push the route forward.
   useEffect(() => {
-    if (doc?.path === undefined) return;
-    if (pathsEqual(desiredPath, doc.path)) return;
-    setActivePath(doc.path);
-  }, [doc?.path, desiredPath]);
+    if (activeFile?.path === undefined) return;
+    if (pathsEqual(desiredPath, activeFile.path)) return;
+    setActivePath(activeFile.path);
+  }, [activeFile?.path, desiredPath]);
 
   // Remember recently opened repos once we know the current repo is reachable.
   // TODO this shouldn't a useEffect, the only place a repo ever becomes reachable is after
@@ -291,7 +273,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
         }
         markRepoLinked(slug);
         setLinked(true);
-        setSyncMessage('Loaded repository');
+        setStatusMessage('Loaded repository');
       } catch (error) {
         logError(error);
       } finally {
@@ -317,7 +299,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       }
     } catch (error) {
       logError(error);
-      setSyncMessage('Failed to sign in');
+      setStatusMessage('Failed to sign in');
     }
   };
 
@@ -333,7 +315,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       window.open(url, '_blank', 'noopener');
     } catch (error) {
       logError(error);
-      setSyncMessage('Failed to open GitHub');
+      setStatusMessage('Failed to open GitHub');
     }
   };
 
@@ -357,15 +339,15 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     ensureActivePath(undefined);
     initialPullRef.current.done = false;
 
-    setSyncMessage('Signed out');
+    setStatusMessage('Signed out');
   };
 
   // "Sync" button in the header
   const syncNow = async () => {
     try {
-      setSyncMessage(undefined);
+      setStatusMessage(undefined);
       if (!hasSession || !linked || slug === 'new' || !canEdit) {
-        setSyncMessage('Connect GitHub and configure repo first');
+        setStatusMessage('Connect GitHub and configure repo first');
         return;
       }
       let summary = await performSync();
@@ -375,17 +357,16 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       if (summary?.pushed) parts.push(`pushed ${summary.pushed}`);
       if (summary?.deletedRemote) parts.push(`deleted remote ${summary.deletedRemote}`);
       if (summary?.deletedLocal) parts.push(`deleted local ${summary.deletedLocal}`);
-      setSyncMessage(parts.length ? `Synced: ${parts.join(', ')}` : 'Up to date');
+      setStatusMessage(parts.length ? `Synced: ${parts.join(', ')}` : 'Up to date');
     } catch (error) {
       logError(error);
-      setSyncMessage('Sync failed');
+      setStatusMessage('Sync failed');
     }
   };
 
   // click on a file in the sidebar
   const selectFile = async (path: string | undefined) => {
-    // TODO does read-only mode support non-markdown files?
-    await selectReadOnlyDoc(path);
+    await selectReadOnlyFile(path);
     ensureActivePath(path);
   };
 
@@ -418,7 +399,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       getRepoStore(slug).createFolder(parentDir, name);
     } catch (error) {
       logError(error);
-      setSyncMessage('Invalid folder name.');
+      setStatusMessage('Invalid folder name.');
       return;
     }
     scheduleAutoSync();
@@ -435,7 +416,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       scheduleAutoSync();
     } catch (error) {
       logError(error);
-      setSyncMessage('Invalid file name.');
+      setStatusMessage('Invalid file name.');
     }
   };
 
@@ -444,7 +425,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     try {
       let removed = getRepoStore(slug).deleteFile(path);
       if (!removed) {
-        setSyncMessage('Unable to delete file.');
+        setStatusMessage('Unable to delete file.');
         return;
       }
       if (activePath !== undefined && pathsEqual(activePath, path)) {
@@ -453,7 +434,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       scheduleAutoSync();
     } catch (error) {
       logError(error);
-      setSyncMessage('Unable to delete file.');
+      setStatusMessage('Unable to delete file.');
     }
   };
 
@@ -464,7 +445,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       scheduleAutoSync();
     } catch (error) {
       logError(error);
-      setSyncMessage('Invalid folder name.');
+      setStatusMessage('Invalid folder name.');
     }
   };
 
@@ -495,7 +476,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     needsInstall: repoAccess.needsInstall,
     manageUrl,
 
-    doc,
+    activeFile: activeFile,
     activePath,
     files,
     folders,

@@ -1,32 +1,28 @@
 import { useEffect, useMemo, useState } from 'react';
-
-import type { NoteDoc } from '../storage/local';
+import type { FileKind, FileMeta, NoteDoc } from '../storage/local';
 import { normalizePath } from '../lib/util';
-import { hashText } from '../storage/local';
+import { basename, extractDir, hashText, stripExtension } from '../storage/local';
 import { logError } from '../lib/logging';
 import { buildRemoteConfig, listRepoFiles, pullNote } from '../sync/git-sync';
 
-export { useReadOnlyNotes };
-export type { ReadOnlyNote };
+export { useReadOnlyFiles };
 
-type ReadOnlyNote = { id: string; path: string; title: string; dir: string; sha?: string };
-
-function useReadOnlyNotes(params: {
+function useReadOnlyFiles(params: {
   slug: string;
   isReadOnly: boolean;
   defaultBranch?: string;
   desiredPath?: string;
 }) {
   let { slug, isReadOnly, defaultBranch, desiredPath } = params;
-  let [notes, setNotes] = useState<ReadOnlyNote[]>([]);
-  let [doc, setDoc] = useState<NoteDoc | undefined>(undefined);
+  let [files, setFiles] = useState<FileMeta[]>([]);
+  let [activeFile, setActiveFile] = useState<NoteDoc | undefined>(undefined);
   desiredPath = desiredPath === undefined ? undefined : normalizePath(desiredPath);
 
   // Drop read-only data once we gain write access or lose read access.
   useEffect(() => {
     if (isReadOnly) return;
-    setNotes((prev) => (prev.length === 0 ? prev : []));
-    setDoc(undefined);
+    setFiles((prev) => (prev.length === 0 ? prev : []));
+    setActiveFile(undefined);
   }, [isReadOnly]);
 
   // Populate the read-only note list straight from GitHub when we lack write access.
@@ -37,9 +33,9 @@ function useReadOnlyNotes(params: {
       try {
         let cfg = buildRemoteConfig(slug, defaultBranch);
         let entries = await listRepoFiles(cfg);
-        let mapped = entries.map(toNote);
+        let mapped = entries.map(toFile);
         if (cancelled) return;
-        setNotes(mapped);
+        setFiles(mapped);
       } catch (error) {
         logError(error);
       }
@@ -51,7 +47,7 @@ function useReadOnlyNotes(params: {
 
   let folders = useMemo(() => {
     let set = new Set<string>();
-    for (let note of notes) {
+    for (let note of files) {
       if (note.dir === '') continue;
       let current = note.dir.replace(/(^\/+|\/+?$)/g, '');
       while (current) {
@@ -61,31 +57,32 @@ function useReadOnlyNotes(params: {
       }
     }
     return Array.from(set).sort();
-  }, [notes]);
+  }, [files]);
 
   useEffect(() => {
     if (!isReadOnly) return;
-    if (notes.length === 0) return;
-    let target: ReadOnlyNote | undefined;
+    if (files.length === 0) return;
+    let target: FileMeta | undefined;
     if (desiredPath !== undefined) {
-      target = notes.find((note) => normalizePath(note.path) === desiredPath);
+      target = files.find((note) => normalizePath(note.path) === desiredPath);
       if (!target) {
-        target = notes.find((note) => note.path.toLowerCase() === 'readme.md');
+        target = files.find((note) => note.path.toLowerCase() === 'readme.md');
       }
     } else {
-      target = notes.find((note) => note.path.toLowerCase() === 'readme.md');
+      target = files.find((note) => note.path.toLowerCase() === 'readme.md');
     }
     if (!target) return;
-    if (doc?.id === target.id) return;
-    void loadDoc(target);
-  }, [isReadOnly, notes, desiredPath, doc?.id]);
+    if (activeFile?.id === target.id) return;
+    void loadFile(target);
+  }, [isReadOnly, files, desiredPath, activeFile?.id]);
 
-  async function loadDoc(entry: ReadOnlyNote) {
+  async function loadFile(entry: FileMeta) {
     let cfg = buildRemoteConfig(slug, defaultBranch);
     try {
+      // TODO: pull any file, not just markdown
       let remote = await pullNote(cfg, entry.path);
       if (!remote) return;
-      setDoc({
+      setActiveFile({
         id: entry.id,
         path: entry.path,
         title: entry.title,
@@ -104,8 +101,8 @@ function useReadOnlyNotes(params: {
 
   return {
     // exposed state
-    notes,
-    doc,
+    files,
+    activeFile,
     folders,
 
     // exposed actions
@@ -113,29 +110,26 @@ function useReadOnlyNotes(params: {
     /**
      * Fetch the latest contents when a read-only file is selected from the tree.
      */
-    async selectDoc(id: string | undefined) {
+    async selectFile(id: string | undefined) {
       if (id === undefined) {
-        setDoc(undefined);
+        setActiveFile(undefined);
         return;
       }
       if (!isReadOnly) return;
-      let entry = notes.find((note) => note.id === id);
+      let entry = files.find((note) => note.id === id);
       if (!entry) return;
-      await loadDoc(entry);
+      await loadFile(entry);
     },
 
     reset() {
-      setNotes([]);
-      setDoc(undefined);
+      setFiles([]);
+      setActiveFile(undefined);
     },
   };
 }
 
-function toNote({ path, sha }: { path: string; sha?: string }): ReadOnlyNote {
-  const title = path.slice(path.lastIndexOf('/') + 1).replace(/\.md$/i, '');
-  const dir = (() => {
-    const idx = path.lastIndexOf('/');
-    return idx >= 0 ? path.slice(0, idx) : '';
-  })();
-  return { id: path, path, title, dir, sha };
+function toFile({ path, kind, mime }: { path: string; kind: FileKind; mime: string }): FileMeta {
+  let title = stripExtension(basename(path));
+  let dir = extractDir(path);
+  return { id: path, path, title, dir, updatedAt: 0, kind, mime };
 }

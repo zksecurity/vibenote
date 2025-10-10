@@ -56,13 +56,6 @@ const IMAGE_MIME_BY_EXT: Record<string, string> = {
 };
 const BINARY_EXTENSIONS = new Set<string>(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif']);
 
-type RepoFileEntry = {
-  path: string;
-  sha: string;
-  kind: FileKind;
-  mime: string;
-};
-
 type RemoteFileData = RepoFileEntry & {
   text?: string;
   binaryBase64?: string;
@@ -174,6 +167,8 @@ export async function commitBatch(
   return firstPath ? extractBlobSha(res, firstPath) ?? res.commitSha : res.commitSha;
 }
 
+type RepoFileEntry = { path: string; sha: string; kind: FileKind; mime: string };
+
 export async function listRepoFiles(config: RemoteConfig): Promise<RepoFileEntry[]> {
   const filterEntries = (entries: Array<{ path?: string; sha?: string; type?: string }>) => {
     const results: RepoFileEntry[] = [];
@@ -183,6 +178,7 @@ export async function listRepoFiles(config: RemoteConfig): Promise<RepoFileEntry
       let sha = e.sha;
       if (type !== 'blob' || !path || !sha) continue;
       const kind = fileKindFromPath(path);
+      // file is filtered out, because it is not a supported file type
       if (!kind) continue;
       results.push({ path, sha, kind, mime: inferMimeFromPath(path) });
     }

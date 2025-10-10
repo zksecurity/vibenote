@@ -202,8 +202,8 @@ describe('useRepoData', () => {
       result.current.actions.selectFile(welcomePath);
     });
 
-    await waitFor(() => expect(result.current.state.doc?.path).toBe(welcomePath));
-    expect(result.current.state.doc?.content).toContain('Welcome to VibeNote');
+    await waitFor(() => expect(result.current.state.activeFile?.path).toBe(welcomePath));
+    expect(result.current.state.activeFile?.content).toContain('Welcome to VibeNote');
     expect(recordRecent).not.toHaveBeenCalled();
   });
 
@@ -228,7 +228,7 @@ describe('useRepoData', () => {
     });
 
     await waitFor(() => expect(result.current.data.state.activePath).toBe(alpha.path));
-    expect(result.current.data.state.doc?.content).toBe('alpha text');
+    expect(result.current.data.state.activeFile?.content).toBe('alpha text');
     expect(result.current.routeState.notePath).toBe(alpha.path);
 
     await act(async () => {
@@ -261,7 +261,7 @@ describe('useRepoData', () => {
     const { result } = renderRepoData({ slug, route, recordRecent });
 
     await waitFor(() => expect(result.current.state.activePath).toBe(target.path));
-    expect(result.current.state.doc?.path).toBe(target.path);
+    expect(result.current.state.activeFile?.path).toBe(target.path);
   });
 
   test('state.files includes markdown and image entries for writable repos', async () => {
@@ -304,7 +304,7 @@ describe('useRepoData', () => {
     const { result } = renderRepoData({ slug, route, recordRecent });
 
     await waitFor(() => expect(result.current.state.activePath).toBe('guides/Intro.md'));
-    await waitFor(() => expect(result.current.state.doc?.content).toBe('# Intro'));
+    await waitFor(() => expect(result.current.state.activeFile?.content).toBe('# Intro'));
     expect(mockPullNote).toHaveBeenCalledWith(expect.anything(), 'guides/Intro.md');
   });
 
@@ -361,7 +361,7 @@ describe('useRepoData', () => {
       result.current.actions.selectFile(notePath);
     });
 
-    await waitFor(() => expect(result.current.state.doc?.path).toBe(notePath));
+    await waitFor(() => expect(result.current.state.activeFile?.path).toBe(notePath));
 
     act(() => {
       result.current.actions.saveFile(notePath, 'updated text');
@@ -420,7 +420,7 @@ describe('useRepoData', () => {
       expect.objectContaining({ id: 'docs/alpha.md', title: 'alpha' }),
     ]);
     expect(result.current.state.activePath).toBeUndefined();
-    expect(result.current.state.doc).toBeUndefined();
+    expect(result.current.state.activeFile).toBeUndefined();
 
     await waitFor(() =>
       expect(recordRecent).toHaveBeenCalledWith(expect.objectContaining({ slug, connected: false }))
@@ -430,7 +430,7 @@ describe('useRepoData', () => {
       result.current.actions.selectFile('docs/alpha.md');
     });
 
-    await waitFor(() => expect(result.current.state.doc?.content).toBe('# docs/alpha.md'));
+    await waitFor(() => expect(result.current.state.activeFile?.content).toBe('# docs/alpha.md'));
     expect(mockPullNote).toHaveBeenCalledTimes(1);
 
     mockPullNote.mockClear();
@@ -444,7 +444,7 @@ describe('useRepoData', () => {
       result.current.actions.selectFile('docs/alpha.md');
     });
 
-    await waitFor(() => expect(result.current.state.doc?.content).toBe('# updated remote'));
+    await waitFor(() => expect(result.current.state.activeFile?.content).toBe('# updated remote'));
     expect(mockPullNote).toHaveBeenCalledTimes(1);
   });
 
@@ -474,7 +474,7 @@ describe('useRepoData', () => {
 
     await waitFor(() => expect(result.current.state.files.length).toBe(2));
     expect(result.current.state.activePath).toBe('README.md');
-    await waitFor(() => expect(result.current.state.doc?.path).toBe('README.md'));
+    await waitFor(() => expect(result.current.state.activeFile?.path).toBe('README.md'));
     expect(mockPullNote).toHaveBeenCalledWith(expect.anything(), 'README.md');
   });
 
@@ -515,7 +515,7 @@ describe('useRepoData', () => {
     await waitFor(() => expect(result.current.state.files.length).toBe(2));
     const readmeEntry = result.current.state.files.find((file) => file.path === 'README.md');
     await waitFor(() => expect(result.current.state.activePath).toBe('README.md'));
-    await waitFor(() => expect(result.current.state.doc?.path).toBe('README.md'));
+    await waitFor(() => expect(result.current.state.activeFile?.path).toBe('README.md'));
     expect(readmeEntry?.id).toBe('00000000-0000-0000-0000-000000000222');
 
     uuidSpy.mockRestore();
@@ -557,13 +557,13 @@ describe('useRepoData', () => {
           setRoute((prev) => (prev.kind === 'repo' ? { ...prev, notePath: nextPath } : prev));
         },
       });
-      seenDocIds.push(value.state.doc?.id);
+      seenDocIds.push(value.state.activeFile?.id);
       seenNeedsInstall.push(value.state.needsInstall);
       seenCanEdit.push(value.state.canEdit);
       return value;
     });
 
-    expect(result.current.state.doc?.id).toBe(noteId);
+    expect(result.current.state.activeFile?.id).toBe(noteId);
 
     await act(async () => {
       pendingMeta.resolve({ ...writableMeta });
@@ -571,7 +571,7 @@ describe('useRepoData', () => {
     });
 
     await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
-    expect(result.current.state.doc?.id).toBe(noteId);
+    expect(result.current.state.activeFile?.id).toBe(noteId);
     expect(seenDocIds.every((id) => id === noteId)).toBe(true);
     expect(seenNeedsInstall.every((flag) => flag === false)).toBe(true);
     expect(seenCanEdit.every((flag) => flag === true)).toBe(true);
@@ -622,7 +622,7 @@ describe('useRepoData', () => {
       result.current.actions.selectFile(notePath);
     });
 
-    await waitFor(() => expect(result.current.state.doc?.path).toBe(notePath));
+    await waitFor(() => expect(result.current.state.activeFile?.path).toBe(notePath));
 
     act(() => {
       result.current.actions.setAutosync(true);
@@ -698,7 +698,7 @@ describe('useRepoData', () => {
             setRouteState((prev) => (prev.kind === 'repo' ? { ...prev, notePath: nextPath } : prev));
           },
         });
-        seenDocIds.push(value.state.doc?.id);
+        seenDocIds.push(value.state.activeFile?.id);
         seenNeedsInstall.push(value.state.needsInstall);
         return value;
       },
@@ -717,7 +717,7 @@ describe('useRepoData', () => {
       result.current.actions.selectFile(noteAPath);
     });
 
-    await waitFor(() => expect(result.current.state.doc?.id).toBe(noteA));
+    await waitFor(() => expect(result.current.state.activeFile?.id).toBe(noteA));
 
     act(() => {
       rerender({
@@ -733,7 +733,7 @@ describe('useRepoData', () => {
       result.current.actions.selectFile(noteBPath);
     });
 
-    await waitFor(() => expect(result.current.state.doc?.id).toBe(noteB));
+    await waitFor(() => expect(result.current.state.activeFile?.id).toBe(noteB));
 
     expect(seenNeedsInstall.every((flag) => flag === false)).toBe(true);
     expect(seenDocIds.at(-1)).toBe(noteB);
@@ -805,7 +805,7 @@ describe('useRepoData', () => {
       result.current.actions.selectFile(notePath);
     });
 
-    await waitFor(() => expect(result.current.state.doc?.id).toBe(noteId));
+    await waitFor(() => expect(result.current.state.activeFile?.id).toBe(noteId));
     expect(seenNeedsInstall.includes(true)).toBe(true);
   });
 
@@ -852,12 +852,12 @@ describe('useRepoData', () => {
     act(() => {
       result.current.actions.selectFile('docs/alpha.md');
     });
-    await waitFor(() => expect(result.current.state.doc?.path).toBe('docs/alpha.md'));
+    await waitFor(() => expect(result.current.state.activeFile?.path).toBe('docs/alpha.md'));
     act(() => {
       result.current.actions.selectFile('docs/beta.md');
     });
 
-    await waitFor(() => expect(result.current.state.doc?.path).toBe('docs/beta.md'));
+    await waitFor(() => expect(result.current.state.activeFile?.path).toBe('docs/beta.md'));
     expect(result.current.state.needsInstall).toBe(false);
     expect(seenNeedsInstall.every((flag) => flag === false)).toBe(true);
   });
@@ -894,7 +894,7 @@ describe('useRepoData', () => {
       result.current.actions.selectFile(notePath);
     });
 
-    await waitFor(() => expect(result.current.state.doc?.id).toBe(noteId));
+    await waitFor(() => expect(result.current.state.activeFile?.id).toBe(noteId));
 
     await act(async () => {
       await result.current.actions.signOut();
@@ -903,7 +903,7 @@ describe('useRepoData', () => {
     expect(mockSignOutFromGitHubApp).toHaveBeenCalledTimes(1);
     expect(result.current.state.hasSession).toBe(false);
     expect(result.current.state.user).toBeUndefined();
-    expect(result.current.state.doc).toBeUndefined();
+    expect(result.current.state.activeFile).toBeUndefined();
     expect(result.current.state.canSync).toBe(false);
     expect(result.current.state.needsInstall).toBe(false);
     expect(new LocalStore(slug).listFiles()).toHaveLength(0);

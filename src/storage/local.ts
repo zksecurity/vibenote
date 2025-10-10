@@ -4,7 +4,7 @@ import { logError } from '../lib/logging';
 
 export type FileKind = 'markdown' | 'binary';
 
-export { stripExtension };
+export { basename, stripExtension, extractDir };
 
 const DEFAULT_MARKDOWN_MIME = 'text/markdown' as const;
 
@@ -341,7 +341,7 @@ export class LocalStore {
     path = normalizePath(path);
     let kind = params.kind ?? inferKindFromPath(path);
     let updatedAt = Date.now();
-    let dir = normalizeDir(extractDir(path));
+    let dir = extractDir(path);
     let safeName = ensureValidFileName(basename(path));
     let title = stripExtension(safeName);
     path = joinPath(dir, safeName);
@@ -1061,7 +1061,7 @@ function normalizeMeta(raw: unknown): FileMeta | null {
   if (typeof stored.id !== 'string') return null;
   if (typeof stored.path !== 'string') return null;
   let path = stored.path.replace(/^\/+/g, '').replace(/\/+$/g, '') || stored.path;
-  let dir = normalizeDir(typeof stored.dir === 'string' ? stored.dir : extractDir(path));
+  let dir = typeof stored.dir === 'string' ? normalizeDir(stored.dir) : extractDir(path);
   let updatedAt =
     typeof stored.updatedAt === 'number' && Number.isFinite(stored.updatedAt) ? stored.updatedAt : Date.now();
   let inferredKind =
