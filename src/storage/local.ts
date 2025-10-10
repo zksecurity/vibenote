@@ -369,18 +369,16 @@ export class LocalStore {
     let finalPath: string;
     let mime: string;
     if (kind === 'markdown') {
-      let baseTitle =
-        params.title ??
-        (normPath.toLowerCase().endsWith('.md')
-          ? normPath.slice(0, -3).split('/').pop() ?? normPath
-          : basename(normPath));
-      title = ensureValidTitle(baseTitle || 'Untitled');
+      let baseName = params.title ?? basename(normPath);
+      let stripped = stripExtension(baseName);
+      title = ensureValidTitle(stripped || 'Untitled');
       finalPath = joinPath(dir, `${title}.md`);
       mime = params.mime ?? DEFAULT_MARKDOWN_MIME;
     } else {
       let baseName = params.title ?? basename(normPath);
       let safeName = ensureValidFileName(baseName);
-      title = safeName;
+      let stripped = stripExtension(safeName);
+      title = ensureValidTitle(stripped || 'Untitled');
       finalPath = joinPath(dir, safeName);
       mime = params.mime ?? inferMimeFromPath(finalPath);
     }
@@ -425,9 +423,10 @@ export class LocalStore {
     let normDir = normalizeDir(doc.dir);
     let toPath = joinPath(normDir, safeName);
     if (toPath === doc.path) return doc.path;
+    let nextTitle = ensureValidTitle(stripExtension(safeName) || 'Untitled');
     let next = this.applyRename(
       doc,
-      { title: safeName, dir: normDir, path: toPath, mime: doc.mime },
+      { title: nextTitle, dir: normDir, path: toPath, mime: doc.mime },
       'renameFile'
     );
     return next.path;
@@ -548,7 +547,9 @@ export class LocalStore {
       if (kind === 'binary') {
         let base64 = file.binaryBase64 ?? '';
         let mime = file.mime ?? inferMimeFromPath(file.path);
-        let title = basename(file.path);
+        let fileName = basename(file.path);
+        let stripped = stripExtension(fileName);
+        let title = ensureValidTitle(stripped || 'Untitled');
         let meta: FileMeta = { id, path: file.path, title, dir, updatedAt: now, kind: 'binary', mime };
         let doc: RepoFileDoc = {
           ...meta,
@@ -561,7 +562,9 @@ export class LocalStore {
         continue;
       }
       let text = file.text ?? '';
-      let title = basename(file.path).replace(/\.md$/i, '');
+      let fileName = basename(file.path);
+      let stripped = stripExtension(fileName);
+      let title = ensureValidTitle(stripped || 'Untitled');
       let meta: NoteMeta = {
         id,
         path: file.path,
@@ -686,8 +689,10 @@ export class LocalStore {
       nextPath = joinPath(normDir, `${nextTitle}.md`);
       nextMime = DEFAULT_MARKDOWN_MIME;
     } else {
-      nextTitle = doc.title;
-      nextPath = joinPath(normDir, ensureValidFileName(doc.title));
+      let fileName = basename(doc.path);
+      let safeFileName = ensureValidFileName(fileName);
+      nextTitle = ensureValidTitle(stripExtension(safeFileName) || 'Untitled');
+      nextPath = joinPath(normDir, safeFileName);
     }
     if (nextPath === doc.path && normDir === normalizeDir(doc.dir)) return;
     this.applyRename(doc, { title: nextTitle, dir: normDir, path: nextPath, mime: nextMime }, 'moveFileToDir');
@@ -1092,6 +1097,12 @@ function basename(p: string) {
   return i >= 0 ? p.slice(i + 1) : p;
 }
 
+function stripExtension(baseName: string): string {
+  let idx = baseName.lastIndexOf('.');
+  if (idx < 0) return baseName;
+  return baseName.slice(0, idx);
+}
+
 function inferKindFromPath(path: string): FileKind {
   return /\.md$/i.test(path) ? 'markdown' : 'binary';
 }
@@ -1127,17 +1138,15 @@ function normalizeMeta(raw: unknown): FileMeta | null {
     stored.kind === 'markdown' || stored.kind === 'binary'
       ? stored.kind
       : inferKindFromPath(path) ?? 'markdown';
-  let baseTitle = typeof stored.title === 'string' && stored.title.trim() ? stored.title : basename(path);
-  if (inferredKind === 'markdown' && baseTitle.toLowerCase().endsWith('.md')) {
-    baseTitle = baseTitle.replace(/\.md$/i, '');
-  }
+  let rawTitle = typeof stored.title === 'string' ? stored.title.trim() : '';
+  let title = rawTitle;
   let mime =
     typeof stored.mime === 'string' && stored.mime.trim()
       ? stored.mime
       : inferredKind === 'markdown'
       ? DEFAULT_MARKDOWN_MIME
       : inferMimeFromPath(path);
-  return { id: stored.id, path, title: baseTitle, dir, updatedAt, kind: inferredKind, mime };
+  return { id: stored.id, path, title, dir, updatedAt, kind: inferredKind, mime };
 }
 
 function toStoredFile(doc: RepoFileDoc): StoredFile {
