@@ -777,6 +777,37 @@ export function recordRenameTombstone(
   }
 ) {
   let ts = listTombstones(slug);
+
+  let revertIndex = ts.findIndex(
+    (item) => item.type === 'rename' && item.from === t.to && item.to === t.from
+  );
+  if (revertIndex >= 0) {
+    let next = ts.filter((_, idx) => idx !== revertIndex);
+    saveTombstones(slug, next);
+    debugLog(slug, 'tombstone:rename:collapse-revert', { from: t.from, to: t.to });
+    return;
+  }
+
+  let chainIndex = ts.findIndex((item) => item.type === 'rename' && item.to === t.from);
+  if (chainIndex >= 0) {
+    let current = ts[chainIndex];
+    if (!current || current.type !== 'rename') {
+      // If the slot is unexpectedly missing or not a rename, fall back to regular append.
+      debugLog(slug, 'tombstone:rename:collapse-chain-skip', { from: t.from, to: t.to });
+    } else {
+      ts[chainIndex] = {
+        type: 'rename',
+        from: current.from,
+        to: t.to,
+        lastRemoteSha: current.lastRemoteSha,
+        renamedAt: t.renamedAt,
+      };
+      saveTombstones(slug, ts);
+      debugLog(slug, 'tombstone:rename:collapse-chain', { from: current.from, to: t.to });
+      return;
+    }
+  }
+
   ts.push({
     type: 'rename',
     from: t.from,

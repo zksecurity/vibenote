@@ -1,5 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import { describe, expect, test } from 'vitest';
-import { LocalStore, isMarkdownMeta, isMarkdownDoc } from './local';
+import { LocalStore, listTombstones, clearAllTombstones } from './local';
 
 describe('LocalStore cross-tab resilience', () => {
   test('stale second instance does not resurrect a deleted note', () => {
@@ -29,5 +30,28 @@ describe('LocalStore cross-tab resilience', () => {
     // LocalStorage should still be without id1
     const c = new LocalStore(slug);
     expect(c.listFiles().some((n) => n.id === id1)).toBe(false);
+  });
+
+  test('rename tombstones collapse when a rename is reverted', () => {
+    let slug = `user/repo-${randomUUID()}`;
+    let store = new LocalStore(slug);
+    let id = store.createFile('First.md', 'body');
+    store.renameFileById(id, 'Second.md');
+    store.renameFileById(id, 'First.md');
+    expect(listTombstones(slug)).toEqual([]);
+    clearAllTombstones(slug);
+  });
+
+  test('rename tombstones merge when a file is renamed multiple times', () => {
+    let slug = `user/repo-${randomUUID()}`;
+    let store = new LocalStore(slug);
+    let id = store.createFile('Start.md', 'body');
+    store.renameFileById(id, 'Middle.md');
+    store.renameFileById(id, 'End.md');
+    let tombstones = listTombstones(slug);
+    expect(tombstones).toHaveLength(1);
+    let entry = tombstones[0];
+    expect(entry).toMatchObject({ type: 'rename', from: 'Start.md', to: 'End.md' });
+    clearAllTombstones(slug);
   });
 });

@@ -101,6 +101,21 @@ describe('syncBidirectional', () => {
     expect(localPaths).toEqual(['draft-renamed.md', 'draft.md']);
   });
 
+  test('rename revert does not push redundant commits', async () => {
+    const id = store.createFile('first-name.md', 'body');
+    await syncBidirectional(store, 'user/repo');
+    const headBeforeRename = await getRemoteHeadSha(remote);
+
+    store.renameFileById(id, 'second-name.md');
+    store.renameFileById(id, 'first-name.md');
+
+    await syncBidirectional(store, 'user/repo');
+
+    const headAfterSync = await getRemoteHeadSha(remote);
+    expect(headAfterSync).toBe(headBeforeRename);
+    expectParity(store, remote);
+  });
+
   test('pulls new remote notes', async () => {
     remote.setFile('Remote.md', '# remote');
     await syncBidirectional(store, 'user/repo');
@@ -220,6 +235,24 @@ describe('syncBidirectional', () => {
     expect(paths).toEqual(['README.md', 'sub/README.md']);
   });
 });
+
+type RemoteHeadPayload = {
+  object?: { sha?: string };
+};
+
+async function getRemoteHeadSha(remote: MockRemoteRepo, branch = 'main'): Promise<string> {
+  const response = await remote.handleFetch(
+    `https://api.github.com/repos/user/repo/git/ref/heads/${branch}`,
+    { method: 'GET' }
+  );
+  const payload = (await response.json()) as RemoteHeadPayload;
+  if (!response.ok) {
+    throw new Error(`remote head lookup failed with status ${response.status}`);
+  }
+  const sha = typeof payload.object?.sha === 'string' ? payload.object.sha : '';
+  expect(sha).not.toBe('');
+  return sha;
+}
 
 function expectParity(store: LocalStore, remote: MockRemoteRepo) {
   const localMap = new Map<string, string>();
