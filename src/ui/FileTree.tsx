@@ -1,12 +1,12 @@
 // File tree sidebar for browsing, editing, and managing repo notes.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { stripExtension, type FileKind } from '../storage/local';
+import { type FileKind } from '../storage/local';
 
 export type FileEntry = {
   name: string; // filename including extension
   path: string; // dir + name
   dir: string; // '' for root
-  title?: string; // extension-trimmed title for editing
+  title: string; // extension-trimmed title for editing
   kind: FileKind;
 };
 
@@ -38,7 +38,7 @@ type FolderNode = {
   name: string;
   children: (FolderNode | FileNode)[];
 };
-type FileNode = { kind: 'file'; name: string; dir: string; path: string; title?: string; fileKind: FileKind };
+type FileNode = { kind: 'file'; name: string; dir: string; path: string; title: string; fileKind: FileKind };
 
 export function FileTree(props: FileTreeProps) {
   // Rebuild the nested node structure whenever the note list changes.
@@ -157,12 +157,11 @@ export function FileTree(props: FileTreeProps) {
         const f = props.files.find((x) => normalizePath(x.path) === normalizePath(selected.path));
         if (!f) return;
         setEditing({ kind: 'file', path: f.path });
-        const initial = f.title ?? stripExtension(f.name);
-        setEditText(initial);
+        setEditText(f.title);
       } else {
         const name = selected.path.slice(selected.path.lastIndexOf('/') + 1);
         setEditing(selected);
-        setEditText(name || '');
+        setEditText(name);
       }
     } else if (e.key === 'Delete') {
       e.preventDefault();
@@ -633,7 +632,7 @@ function Row(props: {
           <button
             className="btn small subtle"
             onClick={() => {
-              props.onStartEdit({ kind: 'file', path: node.path }, node.title ?? stripExtension(node.name));
+              props.onStartEdit({ kind: 'file', path: node.path }, node.title);
               props.onCloseMenu();
             }}
           >

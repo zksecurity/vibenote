@@ -20,8 +20,9 @@ async function ensureIntroReadme(config: RemoteConfig): Promise<void> {
       [
         {
           path: 'README.md',
-          text: buildReadme(config.repo),
+          content: buildReadme(config.repo),
           baseSha: existingReadme?.sha,
+          kind: 'markdown',
         },
       ],
       'vibenote: add README'
