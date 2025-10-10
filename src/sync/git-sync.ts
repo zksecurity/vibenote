@@ -212,9 +212,7 @@ export async function listRepoFiles(config: RemoteConfig): Promise<RepoFileEntry
 // List Markdown files at HEAD (legacy helper used by read-only flows)
 export async function listNoteFiles(config: RemoteConfig): Promise<{ path: string; sha: string }[]> {
   let files = await listRepoFiles(config);
-  return files
-    .filter((file) => file.kind === 'markdown')
-    .map((file) => ({ path: file.path, sha: file.sha }));
+  return files.filter((file) => file.kind === 'markdown').map((file) => ({ path: file.path, sha: file.sha }));
 }
 
 // --- base64 helpers that safely handle UTF-8 ---
@@ -337,7 +335,13 @@ async function commitChanges(
     let normalized = normalizeBase64(change.contentBase64 ?? '');
     let encoding = change.encoding ?? 'utf-8';
     if (encoding === 'base64') {
-      treeItems.push({ path: change.path, mode: '100644', type: 'blob', content: normalized, encoding: 'base64' });
+      treeItems.push({
+        path: change.path,
+        mode: '100644',
+        type: 'blob',
+        content: normalized,
+        encoding: 'base64',
+      });
     } else {
       let decoded = '';
       try {
@@ -345,7 +349,13 @@ async function commitChanges(
       } catch (err) {
         console.warn('vibenote: failed to decode base64 content for', change.path, err);
       }
-      treeItems.push({ path: change.path, mode: '100644', type: 'blob', content: decoded, encoding: 'utf-8' });
+      treeItems.push({
+        path: change.path,
+        mode: '100644',
+        type: 'blob',
+        content: decoded,
+        encoding: 'utf-8',
+      });
     }
     trackedPaths.add(change.path);
   }
@@ -566,17 +576,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         const rf = remoteFile ?? (await pullNote(config, entry.path));
         if (!rf) continue;
         remoteTextHash = remoteTextHash ?? hashText(rf.text || '');
-        const title = entry.path.slice(entry.path.lastIndexOf('/') + 1).replace(/\.md$/i, '');
-        const dir = (() => {
-          const i = entry.path.lastIndexOf('/');
-          return i >= 0 ? entry.path.slice(0, i) : '';
-        })();
-        const id = store.createFile({
-          path: entry.path,
-          content: rf.text,
-          kind: 'markdown',
-          mime: MARKDOWN_MIME,
-        });
+        const id = store.createFile(entry.path, rf.text, { kind: 'markdown', mime: MARKDOWN_MIME });
         markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: remoteTextHash });
         remoteMap.set(entry.path, { path: entry.path, sha: rf.sha, kind: 'markdown', mime: MARKDOWN_MIME });
         pulled++;
@@ -691,12 +691,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
           if (!fetchedBinary) continue;
         }
         const rf = fetchedBinary;
-        const id = store.createFile({
-          path: rf.path,
-          content: rf.binaryBase64 ?? '',
-          kind: 'binary',
-          mime: rf.mime,
-        });
+        const id = store.createFile(rf.path, rf.binaryBase64 ?? '', { kind: 'binary', mime: rf.mime });
         markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: hashText(rf.binaryBase64 ?? '') });
         remoteMap.set(entry.path, { path: entry.path, sha: rf.sha, kind: 'binary', mime: rf.mime });
         pulled++;
@@ -719,7 +714,12 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
           'vibenote: update assets'
         );
         markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: hashText(localBinary) });
-        remoteMap.set(doc.path, { path: doc.path, sha: newSha, kind: 'binary', mime: doc.mime ?? inferMimeFromPath(doc.path) });
+        remoteMap.set(doc.path, {
+          path: doc.path,
+          sha: newSha,
+          kind: 'binary',
+          mime: doc.mime ?? inferMimeFromPath(doc.path),
+        });
         pushed++;
         debugLog(slug, 'sync:push:asset', { path: doc.path });
       }
@@ -744,7 +744,12 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         'vibenote: update assets'
       );
       markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: hashText(localBinary) });
-      remoteMap.set(doc.path, { path: doc.path, sha: newSha, kind: 'binary', mime: doc.mime ?? inferMimeFromPath(doc.path) });
+      remoteMap.set(doc.path, {
+        path: doc.path,
+        sha: newSha,
+        kind: 'binary',
+        mime: doc.mime ?? inferMimeFromPath(doc.path),
+      });
       pushed++;
       debugLog(slug, 'sync:asset-push', { path: doc.path });
     } else {
@@ -944,10 +949,8 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
           });
         } else {
           if (remoteFile.kind === 'binary') {
-            const newId = store.createFile({
-              path: remoteFile.path,
-              content: remoteFile.binaryBase64 ?? '',
-              kind: 'binary',
+            const newId = store.createFile(remoteFile.path, remoteFile.binaryBase64 ?? '', {
+              kind: remoteFile.kind,
               mime: remoteFile.mime,
             });
             markSynced(storeSlug, newId, {
@@ -957,11 +960,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
             pulled++;
             debugLog(slug, 'sync:tombstone:rename:recreate-local-binary', { from: t.from });
           } else {
-            const title = basename(t.from).replace(/\.md$/i, '');
-            const dir = t.from.includes('/') ? t.from.slice(0, t.from.lastIndexOf('/')) : '';
-            const newId = store.createFile({
-              path: remoteFile.path,
-              content: remoteFile.text ?? '',
+            const newId = store.createFile(remoteFile.path, remoteFile.text ?? '', {
               kind: 'markdown',
               mime: MARKDOWN_MIME,
             });

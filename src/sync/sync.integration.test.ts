@@ -25,8 +25,8 @@ describe('syncBidirectional integration', () => {
 
     try {
       const store = new LocalStore(slug);
-      createMarkdown(store, 'Alpha', 'alpha text', 'docs');
-      createMarkdown(store, 'Beta', 'beta text', 'docs');
+      store.createFile('docs/Alpha.md', 'alpha text');
+      store.createFile('docs/Beta.md', 'beta text');
       markRepoLinked(slug);
 
       await syncBidirectional(store, slug);
@@ -48,13 +48,3 @@ describe('syncBidirectional integration', () => {
     }
   });
 });
-function createMarkdown(store: LocalStore, title: string, text: string, dir = '') {
-  return store.createFile({
-    path: dir ? `${dir}/${title}.md` : `${title}.md`,
-    dir,
-    title,
-    content: text,
-    kind: 'markdown',
-    mime: 'text/markdown',
-  });
-}

@@ -7,30 +7,6 @@ const authModule = vi.hoisted(() => ({
   ensureFreshAccessToken: vi.fn().mockResolvedValue('test-token'),
 }));
 
-function createMarkdown(store: LocalStore, title: string, text: string, dir = '') {
-  return store.createFile({
-    path: dir ? `${dir}/${title}.md` : `${title}.md`,
-    dir,
-    title,
-    content: text,
-    kind: 'markdown',
-    mime: 'text/markdown',
-  });
-}
-
-function createBinary(store: LocalStore, path: string, base64: string, mime: string) {
-  return store.createFile({ path, content: base64, kind: 'binary', mime });
-}
-
-function listMarkdown(store: LocalStore) {
-  return store.listFiles().filter(isMarkdownMeta);
-}
-
-function loadMarkdown(store: LocalStore, id: string) {
-  let doc = store.loadFile(id);
-  return doc && isMarkdownDoc(doc) ? doc : null;
-}
-
 vi.mock('../auth/app-auth', () => authModule);
 
 const globalAny = globalThis as {
@@ -116,12 +92,6 @@ function useDevice(device: Device): LocalStore {
   return device.store;
 }
 
-function notePaths(store: LocalStore): string[] {
-  return listMarkdown(store)
-    .map((note) => note.path)
-    .sort();
-}
-
 function filePaths(store: LocalStore): string[] {
   return store
     .listFiles()
@@ -143,9 +113,7 @@ describe('syncBidirectional multi-device', () => {
     remote = new MockRemoteRepo();
     remote.configure('user', 'repo');
     remote.allowToken('test-token');
-    let fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
-      remote.handleFetch(input, init)
-    );
+    let fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => remote.handleFetch(input, init));
     globalAny.fetch = fetchMock as unknown as typeof fetch;
     let module = await import('./git-sync');
     syncBidirectional = module.syncBidirectional;
@@ -159,7 +127,7 @@ describe('syncBidirectional multi-device', () => {
   test('device two pulls newly created note', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
-    createMarkdown(storeOne, 'Fresh', 'body');
+    storeOne.createFile('Fresh.md', 'body');
     await syncBidirectional(storeOne, REPO_SLUG);
     expect(remotePaths(remote)).toEqual(['Fresh.md']);
 
@@ -167,14 +135,14 @@ describe('syncBidirectional multi-device', () => {
     let storeTwo = deviceTwo.store;
     await syncBidirectional(storeTwo, REPO_SLUG);
 
-    expect(notePaths(storeTwo)).toEqual(['Fresh.md']);
+    expect(filePaths(storeTwo)).toEqual(['Fresh.md']);
     expect(remotePaths(remote)).toEqual(['Fresh.md']);
   });
 
   test('rename on device one propagates to device two', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
-    let noteId = createMarkdown(storeOne, 'Draft', 'seed content');
+    let noteId = storeOne.createFile('Draft.md', 'seed content');
     await syncBidirectional(storeOne, REPO_SLUG);
 
     let deviceTwo = createDevice('device-two', deviceOne.storage);
@@ -187,14 +155,14 @@ describe('syncBidirectional multi-device', () => {
     let storeTwo = useDevice(deviceTwo);
     await syncBidirectional(storeTwo, REPO_SLUG);
 
-    expect(notePaths(storeTwo)).toEqual(['Draft Renamed.md']);
+    expect(filePaths(storeTwo)).toEqual(['Draft Renamed.md']);
     expect(remotePaths(remote)).toEqual(['Draft Renamed.md']);
   });
 
   test('renaming on device one with edits on device two does not keep the old path', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
-    let noteId = createMarkdown(storeOne, 'Draft', 'seed content');
+    let noteId = storeOne.createFile('Draft.md', 'seed content');
     await syncBidirectional(storeOne, REPO_SLUG);
 
     let deviceTwo = createDevice('device-two', deviceOne.storage);
@@ -208,15 +176,15 @@ describe('syncBidirectional multi-device', () => {
     storeTwo.saveFileContent(noteId, 'local edits from device two', 'text/markdown');
     await syncBidirectional(storeTwo, REPO_SLUG);
 
-    expect(notePaths(storeTwo)).toEqual(['Draft Renamed.md']);
+    expect(filePaths(storeTwo)).toEqual(['Draft Renamed.md']);
     expect(remotePaths(remote)).toEqual(['Draft Renamed.md']);
   });
 
   test('rename chooses the correct note when another note shares the same content', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
-    let cloneId = createMarkdown(storeOne, 'Clone', 'shared body');
-    let draftId = createMarkdown(storeOne, 'Draft', 'shared body');
+    let cloneId = storeOne.createFile('Clone.md', 'shared body');
+    let draftId = storeOne.createFile('Draft.md', 'shared body');
     await syncBidirectional(storeOne, REPO_SLUG);
 
     let deviceTwo = createDevice('device-two', deviceOne.storage);
@@ -231,12 +199,12 @@ describe('syncBidirectional multi-device', () => {
     storeTwo = useDevice(deviceTwo);
     await syncBidirectional(storeTwo, REPO_SLUG);
 
-    let renamed = loadMarkdown(storeTwo, draftId);
+    let renamed = storeTwo.loadFile(draftId);
     expect(renamed?.path).toBe('Draft Renamed.md');
     expect(renamed?.content).toBe('shared body');
     expect(renamed?.id).toBe(draftId);
 
-    let clone = loadMarkdown(storeTwo, cloneId);
+    let clone = storeTwo.loadFile(cloneId);
     expect(clone?.path).toBe('Clone.md');
     expect(clone?.content).toBe('clone offline edits');
     expect(clone?.id).toBe(cloneId);
@@ -245,7 +213,7 @@ describe('syncBidirectional multi-device', () => {
   test('device two removes a note deleted on device one', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
-    let noteId = createMarkdown(storeOne, 'Shared', 'shared text');
+    let noteId = storeOne.createFile('Shared.md', 'shared text');
     await syncBidirectional(storeOne, REPO_SLUG);
     let deviceTwo = createDevice('device-two', deviceOne.storage);
 
@@ -257,14 +225,14 @@ describe('syncBidirectional multi-device', () => {
     let storeTwo = useDevice(deviceTwo);
     await syncBidirectional(storeTwo, REPO_SLUG);
 
-    expect(notePaths(storeTwo)).toEqual([]);
+    expect(filePaths(storeTwo)).toEqual([]);
     expect(remotePaths(remote)).toEqual([]);
   });
 
   test('device two pulls newly created binary asset', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
-    createBinary(storeOne, 'assets/logo.png', Buffer.from('logo').toString('base64'), 'image/png');
+    storeOne.createFile('assets/logo.png', Buffer.from('logo').toString('base64'));
     await syncBidirectional(storeOne, REPO_SLUG);
     expect(remotePaths(remote)).toEqual(['assets/logo.png']);
 
@@ -279,7 +247,7 @@ describe('syncBidirectional multi-device', () => {
   test('renaming a binary asset propagates to other devices', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
-    createBinary(storeOne, 'logo.png', Buffer.from('logo').toString('base64'), 'image/png');
+    storeOne.createFile('logo.png', Buffer.from('logo').toString('base64'));
     await syncBidirectional(storeOne, REPO_SLUG);
     expect(remotePaths(remote)).toEqual(['logo.png']);
 
@@ -300,7 +268,7 @@ describe('syncBidirectional multi-device', () => {
   test('device two removes a binary asset deleted on device one', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
-    createBinary(storeOne, 'assets/chart.svg', Buffer.from('<svg/>').toString('base64'), 'image/svg+xml');
+    storeOne.createFile('assets/chart.svg', Buffer.from('<svg/>').toString('base64'));
     await syncBidirectional(storeOne, REPO_SLUG);
     expect(remotePaths(remote)).toEqual(['assets/chart.svg']);
 
@@ -321,7 +289,7 @@ describe('syncBidirectional multi-device', () => {
   test('device two with local edits resurrects a note removed on device one', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
-    let noteId = createMarkdown(storeOne, 'Keep', 'shared text');
+    let noteId = storeOne.createFile('Keep.md', 'shared text');
     await syncBidirectional(storeOne, REPO_SLUG);
     let deviceTwo = createDevice('device-two', deviceOne.storage);
 
@@ -336,16 +304,16 @@ describe('syncBidirectional multi-device', () => {
     storeTwo = useDevice(deviceTwo);
     await syncBidirectional(storeTwo, REPO_SLUG);
 
-    expect(notePaths(storeTwo)).toEqual(['Keep.md']);
+    expect(filePaths(storeTwo)).toEqual(['Keep.md']);
     expect(remotePaths(remote)).toEqual(['Keep.md']);
   });
 
   test('folder rename on device one updates paths on device two', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
-    createMarkdown(storeOne, 'Doc', 'body', 'docs');
+    storeOne.createFile('docs/Doc.md', 'body');
     await syncBidirectional(storeOne, REPO_SLUG);
-    expect(notePaths(storeOne)).toEqual(['docs/Doc.md']);
+    expect(filePaths(storeOne)).toEqual(['docs/Doc.md']);
     let deviceTwo = createDevice('device-two', deviceOne.storage);
 
     storeOne = useDevice(deviceOne);
@@ -356,7 +324,7 @@ describe('syncBidirectional multi-device', () => {
     let storeTwo = useDevice(deviceTwo);
     await syncBidirectional(storeTwo, REPO_SLUG);
 
-    expect(notePaths(storeTwo)).toEqual(['guides/Doc.md']);
+    expect(filePaths(storeTwo)).toEqual(['guides/Doc.md']);
     expect(storeTwo.listFolders()).toEqual(['guides']);
     expect(remotePaths(remote)).toEqual(['guides/Doc.md']);
   });
@@ -364,7 +332,7 @@ describe('syncBidirectional multi-device', () => {
   test('folder rename preserves offline edits on device two', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
-    let noteId = createMarkdown(storeOne, 'Doc', 'body', 'docs');
+    let noteId = storeOne.createFile('docs/Doc.md', 'body');
     await syncBidirectional(storeOne, REPO_SLUG);
 
     let deviceTwo = createDevice('device-two', deviceOne.storage);
@@ -377,7 +345,7 @@ describe('syncBidirectional multi-device', () => {
     storeTwo.saveFileContent(noteId, 'offline edit after rename', 'text/markdown');
     await syncBidirectional(storeTwo, REPO_SLUG);
 
-    let updated = loadMarkdown(storeTwo, noteId);
+    let updated = storeTwo.loadFile(noteId);
     expect(updated?.path).toBe('guides/Doc.md');
     expect(updated?.content).toBe('offline edit after rename');
     expect(remote.snapshot().get('guides/Doc.md')).toBe('offline edit after rename');
@@ -386,10 +354,10 @@ describe('syncBidirectional multi-device', () => {
   test('folder deletion on device one removes its notes on device two', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
-    createMarkdown(storeOne, 'Doc', 'body', 'docs');
-    createMarkdown(storeOne, 'Nested', 'body', 'docs/nested');
+    storeOne.createFile('docs/Doc.md', 'body');
+    storeOne.createFile('docs/nested/Nested.md', 'body');
     await syncBidirectional(storeOne, REPO_SLUG);
-    expect(notePaths(storeOne)).toEqual(['docs/Doc.md', 'docs/nested/Nested.md']);
+    expect(filePaths(storeOne)).toEqual(['docs/Doc.md', 'docs/nested/Nested.md']);
     let deviceTwo = createDevice('device-two', deviceOne.storage);
 
     storeOne = useDevice(deviceOne);
@@ -400,7 +368,7 @@ describe('syncBidirectional multi-device', () => {
     let storeTwo = useDevice(deviceTwo);
     await syncBidirectional(storeTwo, REPO_SLUG);
 
-    expect(notePaths(storeTwo)).toEqual([]);
+    expect(filePaths(storeTwo)).toEqual([]);
     expect(storeTwo.listFolders()).toEqual([]);
     expect(remotePaths(remote)).toEqual([]);
   });

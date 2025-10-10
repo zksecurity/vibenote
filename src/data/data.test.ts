@@ -4,38 +4,7 @@ import { useEffect, useState } from 'react';
 import { beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { RepoMetadata } from '../lib/backend';
 import type { RepoRoute } from '../ui/routing';
-import {
-  LocalStore,
-  markRepoLinked,
-  recordAutoSyncRun,
-  setLastActiveNoteId,
-  isMarkdownMeta,
-  isMarkdownDoc,
-} from '../storage/local';
-
-function createMarkdown(store: LocalStore, title: string, text: string, dir = '') {
-  return store.createFile({
-    path: dir ? `${dir}/${title}.md` : `${title}.md`,
-    dir,
-    title,
-    content: text,
-    kind: 'markdown',
-    mime: 'text/markdown',
-  });
-}
-
-function createBinary(store: LocalStore, path: string, base64: string, mime: string) {
-  return store.createFile({ path, content: base64, kind: 'binary', mime });
-}
-
-function listMarkdown(store: LocalStore) {
-  return store.listFiles().filter(isMarkdownMeta);
-}
-
-function loadMarkdown(store: LocalStore, id: string) {
-  let doc = store.loadFile(id);
-  return doc && isMarkdownDoc(doc) ? doc : null;
-}
+import { LocalStore, markRepoLinked, recordAutoSyncRun, setLastActiveNoteId } from '../storage/local';
 
 type RemoteFile = { path: string; text: string; sha: string };
 
@@ -241,9 +210,9 @@ describe('useRepoData', () => {
   test('tracks active note path on the new route', async () => {
     const recordRecent = vi.fn<RecordRecentFn>();
     const store = new LocalStore('new');
-    const alphaId = createMarkdown(store, 'Alpha', 'alpha text');
-    const welcome = listMarkdown(store).find((note) => note.title === 'Welcome');
-    const alpha = loadMarkdown(store, alphaId);
+    const alphaId = store.createFile('Alpha.md', 'alpha text');
+    const welcome = store.listFiles().find((note) => note.title === 'Welcome');
+    const alpha = store.loadFile(alphaId);
     if (!alpha) throw new Error('Failed to seed alpha note');
     if (!welcome) throw new Error('Missing welcome note');
 
@@ -273,9 +242,9 @@ describe('useRepoData', () => {
   test('activates the route note path when the file exists locally', async () => {
     const slug = 'acme/docs';
     const store = new LocalStore(slug);
-    createMarkdown(store, 'Alpha', '# Alpha');
-    const targetId = createMarkdown(store, 'Beta', '# Beta');
-    const target = loadMarkdown(store, targetId);
+    store.createFile('Alpha.md', '# Alpha');
+    const targetId = store.createFile('Beta.md', '# Beta');
+    const target = store.loadFile(targetId);
     if (target === null) throw new Error('Failed to load newly created note');
     markRepoLinked(slug);
 
@@ -298,12 +267,16 @@ describe('useRepoData', () => {
   test('state.files includes markdown and image entries for writable repos', async () => {
     const slug = 'acme/assets';
     const store = new LocalStore(slug);
-    createMarkdown(store, 'Guide', '# usage');
-    createBinary(store, 'art/logo.png', Buffer.from('png-data', 'utf8').toString('base64'), 'image/png');
+    store.createFile('Guide.md', '# usage');
+    store.createFile('art/logo.png', Buffer.from('png-data', 'utf8').toString('base64'));
     markRepoLinked(slug);
 
     mockGetSessionToken.mockReturnValue('token');
-    mockGetSessionUser.mockReturnValue({ login: 'octo', name: 'Octo', avatarUrl: 'https://example.com/octo.png' });
+    mockGetSessionUser.mockReturnValue({
+      login: 'octo',
+      name: 'Octo',
+      avatarUrl: 'https://example.com/octo.png',
+    });
     setRepoMetadata(writableMeta);
 
     const recordRecent = vi.fn<RecordRecentFn>();
@@ -343,8 +316,8 @@ describe('useRepoData', () => {
     const seededUuid = '00000000-0000-0000-0000-000000000001';
     const uuidSpy = vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValueOnce(seededUuid);
     const seedStore = new LocalStore(slug);
-    const noteId = createMarkdown(seedStore, 'Seed', 'initial text');
-    const notePath = loadMarkdown(seedStore, noteId)?.path;
+    const noteId = seedStore.createFile('Seed.md', 'initial text');
+    const notePath = seedStore.loadFile(noteId)?.path;
     if (!notePath) throw new Error('Missing note path after seeding');
     uuidSpy.mockRestore();
     markRepoLinked(slug);
@@ -394,7 +367,7 @@ describe('useRepoData', () => {
       result.current.actions.updateNoteText(notePath, 'updated text');
     });
 
-    const storedAfterEdit = loadMarkdown(new LocalStore(slug), noteId);
+    const storedAfterEdit = new LocalStore(slug).loadFile(noteId);
     expect(storedAfterEdit?.content).toBe('updated text');
 
     await act(async () => {
@@ -556,7 +529,7 @@ describe('useRepoData', () => {
     const seededUuid = '00000000-0000-0000-0000-000000000042';
     const uuidSpy = vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValueOnce(seededUuid);
     const seedStore = new LocalStore(slug);
-    const noteId = createMarkdown(seedStore, 'Seed', 'initial text');
+    const noteId = seedStore.createFile('Seed.md', 'initial text');
     setLastActiveNoteId(slug, noteId);
     markRepoLinked(slug);
     uuidSpy.mockRestore();
@@ -613,8 +586,8 @@ describe('useRepoData', () => {
       .spyOn(globalThis.crypto, 'randomUUID')
       .mockReturnValueOnce('00000000-0000-0000-0000-000000000051');
     const store = new LocalStore(slug);
-    const noteId = createMarkdown(store, 'Seed', 'initial text');
-    const notePath = loadMarkdown(store, noteId)?.path;
+    const noteId = store.createFile('Seed.md', 'initial text');
+    const notePath = store.loadFile(noteId)?.path;
     if (!notePath) throw new Error('Missing note path after seeding');
     uuidSpy.mockRestore();
     markRepoLinked(slug);
@@ -687,14 +660,14 @@ describe('useRepoData', () => {
     const slugB = 'acme/wiki';
 
     const storeA = new LocalStore(slugA);
-    const noteA = createMarkdown(storeA, 'A', 'text a');
-    const noteAPath = loadMarkdown(storeA, noteA)?.path;
+    const noteA = storeA.createFile('A.md', 'text a');
+    const noteAPath = storeA.loadFile(noteA)?.path;
     if (!noteAPath) throw new Error('Missing path for note A');
     markRepoLinked(slugA);
 
     const storeB = new LocalStore(slugB);
-    const noteB = createMarkdown(storeB, 'B', 'text b');
-    const noteBPath = loadMarkdown(storeB, noteB)?.path;
+    const noteB = storeB.createFile('B.md', 'text b');
+    const noteBPath = storeB.loadFile(noteB)?.path;
     if (!noteBPath) throw new Error('Missing path for note B');
     markRepoLinked(slugB);
 
@@ -772,8 +745,8 @@ describe('useRepoData', () => {
     const recordRecent = vi.fn<RecordRecentFn>();
 
     const store = new LocalStore(slug);
-    const noteId = createMarkdown(store, 'Secret', 'classified');
-    const notePath = loadMarkdown(store, noteId)?.path;
+    const noteId = store.createFile('Secret.md', 'classified');
+    const notePath = store.loadFile(noteId)?.path;
     if (!notePath) throw new Error('Missing path for private repo note');
     markRepoLinked(slug);
 
@@ -895,8 +868,8 @@ describe('useRepoData', () => {
     const recordRecent = vi.fn<RecordRecentFn>();
 
     const store = new LocalStore(slug);
-    const noteId = createMarkdown(store, 'Seed', 'content');
-    const notePath = loadMarkdown(store, noteId)?.path;
+    const noteId = store.createFile('Seed.md', 'content');
+    const notePath = store.loadFile(noteId)?.path;
     if (!notePath) throw new Error('Missing path for sign-out test');
     markRepoLinked(slug);
 
@@ -933,6 +906,6 @@ describe('useRepoData', () => {
     expect(result.current.state.doc).toBeUndefined();
     expect(result.current.state.canSync).toBe(false);
     expect(result.current.state.needsInstall).toBe(false);
-    expect(listMarkdown(new LocalStore(slug))).toHaveLength(0);
+    expect(new LocalStore(slug).listFiles()).toHaveLength(0);
   });
 });

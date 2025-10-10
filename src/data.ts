@@ -430,19 +430,12 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   const createNote = (dir: string, name: string) => {
     if (!canEdit) return undefined;
     let store = getRepoStore(slug);
-    let trimmedDir = (dir ?? '').trim();
+    let trimmedDir = dir.trim();
     let basePath = trimmedDir === '' ? `${name}.md` : `${trimmedDir}/${name}.md`;
-    let id = store.createFile({
-      path: basePath,
-      dir: trimmedDir,
-      title: name,
-      content: '',
-      kind: 'markdown',
-      mime: 'text/markdown',
-    });
+    let id = store.createFile(basePath, '');
     let created = store.loadFile(id);
     scheduleAutoSync();
-    if (created && created.kind === 'markdown') {
+    if (created) {
       ensureActivePath(created.path);
       return created.path;
     }

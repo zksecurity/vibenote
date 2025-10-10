@@ -274,14 +274,7 @@ export class LocalStore {
     // that layout should be documented clearly in the form of types and zod schemas
     this.backfillFolders();
     if (slug === 'new' && this.index.length === 0) {
-      this.createFile({
-        path: 'Welcome.md',
-        title: 'Welcome',
-        dir: '',
-        content: WELCOME_NOTE,
-        kind: 'markdown',
-        mime: DEFAULT_MARKDOWN_MIME,
-      });
+      this.createFile('Welcome.md', WELCOME_NOTE);
       this.index = this.loadIndex();
     }
     ensureRepoSubscribers(this.slug);
@@ -351,48 +344,19 @@ export class LocalStore {
     emitRepoChange(this.slug);
   }
 
-  createFile(params: {
-    path: string;
-    content: string;
-    kind?: FileKind;
-    title?: string;
-    dir?: string;
-    mime?: string;
-  }): string {
+  createFile(path: string, content: string, params: { kind?: FileKind; mime?: string } = {}): string {
     let id = crypto.randomUUID();
-    let normPath = normalizeFilePath(params.path);
-    let inferredKind = inferKindFromPath(normPath);
-    let kind: FileKind = params.kind ?? inferredKind ?? 'markdown';
+    path = normalizeFilePath(path);
+    let kind = params.kind ?? inferKindFromPath(path);
     let updatedAt = Date.now();
-    let dir = normalizeDir(params.dir ?? extractDir(normPath));
-    let title: string;
-    let finalPath: string;
-    let mime: string;
-    if (kind === 'markdown') {
-      let baseName = params.title ?? basename(normPath);
-      let stripped = stripExtension(baseName);
-      title = ensureValidTitle(stripped || 'Untitled');
-      finalPath = joinPath(dir, `${title}.md`);
-      mime = params.mime ?? DEFAULT_MARKDOWN_MIME;
-    } else {
-      let baseName = params.title ?? basename(normPath);
-      let safeName = ensureValidFileName(baseName);
-      let stripped = stripExtension(safeName);
-      title = ensureValidTitle(stripped || 'Untitled');
-      finalPath = joinPath(dir, safeName);
-      mime = params.mime ?? inferMimeFromPath(finalPath);
-    }
-    let meta: RepoFileMeta = {
-      id,
-      path: finalPath,
-      title,
-      dir,
-      updatedAt,
-      kind,
-      mime,
-    };
-    debugLog(this.slug, 'createFile', { id, path: finalPath, kind });
-    this.persistNewFile(meta, params.content);
+    let dir = normalizeDir(extractDir(path));
+    let safeName = ensureValidFileName(basename(path));
+    let title = stripExtension(safeName);
+    path = joinPath(dir, safeName);
+    let mime = params.mime ?? inferMimeFromPath(path);
+    let meta: RepoFileMeta = { id, path, title, dir, updatedAt, kind, mime };
+    debugLog(this.slug, 'createFile', { id, path, kind });
+    this.persistNewFile(meta, content);
     emitRepoChange(this.slug);
     return id;
   }
@@ -509,14 +473,7 @@ export class LocalStore {
       if (key === this.indexKey || key.startsWith(prefix)) toRemove.push(key);
     }
     for (let key of toRemove) localStorage.removeItem(key);
-    let id = this.createFile({
-      path: 'Welcome.md',
-      title: 'Welcome',
-      dir: '',
-      content: WELCOME_NOTE,
-      kind: 'markdown',
-      mime: DEFAULT_MARKDOWN_MIME,
-    });
+    let id = this.createFile('Welcome.md', WELCOME_NOTE);
     this.index = this.loadIndex();
     emitRepoChange(this.slug);
     return id;
@@ -641,12 +598,12 @@ export class LocalStore {
     // Update notes under moved folder
     let idx = this.loadIndex();
     for (let meta of idx) {
-    let dir = normalizeDir(meta.dir);
-    if (dir === from || dir.startsWith(from + '/')) {
-      let rest = dir.slice(from.length);
-      let nextDir = normalizeDir(to + rest);
+      let dir = normalizeDir(meta.dir);
+      if (dir === from || dir.startsWith(from + '/')) {
+        let rest = dir.slice(from.length);
+        let nextDir = normalizeDir(to + rest);
         this.moveFileToDir(meta.id, nextDir);
-    }
+      }
     }
     localStorage.setItem(this.foldersKey, JSON.stringify(Array.from(updated).sort()));
     debugLog(this.slug, 'folder:move', { from, to });
@@ -695,7 +652,11 @@ export class LocalStore {
       nextPath = joinPath(normDir, safeFileName);
     }
     if (nextPath === doc.path && normDir === normalizeDir(doc.dir)) return;
-    this.applyRename(doc, { title: nextTitle, dir: normDir, path: nextPath, mime: nextMime }, 'moveFileToDir');
+    this.applyRename(
+      doc,
+      { title: nextTitle, dir: normDir, path: nextPath, mime: nextMime },
+      'moveFileToDir'
+    );
   }
 
   private findMetaByPath(path: string): FileMeta | null {
@@ -1188,7 +1149,7 @@ function ensureValidTitle(title: string): string {
 function ensureValidFileName(name: string): string {
   let trimmed = name.trim();
   if (!trimmed || trimmed === '.' || trimmed === '..') throw new Error('Invalid file name');
-  if (/[\\/\0]/.test(trimmed)) throw new Error('Invalid file name');
+  if (/[\\/\0]/.test(trimmed)) throw new Error('Invalid file name: contains illegal characters');
   return trimmed;
 }
 
