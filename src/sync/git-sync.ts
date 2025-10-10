@@ -209,12 +209,6 @@ export async function listRepoFiles(config: RemoteConfig): Promise<RepoFileEntry
   return filterEntries(entries.map((entry) => ({ path: entry.path, sha: entry.sha, type: 'blob' })));
 }
 
-// List Markdown files at HEAD (legacy helper used by read-only flows)
-export async function listNoteFiles(config: RemoteConfig): Promise<{ path: string; sha: string }[]> {
-  let files = await listRepoFiles(config);
-  return files.filter((file) => file.kind === 'markdown').map((file) => ({ path: file.path, sha: file.sha }));
-}
-
 // --- base64 helpers that safely handle UTF-8 ---
 function toBase64(input: string): string {
   const encoder = new TextEncoder();

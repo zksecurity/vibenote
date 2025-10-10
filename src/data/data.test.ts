@@ -23,7 +23,7 @@ type BackendMocks = {
 
 type SyncMocks = {
   buildRemoteConfig: ReturnType<typeof vi.fn>;
-  listNoteFiles: ReturnType<typeof vi.fn>;
+  listRepoFiles: ReturnType<typeof vi.fn>;
   pullNote: ReturnType<typeof vi.fn>;
   syncBidirectional: ReturnType<typeof vi.fn>;
 };
@@ -46,7 +46,7 @@ const syncModule = vi.hoisted<SyncMocks>(() => ({
     const [owner, repo] = slug.split('/', 2);
     return { owner: owner ?? '', repo: repo ?? '', branch: 'main' };
   }),
-  listNoteFiles: vi.fn(),
+  listRepoFiles: vi.fn(),
   pullNote: vi.fn(),
   syncBidirectional: vi.fn(),
 }));
@@ -66,7 +66,7 @@ vi.mock('../lib/backend', () => ({
 
 vi.mock('../sync/git-sync', () => ({
   buildRemoteConfig: syncModule.buildRemoteConfig,
-  listNoteFiles: syncModule.listNoteFiles,
+  listRepoFiles: syncModule.listRepoFiles,
   pullNote: syncModule.pullNote,
   syncBidirectional: syncModule.syncBidirectional,
 }));
@@ -86,7 +86,7 @@ const mockSignOutFromGitHubApp = authModule.signOutFromGitHubApp;
 const mockGetRepoMetadata = backendModule.getRepoMetadata;
 
 const mockBuildRemoteConfig = syncModule.buildRemoteConfig;
-const mockListNoteFiles = syncModule.listNoteFiles;
+const mockListRepoFiles = syncModule.listRepoFiles;
 const mockPullNote = syncModule.pullNote;
 const mockSyncBidirectional = syncModule.syncBidirectional;
 
@@ -167,7 +167,7 @@ describe('useRepoData', () => {
 
     mockGetRepoMetadata.mockReset();
     mockBuildRemoteConfig.mockReset();
-    mockListNoteFiles.mockReset();
+    mockListRepoFiles.mockReset();
     mockPullNote.mockReset();
     mockSyncBidirectional.mockReset();
 
@@ -176,7 +176,7 @@ describe('useRepoData', () => {
     mockEnsureFreshAccessToken.mockResolvedValue('access-token');
     mockSignInWithGitHubApp.mockResolvedValue(null);
 
-    mockListNoteFiles.mockResolvedValue([]);
+    mockListRepoFiles.mockResolvedValue([]);
 
     mockBuildRemoteConfig.mockImplementation((slug: string) => {
       const [owner, repo] = slug.split('/', 2);
@@ -292,7 +292,7 @@ describe('useRepoData', () => {
   test('loads a read-only note that matches the route note path', async () => {
     const slug = 'acme/docs';
     setRepoMetadata(readOnlyMeta);
-    mockListNoteFiles.mockResolvedValue([{ path: 'guides/Intro.md', sha: 'sha-intro' }]);
+    mockListRepoFiles.mockResolvedValue([{ path: 'guides/Intro.md', sha: 'sha-intro' }]);
     mockPullNote.mockResolvedValue({
       path: 'guides/Intro.md',
       text: '# Intro',
@@ -396,7 +396,7 @@ describe('useRepoData', () => {
 
     mockGetSessionToken.mockReturnValue(null);
     setRepoMetadata(readOnlyMeta);
-    mockListNoteFiles.mockResolvedValue([{ path: 'docs/alpha.md', sha: 'sha-alpha' }]);
+    mockListRepoFiles.mockResolvedValue([{ path: 'docs/alpha.md', sha: 'sha-alpha' }]);
     mockPullNote.mockImplementation(
       async (_config, path: string): Promise<RemoteFile> => ({
         path,
@@ -454,7 +454,7 @@ describe('useRepoData', () => {
 
     mockGetSessionToken.mockReturnValue(null);
     setRepoMetadata(readOnlyMeta);
-    mockListNoteFiles.mockResolvedValue([
+    mockListRepoFiles.mockResolvedValue([
       { path: 'docs/alpha.md', sha: 'sha-alpha' },
       { path: 'README.md', sha: 'sha-readme' },
     ]);
@@ -489,7 +489,7 @@ describe('useRepoData', () => {
       avatarUrl: 'https://example.com/hubot.png',
     });
     setRepoMetadata(writableMeta);
-    mockListNoteFiles.mockResolvedValue([
+    mockListRepoFiles.mockResolvedValue([
       { path: 'notes/first.md', sha: 'sha-first' },
       { path: 'README.md', sha: 'sha-readme' },
     ]);
@@ -817,7 +817,7 @@ describe('useRepoData', () => {
     mockGetSessionToken.mockReturnValue(null);
     setRepoMetadata(readOnlyMeta);
 
-    mockListNoteFiles.mockResolvedValue([
+    mockListRepoFiles.mockResolvedValue([
       { path: 'docs/alpha.md', sha: 'sha-alpha' },
       { path: 'docs/beta.md', sha: 'sha-beta' },
     ]);

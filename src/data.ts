@@ -35,10 +35,10 @@ import {
 import {
   buildRemoteConfig,
   pullNote,
-  listNoteFiles,
   syncBidirectional,
   type RemoteConfig,
   type SyncSummary,
+  listRepoFiles,
 } from './sync/git-sync';
 import { logError } from './lib/logging';
 import { useReadOnlyNotes, type ReadOnlyNote } from './data/readonly-notes';
@@ -269,7 +269,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       if (initialPullRef.current.done) return;
       try {
         let cfg: RemoteConfig = buildRemoteConfig(slug, repoAccess.defaultBranch);
-        let entries = await listNoteFiles(cfg);
+        let entries = await listRepoFiles(cfg);
         let files: { path: string; text: string; sha?: string }[] = [];
         for (let e of entries) {
           let rf = await pullNote(cfg, e.path);

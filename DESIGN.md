@@ -82,7 +82,7 @@ Notes:
 `src/sync/git-sync.ts` now talks to the GitHub Git Data API directly from the browser:
 
 - `configureRemote` persists `{ owner, repo, branch }` in `localStorage`.
-- `pullNote`, `listNoteFiles`, and `fetchBlob` fetch via REST using the short-lived user token (with public fallbacks).
+- `pullNote`, `listRepoFiles`, and `fetchBlob` fetch via REST using the short-lived user token (with public fallbacks).
 - `commitBatch`, `putFile`, and `deleteFiles` build trees/commits client-side and update refs with the same token.
 - `syncBidirectional` mediates merges, handles local tombstones, restores remote deletions when needed, and records per-note sync hashes.
 

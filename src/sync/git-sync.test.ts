@@ -204,11 +204,11 @@ describe('syncBidirectional', () => {
     expectParity(store, remote);
   });
 
-  test('listNoteFiles includes nested markdown', async () => {
+  test('listRepoFiles includes nested markdown', async () => {
     const mod = await import('./git-sync');
     remote.setFile('nested/Nested.md', '# nested');
     let cfg = mod.buildRemoteConfig('user/repo');
-    let entries = await mod.listNoteFiles(cfg);
+    let entries = await mod.listRepoFiles(cfg);
     const paths = entries.map((e) => e.path).sort();
     expect(paths).toEqual(['nested/Nested.md']);
   });

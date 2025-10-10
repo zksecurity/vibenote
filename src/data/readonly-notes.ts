@@ -4,7 +4,7 @@ import type { NoteDoc } from '../storage/local';
 import { normalizePath } from '../lib/util';
 import { hashText } from '../storage/local';
 import { logError } from '../lib/logging';
-import { buildRemoteConfig, listNoteFiles, pullNote } from '../sync/git-sync';
+import { buildRemoteConfig, listRepoFiles, pullNote } from '../sync/git-sync';
 
 export { useReadOnlyNotes };
 export type { ReadOnlyNote };
@@ -36,7 +36,7 @@ function useReadOnlyNotes(params: {
     (async () => {
       try {
         let cfg = buildRemoteConfig(slug, defaultBranch);
-        let entries = await listNoteFiles(cfg);
+        let entries = await listRepoFiles(cfg);
         let mapped = entries.map(toNote);
         if (cancelled) return;
         setNotes(mapped);
