@@ -63,9 +63,9 @@ describe('syncBidirectional', () => {
   });
 
   test('renames move files remotely', async () => {
-    const id = store.createFile('Original.md', 'rename me');
+    store.createFile('Original.md', 'rename me');
     await syncBidirectional(store, 'user/repo');
-    store.renameFileById(id, 'Renamed.md');
+    store.renameFile('Original.md', 'Renamed');
     await syncBidirectional(store, 'user/repo');
     expectParity(store, remote);
     const notes = store.listFiles();
@@ -75,10 +75,10 @@ describe('syncBidirectional', () => {
   });
 
   test('rename removes old remote path after prior sync', async () => {
-    const id = store.createFile('test.md', 'body');
+    store.createFile('test.md', 'body');
     await syncBidirectional(store, 'user/repo');
     expect([...remote.snapshot().keys()]).toEqual(['test.md']);
-    store.renameFileById(id, 'test2.md');
+    store.renameFile('test.md', 'test2');
     await syncBidirectional(store, 'user/repo');
     const remoteFiles = [...remote.snapshot().keys()].sort();
     expect(remoteFiles).toEqual(['test2.md']);
@@ -86,10 +86,10 @@ describe('syncBidirectional', () => {
   });
 
   test('rename with remote edits keeps both copies in sync', async () => {
-    const id = store.createFile('draft.md', 'original body');
+    store.createFile('draft.md', 'original body');
     await syncBidirectional(store, 'user/repo');
     remote.setFile('draft.md', 'remote update');
-    store.renameFileById(id, 'draft-renamed.md');
+    store.renameFile('draft.md', 'draft-renamed');
     await syncBidirectional(store, 'user/repo');
     const paths = [...remote.snapshot().keys()].sort();
     expect(paths).toEqual(['draft-renamed.md', 'draft.md']);
@@ -102,12 +102,12 @@ describe('syncBidirectional', () => {
   });
 
   test('rename revert does not push redundant commits', async () => {
-    const id = store.createFile('first-name.md', 'body');
+    store.createFile('first-name.md', 'body');
     await syncBidirectional(store, 'user/repo');
     const headBeforeRename = await getRemoteHeadSha(remote);
 
-    store.renameFileById(id, 'second-name.md');
-    store.renameFileById(id, 'first-name.md');
+    store.renameFile('first-name.md', 'second-name');
+    store.renameFile('second-name.md', 'first-name');
 
     await syncBidirectional(store, 'user/repo');
 

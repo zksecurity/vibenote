@@ -100,15 +100,14 @@ type RepoDataActions = {
   setAutosync: (enabled: boolean) => void;
 
   // edit notes/folders
-  selectNote: (path: string | undefined) => Promise<void>;
+  selectFile: (path: string | undefined) => Promise<void>;
   createNote: (dir: string, name: string) => string | undefined;
   createFolder: (parentDir: string, name: string) => void;
   renameFile: (path: string, name: string) => void;
-  deleteNote: (path: string) => void;
   deleteFile: (path: string) => void;
   renameFolder: (dir: string, newName: string) => void;
   deleteFolder: (dir: string) => void;
-  updateNoteText: (path: string, text: string) => void;
+  saveFile: (path: string, text: string) => void;
 };
 
 type RepoDataInputs = {
@@ -332,11 +331,6 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     return list.find((file) => normalizePath(file.path) === normalized);
   };
 
-  const resolveEditableNote = (path: string | undefined): NoteMeta | undefined => {
-    let meta = resolveEditableFile(path);
-    return meta && isMarkdownMeta(meta) ? meta : undefined;
-  };
-
   // "Connect GitHub" button in the header
   const signIn = async () => {
     try {
@@ -412,20 +406,23 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     }
   };
 
-  // click on a note in the sidebar
-  const selectNote = async (path: string | undefined) => {
+  // click on a file in the sidebar
+  const selectFile = async (path: string | undefined) => {
+    // TODO does read-only mode support non-markdown files?
     await selectReadOnlyDoc(path);
     ensureActivePath(path);
   };
 
-  const updateNoteText = (path: string, text: string) => {
+  const saveFile = (path: string, content: string) => {
     if (!canEdit) return;
-    let meta = resolveEditableNote(path);
+    let meta = resolveEditableFile(path);
     if (!meta) return;
-    getRepoStore(slug).saveFile(meta.id, text);
+    getRepoStore(slug).saveFile(meta.id, content);
     scheduleAutoSync();
   };
 
+  // TODO: assumes markdown file. eventually we want to support creating other files as well,
+  // but that would mean some kind of user input on the file type.
   const createNote = (dir: string, name: string) => {
     if (!canEdit) return undefined;
     let store = getRepoStore(slug);
@@ -468,24 +465,14 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     }
   };
 
-  const deleteNote = (path: string) => {
-    if (!canEdit) return;
-    let meta = resolveEditableNote(path);
-    if (!meta) return;
-    let store = getRepoStore(slug);
-    store.deleteFileById(meta.id);
-    if (activePath !== undefined && pathsEqual(activePath, path)) {
-      ensureActivePath(undefined);
-    }
-    scheduleAutoSync();
-  };
-
   const deleteFile = (path: string) => {
     if (!canEdit) return;
     try {
-      let store = getRepoStore(slug);
-      let removed = store.deleteFile(path);
-      if (!removed) return;
+      let removed = getRepoStore(slug).deleteFile(path);
+      if (!removed) {
+        setSyncMessage('Unable to delete file.');
+        return;
+      }
       if (activePath !== undefined && pathsEqual(activePath, path)) {
         ensureActivePath(undefined);
       }
@@ -552,15 +539,14 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
 
     syncNow,
     setAutosync,
-    selectNote,
+    selectFile,
     createNote,
     createFolder,
     renameFile,
-    deleteNote,
     deleteFile,
     renameFolder,
     deleteFolder,
-    updateNoteText,
+    saveFile,
   };
 
   return { state, actions };

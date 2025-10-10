@@ -140,7 +140,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
   }, []);
 
   const onSelect = async (path: string | undefined) => {
-    await actions.selectNote(path);
+    await actions.selectFile(path);
     setSidebarOpen(false);
   };
 
@@ -347,7 +347,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
                         doc={doc}
                         readOnly={!canEdit}
                         onChange={(path, text) => {
-                          actions.updateNoteText(path, text);
+                          actions.saveFile(path, text);
                         }}
                       />
                     ) : isBinaryDoc(doc) ? (

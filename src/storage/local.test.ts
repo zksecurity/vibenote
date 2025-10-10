@@ -35,9 +35,9 @@ describe('LocalStore cross-tab resilience', () => {
   test('rename tombstones collapse when a rename is reverted', () => {
     let slug = `user/repo-${randomUUID()}`;
     let store = new LocalStore(slug);
-    let id = store.createFile('First.md', 'body');
-    store.renameFileById(id, 'Second.md');
-    store.renameFileById(id, 'First.md');
+    store.createFile('First.md', 'body');
+    store.renameFile('First.md', 'Second');
+    store.renameFile('Second.md', 'First');
     expect(listTombstones(slug)).toEqual([]);
     clearAllTombstones(slug);
   });
@@ -45,9 +45,9 @@ describe('LocalStore cross-tab resilience', () => {
   test('rename tombstones merge when a file is renamed multiple times', () => {
     let slug = `user/repo-${randomUUID()}`;
     let store = new LocalStore(slug);
-    let id = store.createFile('Start.md', 'body');
-    store.renameFileById(id, 'Middle.md');
-    store.renameFileById(id, 'End.md');
+    store.createFile('Start.md', 'body');
+    store.renameFile('Start.md', 'Middle');
+    store.renameFile('Middle.md', 'End');
     let tombstones = listTombstones(slug);
     expect(tombstones).toHaveLength(1);
     let entry = tombstones[0];

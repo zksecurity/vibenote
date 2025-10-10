@@ -346,42 +346,35 @@ export class LocalStore {
     return id;
   }
 
-  // `newName` refers to the file name EXCLUDING extension
+  /**
+   * Renames a file, preserving its extension.
+   *
+   * `newName` must be the new file name EXCLUDING extension.
+   */
   renameFile(path: string, newName: string): string | undefined {
     let meta = this.findMetaByPath(path);
     if (!meta) return undefined;
-    // get previous extension from path
-    let ext = extractExtensionWithDot(basename(meta.path));
-    return this.renameFileById(meta.id, newName + ext);
-  }
 
-  // `newFileName` refers to the file name INCLUDING extension
-  renameFileById(id: string, newFileName: string): string | undefined {
-    let doc = this.loadFile(id);
+    // get previous extension from path, and determine new path
+    let ext = extractExtensionWithDot(basename(meta.path));
+    let newFileName = newName + ext;
+
+    let doc = this.loadFile(meta.id);
     if (!doc) return undefined;
     let safeName = ensureValidFileName(newFileName);
     let normDir = normalizeDir(doc.dir);
     let toPath = joinPath(normDir, safeName);
     if (toPath === doc.path) return doc.path;
     let nextTitle = stripExtension(safeName);
-    let next = this.applyRename(doc, { title: nextTitle, dir: normDir, path: toPath, mime: doc.mime });
+    let next = this.applyRename(doc, { title: nextTitle, dir: normDir, path: toPath });
     return next.path;
   }
 
-  private applyRename(
-    doc: RepoFileDoc,
-    target: { title: string; dir: string; path: string; mime: string }
-  ): RepoFileDoc {
+  // internal rename method that also supports moving files between folders
+  private applyRename(doc: RepoFileDoc, target: { title: string; dir: string; path: string }): RepoFileDoc {
     let fromPath = doc.path;
     let updatedAt = Date.now();
-    let next: RepoFileDoc = {
-      ...doc,
-      title: target.title,
-      dir: target.dir,
-      path: target.path,
-      mime: target.mime,
-      updatedAt,
-    };
+    let next: RepoFileDoc = { ...doc, title: target.title, dir: target.dir, path: target.path, updatedAt };
     let pathChanged = fromPath !== target.path;
     if (pathChanged) {
       delete next.lastRemoteSha;
@@ -394,7 +387,6 @@ export class LocalStore {
       path: target.path,
       updatedAt,
       kind: next.kind,
-      mime: next.mime,
     });
     ensureFolderForSlug(this.slug, target.dir);
     if (pathChanged) {
@@ -405,7 +397,7 @@ export class LocalStore {
         renamedAt: updatedAt,
       });
     }
-    debugLog(this.slug, 'renameFile', { id: doc.id, fromPath, toPath: target.path, pathChanged });
+    debugLog(this.slug, 'applyRename', { id: doc.id, fromPath, toPath: target.path, pathChanged });
     emitRepoChange(this.slug);
     return next;
   }
@@ -609,21 +601,12 @@ export class LocalStore {
     let doc = this.loadFile(id);
     if (!doc) return;
     let normDir = normalizeDir(dir);
-    let nextPath: string;
-    let nextTitle: string;
-    let nextMime = doc.mime;
-    if (isMarkdownDoc(doc)) {
-      nextTitle = ensureValidTitle(doc.title);
-      nextPath = joinPath(normDir, `${nextTitle}.md`);
-      nextMime = DEFAULT_MARKDOWN_MIME;
-    } else {
-      let fileName = basename(doc.path);
-      let safeFileName = ensureValidFileName(fileName);
-      nextTitle = ensureValidTitle(stripExtension(safeFileName) || 'Untitled');
-      nextPath = joinPath(normDir, safeFileName);
-    }
+    let fileName = basename(doc.path);
+    let safeFileName = ensureValidFileName(fileName);
+    let nextPath = joinPath(normDir, safeFileName);
+    let nextTitle = stripExtension(safeFileName);
     if (nextPath === doc.path && normDir === normalizeDir(doc.dir)) return;
-    this.applyRename(doc, { title: nextTitle, dir: normDir, path: nextPath, mime: nextMime });
+    this.applyRename(doc, { title: nextTitle, dir: normDir, path: nextPath });
   }
 
   private findMetaByPath(path: string): FileMeta | null {
@@ -833,6 +816,7 @@ export function markSynced(slug: string, id: string, patch: { remoteSha?: string
   emitRepoChange(slug);
 }
 
+// TODO why does this exist separately from LocalStore?
 export function updateNoteText(slug: string, id: string, text: string) {
   mutateFileDoc(
     slug,
@@ -847,6 +831,7 @@ export function updateNoteText(slug: string, id: string, text: string) {
   );
 }
 
+// TODO why does this exist separately from LocalStore?
 export function updateBinaryContent(slug: string, id: string, base64: string, mime?: string) {
   mutateFileDoc(
     slug,
@@ -1147,8 +1132,8 @@ function ensureValidTitle(title: string): string {
 
 function ensureValidFileName(name: string): string {
   let trimmed = name.trim();
-  if (!trimmed || trimmed === '.' || trimmed === '..') throw new Error('Invalid file name');
-  if (/[\\/\0]/.test(trimmed)) throw new Error('Invalid file name: contains illegal characters');
+  if (!trimmed || trimmed === '.' || trimmed === '..') throw Error('Invalid file name');
+  if (/[\\/\0]/.test(trimmed)) throw Error('Invalid file name: contains illegal characters');
   return trimmed;
 }
 

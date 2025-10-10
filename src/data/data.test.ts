@@ -199,7 +199,7 @@ describe('useRepoData', () => {
     expect(welcomePath).toBeDefined();
 
     act(() => {
-      result.current.actions.selectNote(welcomePath);
+      result.current.actions.selectFile(welcomePath);
     });
 
     await waitFor(() => expect(result.current.state.doc?.path).toBe(welcomePath));
@@ -232,7 +232,7 @@ describe('useRepoData', () => {
     expect(result.current.routeState.notePath).toBe(alpha.path);
 
     await act(async () => {
-      await result.current.data.actions.selectNote(welcome.path);
+      await result.current.data.actions.selectFile(welcome.path);
     });
 
     await waitFor(() => expect(result.current.data.state.activePath).toBe(welcome.path));
@@ -358,13 +358,13 @@ describe('useRepoData', () => {
     );
 
     act(() => {
-      result.current.actions.selectNote(notePath);
+      result.current.actions.selectFile(notePath);
     });
 
     await waitFor(() => expect(result.current.state.doc?.path).toBe(notePath));
 
     act(() => {
-      result.current.actions.updateNoteText(notePath, 'updated text');
+      result.current.actions.saveFile(notePath, 'updated text');
     });
 
     const storedAfterEdit = new LocalStore(slug).loadFile(noteId);
@@ -427,7 +427,7 @@ describe('useRepoData', () => {
     );
 
     act(() => {
-      result.current.actions.selectNote('docs/alpha.md');
+      result.current.actions.selectFile('docs/alpha.md');
     });
 
     await waitFor(() => expect(result.current.state.doc?.content).toBe('# docs/alpha.md'));
@@ -441,7 +441,7 @@ describe('useRepoData', () => {
     });
 
     act(() => {
-      result.current.actions.selectNote('docs/alpha.md');
+      result.current.actions.selectFile('docs/alpha.md');
     });
 
     await waitFor(() => expect(result.current.state.doc?.content).toBe('# updated remote'));
@@ -619,7 +619,7 @@ describe('useRepoData', () => {
     await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
 
     act(() => {
-      result.current.actions.selectNote(notePath);
+      result.current.actions.selectFile(notePath);
     });
 
     await waitFor(() => expect(result.current.state.doc?.path).toBe(notePath));
@@ -632,7 +632,7 @@ describe('useRepoData', () => {
     setTimeoutSpy.mockClear();
 
     act(() => {
-      result.current.actions.updateNoteText(notePath, 'updated text');
+      result.current.actions.saveFile(notePath, 'updated text');
     });
 
     const lastCall = setTimeoutSpy.mock.calls.at(-1);
@@ -714,7 +714,7 @@ describe('useRepoData', () => {
     await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
 
     act(() => {
-      result.current.actions.selectNote(noteAPath);
+      result.current.actions.selectFile(noteAPath);
     });
 
     await waitFor(() => expect(result.current.state.doc?.id).toBe(noteA));
@@ -730,7 +730,7 @@ describe('useRepoData', () => {
     await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
 
     act(() => {
-      result.current.actions.selectNote(noteBPath);
+      result.current.actions.selectFile(noteBPath);
     });
 
     await waitFor(() => expect(result.current.state.doc?.id).toBe(noteB));
@@ -802,7 +802,7 @@ describe('useRepoData', () => {
     await waitFor(() => expect(result.current.state.needsInstall).toBe(false));
 
     act(() => {
-      result.current.actions.selectNote(notePath);
+      result.current.actions.selectFile(notePath);
     });
 
     await waitFor(() => expect(result.current.state.doc?.id).toBe(noteId));
@@ -850,11 +850,11 @@ describe('useRepoData', () => {
     await waitFor(() => expect(result.current.state.notes.length).not.toBe(0));
     expect(result.current.state.activePath).toBeUndefined();
     act(() => {
-      result.current.actions.selectNote('docs/alpha.md');
+      result.current.actions.selectFile('docs/alpha.md');
     });
     await waitFor(() => expect(result.current.state.doc?.path).toBe('docs/alpha.md'));
     act(() => {
-      result.current.actions.selectNote('docs/beta.md');
+      result.current.actions.selectFile('docs/beta.md');
     });
 
     await waitFor(() => expect(result.current.state.doc?.path).toBe('docs/beta.md'));
@@ -891,7 +891,7 @@ describe('useRepoData', () => {
     await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
 
     act(() => {
-      result.current.actions.selectNote(notePath);
+      result.current.actions.selectFile(notePath);
     });
 
     await waitFor(() => expect(result.current.state.doc?.id).toBe(noteId));
