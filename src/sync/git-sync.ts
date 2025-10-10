@@ -87,7 +87,11 @@ export async function pullRepoFile(config: RemoteConfig, path: string): Promise<
     if (res.ok) {
       let json = await res.json();
       let sha = String(json.sha || '');
-      let contentB64 = normalizeBase64(String(json.content || ''));
+      let contentB64 = normalizeBase64(typeof json.content === 'string' ? json.content : '');
+      if (!contentB64 && sha) {
+        let blobContent = await fetchBlob(config, sha);
+        if (blobContent) contentB64 = blobContent;
+      }
       return deserializeRemoteFile(path, kind, sha, contentB64);
     }
     if (res.status !== 403 && res.status !== 404) {
@@ -208,7 +212,7 @@ function fromBase64(b64: string): string {
   return decoder.decode(bytes);
 }
 
-// Fetch raw blob content by SHA using backend (requires installation for the repo)
+// Fetch raw blob content (base64) by SHA using backend (requires installation for the repo)
 export async function fetchBlob(config: RemoteConfig, sha: string): Promise<string | null> {
   let token = await ensureFreshAccessToken();
   if (!token) return '';
@@ -220,7 +224,7 @@ export async function fetchBlob(config: RemoteConfig, sha: string): Promise<stri
     return '';
   }
   let json = await res.json();
-  return fromBase64(String(json.content || '').replace(/\n/g, ''));
+  return normalizeBase64(String(json.content || ''));
 }
 
 function extractBlobSha(res: CommitResponse, path: string): string | undefined {
@@ -546,9 +550,10 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       // Remote changed; fetch remote content
       const rf = remoteFile ?? (await pullRepoFile(config, e.path));
       if (!rf) continue;
-      const base = lastRemoteSha ? await fetchBlob(config, lastRemoteSha) : '';
+      const baseRaw = lastRemoteSha ? await fetchBlob(config, lastRemoteSha) : '';
+      const baseContent = doc.kind === 'markdown' ? fromBase64(baseRaw ?? '') : baseRaw ?? '';
       const remoteHash = hashText(rf.content);
-      const baseHash = hashText(base ?? '');
+      const baseHash = hashText(baseContent);
       if (remoteHash === localHash) {
         markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: localHash });
         remoteMap.set(e.path, rf.sha);
@@ -581,7 +586,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         // both changed → merge
         if (doc.kind === 'markdown') {
           // custom merge strategy for markdown files
-          const mergedText = mergeMarkdown(base ?? '', doc.content, rf.content);
+          const mergedText = mergeMarkdown(baseContent, doc.content, rf.content);
           if (mergedText !== doc.content) {
             updateFile(storeSlug, id, mergedText);
           }

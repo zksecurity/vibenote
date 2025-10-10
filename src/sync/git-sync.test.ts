@@ -172,6 +172,54 @@ describe('syncBidirectional', () => {
     expectParity(store, remote);
   });
 
+  test('pulls binary assets via blob fallback when contents payload is empty', async () => {
+    const payload = 'high-res-image';
+    const expectedBase64 = Buffer.from(payload, 'utf8').toString('base64');
+    remote.setFile('assets/large.png', payload);
+    const originalFetch = globalAny.fetch!;
+    let capturedSha: string | null = null;
+    const interceptFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+      if (request.method.toUpperCase() === 'GET' && url.pathname === '/repos/user/repo/contents/assets/large.png') {
+        const upstream = await originalFetch(input, init);
+        const json = await upstream.json();
+        capturedSha = typeof json?.sha === 'string' ? json.sha : null;
+        return new Response(
+          JSON.stringify({ ...json, content: '' }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      if (
+        request.method.toUpperCase() === 'GET' &&
+        capturedSha &&
+        url.pathname === `/repos/user/repo/git/blobs/${capturedSha}`
+      ) {
+        return new Response(
+          JSON.stringify({ sha: capturedSha, content: expectedBase64, encoding: 'base64' }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      return originalFetch(input, init);
+    });
+
+    globalAny.fetch = interceptFetch as unknown as typeof fetch;
+    try {
+      await syncBidirectional(store, 'user/repo');
+    } finally {
+      globalAny.fetch = originalFetch;
+    }
+    const files = store.listFiles();
+    const asset = files.find((f) => f.path === 'assets/large.png');
+    expect(asset).toBeDefined();
+    if (!asset) return;
+    const doc = store.loadFileById(asset.id);
+    expect(doc?.kind).toBe('binary');
+    expect(doc?.content).toBe(expectedBase64);
+    expect(capturedSha).toBeTruthy();
+    expectParity(store, remote);
+  });
+
   test('tracks remote binary renames by sha/hash', async () => {
     const payload = Buffer.from('asset', 'utf8').toString('base64');
     const id = store.createFile('logo.png', payload);
