@@ -27,8 +27,8 @@ export default defineConfig({
   plugins: [
     {
       name: 'share-route-fallback',
-      configureServer(server) {
-        server.middlewares.use(async (req, res, next) => {
+      configureServer(server: any) {
+        server.middlewares.use(async (req: any, res: any, next: any) => {
           if (!req.url || req.method !== 'GET') {
             next();
             return;
