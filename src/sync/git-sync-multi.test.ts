@@ -173,7 +173,7 @@ describe('syncBidirectional multi-device', () => {
     expect(remotePaths(remote)).toEqual(['Draft Renamed.md']);
 
     let storeTwo = useDevice(deviceTwo);
-    storeTwo.saveFileContent(noteId, 'local edits from device two', 'text/markdown');
+    storeTwo.saveFile(noteId, 'local edits from device two');
     await syncBidirectional(storeTwo, REPO_SLUG);
 
     expect(filePaths(storeTwo)).toEqual(['Draft Renamed.md']);
@@ -190,7 +190,7 @@ describe('syncBidirectional multi-device', () => {
     let deviceTwo = createDevice('device-two', deviceOne.storage);
 
     let storeTwo = useDevice(deviceTwo);
-    storeTwo.saveFileContent(cloneId, 'clone offline edits', 'text/markdown');
+    storeTwo.saveFile(cloneId, 'clone offline edits');
 
     storeOne = useDevice(deviceOne);
     storeOne.renameFileById(draftId, 'Draft Renamed.md');
@@ -294,7 +294,7 @@ describe('syncBidirectional multi-device', () => {
     let deviceTwo = createDevice('device-two', deviceOne.storage);
 
     let storeTwo = useDevice(deviceTwo);
-    storeTwo.saveFileContent(noteId, 'offline edits from device two', 'text/markdown');
+    storeTwo.saveFile(noteId, 'offline edits from device two');
 
     storeOne = useDevice(deviceOne);
     storeOne.deleteFileById(noteId);
@@ -342,7 +342,7 @@ describe('syncBidirectional multi-device', () => {
     await syncBidirectional(storeOne, REPO_SLUG);
 
     let storeTwo = useDevice(deviceTwo);
-    storeTwo.saveFileContent(noteId, 'offline edit after rename', 'text/markdown');
+    storeTwo.saveFile(noteId, 'offline edit after rename');
     await syncBidirectional(storeTwo, REPO_SLUG);
 
     let updated = storeTwo.loadFile(noteId);

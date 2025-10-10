@@ -422,7 +422,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     if (!canEdit) return;
     let meta = resolveEditableNote(path);
     if (!meta) return;
-    getRepoStore(slug).saveFileContent(meta.id, text, 'text/markdown');
+    getRepoStore(slug).saveFile(meta.id, text);
     scheduleAutoSync();
   };
 

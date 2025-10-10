@@ -318,23 +318,14 @@ export class LocalStore {
     return doc;
   }
 
-  saveNote(id: string, text: string) {
-    this.updateFileContent(id, text, DEFAULT_MARKDOWN_MIME, 'saveNote');
-  }
-
-  saveFileContent(id: string, content: string, mime?: string) {
-    this.updateFileContent(id, content, mime, 'saveFileContent');
-  }
-
-  private updateFileContent(id: string, content: string, mime: string | undefined, op: string) {
+  saveFile(id: string, content: string) {
     let doc = this.loadFile(id);
     if (!doc) return;
     let updatedAt = Date.now();
     let next: RepoFileDoc = { ...doc, content, updatedAt };
-    if (mime) next.mime = mime;
     localStorage.setItem(this.noteKey(id), serializeFile(next));
-    this.touchIndex(id, { updatedAt, mime: next.mime, kind: next.kind });
-    debugLog(this.slug, op, { id, path: doc.path, updatedAt });
+    this.touchIndex(id, { updatedAt });
+    debugLog(this.slug, 'saveFile', { id, path: doc.path, updatedAt });
     emitRepoChange(this.slug);
   }
 
