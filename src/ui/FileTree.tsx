@@ -1,13 +1,11 @@
 // File tree sidebar for browsing, editing, and managing repo notes.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { type FileKind } from '../storage/local';
 
 export type FileEntry = {
   name: string; // filename including extension
   path: string; // dir + name
   dir: string; // '' for root
   title: string; // extension-trimmed title for editing
-  kind: FileKind;
 };
 
 type Selection = { kind: 'folder' | 'file'; path: string } | null;
@@ -38,7 +36,7 @@ type FolderNode = {
   name: string;
   children: (FolderNode | FileNode)[];
 };
-type FileNode = { kind: 'file'; name: string; dir: string; path: string; title: string; fileKind: FileKind };
+type FileNode = { kind: 'file'; name: string; dir: string; path: string; title: string };
 
 export function FileTree(props: FileTreeProps) {
   // Rebuild the nested node structure whenever the note list changes.
@@ -248,17 +246,8 @@ export function FileTree(props: FileTreeProps) {
       setEditText('');
       return;
     }
-    if (context.kind === 'file' && context.path) {
-      const entry = props.files.find((f) => normalizePath(f.path) === normalizePath(context.path));
-      if (!entry) {
-        setEditing(null);
-        setEditText('');
-        return;
-      }
-      props.onRenameFile(context.path, name);
-    } else if (context.kind === 'folder' && context.path) {
-      props.onRenameFolder(context.path, name);
-    }
+    if (context.kind === 'file' && context.path) props.onRenameFile(context.path, name);
+    else if (context.kind === 'folder' && context.path) props.onRenameFolder(context.path, name);
     setEditing(null);
     setEditText('');
   };
@@ -594,9 +583,7 @@ function Row(props: {
         e.preventDefault();
         props.onRequestMenu({ kind: 'file', path: node.path });
       }}
-      onPointerDown={(e) => {
-        startLongPress(e, { kind: 'file', path: node.path });
-      }}
+      onPointerDown={(e) => startLongPress(e, { kind: 'file', path: node.path })}
       onDoubleClick={() => props.onSelectFile(node.path)}
     >
       <span className="tree-disclosure-spacer" />
@@ -724,14 +711,7 @@ function buildTree(files: FileEntry[], folders: string[]): FolderNode {
   for (let d of folders) addFolder(d);
   for (let f of files) {
     const parent = addFolder(f.dir);
-    parent.children.push({
-      kind: 'file',
-      name: f.name,
-      dir: f.dir,
-      path: f.path,
-      title: f.title,
-      fileKind: f.kind,
-    });
+    parent.children.push({ kind: 'file', name: f.name, dir: f.dir, path: f.path, title: f.title });
   }
   // Sort like GitHub: folders A→Z, then files A→Z
   const sortNode = (n: FolderNode) => {

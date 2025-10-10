@@ -406,7 +406,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     try {
       let store = getRepoStore(slug);
       let nextPath = store.renameFile(path, name);
-      if (nextPath && activePath !== undefined && pathsEqual(activePath, path)) {
+      if (nextPath && pathsEqual(activePath, path)) {
         ensureActivePath(nextPath);
       }
       scheduleAutoSync();
@@ -418,20 +418,13 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
 
   const deleteFile = (path: string) => {
     if (!canEdit) return;
-    try {
-      let removed = getRepoStore(slug).deleteFile(path);
-      if (!removed) {
-        setStatusMessage('Unable to delete file.');
-        return;
-      }
-      if (activePath !== undefined && pathsEqual(activePath, path)) {
-        ensureActivePath(undefined);
-      }
-      scheduleAutoSync();
-    } catch (error) {
-      logError(error);
+    let removed = getRepoStore(slug).deleteFile(path);
+    if (!removed) {
       setStatusMessage('Unable to delete file.');
+      return;
     }
+    if (pathsEqual(activePath, path)) ensureActivePath(undefined);
+    scheduleAutoSync();
   };
 
   const renameFolder = (dir: string, newName: string) => {
@@ -449,10 +442,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     if (!canEdit) return;
     let localStore = getRepoStore(slug);
     let files = localStore.listFiles();
-    let hasFiles = files.some((file) => {
-      let directory = file.dir ?? '';
-      return directory === dir || directory.startsWith(dir + '/');
-    });
+    let hasFiles = files.some((f) => f.dir === dir || f.dir.startsWith(dir + '/'));
     if (hasFiles && !window.confirm('Delete folder and all contained files?')) return;
     localStore.deleteFolder(dir);
     if (activePath !== undefined && isPathInsideDir(activePath, dir)) {
@@ -472,7 +462,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     needsInstall: repoAccess.needsInstall,
     manageUrl,
 
-    activeFile: activeFile,
+    activeFile,
     activePath,
     files,
     folders,
@@ -720,7 +710,7 @@ function useSync(params: { slug: string; canSync: boolean; defaultBranch?: strin
         let pending = localStore
           .listFiles()
           .map((meta) => localStore.loadFileById(meta.id))
-          .filter((note): note is RepoFile => note !== null)
+          .filter((note) => note !== null)
           .filter((note) => note.lastSyncedHash !== hashText(note.content))
           .map((note) => ({
             path: note.path,
@@ -731,11 +721,7 @@ function useSync(params: { slug: string; canSync: boolean; defaultBranch?: strin
         if (pending.length === 0) return;
         ctrl.postMessage({
           type: 'vibenote-flush',
-          payload: {
-            token: accessToken,
-            config: cfg,
-            files: pending,
-          },
+          payload: { token: accessToken, config: cfg, files: pending },
         });
       } catch (error) {
         console.warn('vibenote: background flush failed', error);

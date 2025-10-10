@@ -7,8 +7,14 @@ import { RepoSwitcher } from './RepoSwitcher';
 import { Toggle } from './Toggle';
 import { GitHubIcon, ExternalLinkIcon, NotesIcon, CloseIcon, SyncIcon } from './RepoIcons';
 import { useRepoData } from '../data';
-import type { FileKind, FileMeta } from '../storage/local';
-import { getExpandedFolders, setExpandedFolders, isMarkdownFile, isBinaryFile } from '../storage/local';
+import type { FileMeta } from '../storage/local';
+import {
+  getExpandedFolders,
+  setExpandedFolders,
+  isMarkdownFile,
+  isBinaryFile,
+  basename,
+} from '../storage/local';
 import type { RepoRoute, Route } from './routing';
 import { normalizePath, pathsEqual } from '../lib/util';
 
@@ -451,10 +457,11 @@ function FileSidebar(props: FileSidebarProps) {
     onDeleteFolder,
   } = props;
 
-  const treeFiles = useMemo<FileEntry[]>(
+  // Derive file entries for the tree component from the provided notes list.
+  let treeFiles = useMemo<FileEntry[]>(
     () =>
       files.map((file) => ({
-        name: file.path.slice(file.path.lastIndexOf('/') + 1),
+        name: basename(file.path),
         path: file.path,
         dir: file.dir,
         title: file.title,
@@ -502,7 +509,8 @@ function FileSidebar(props: FileSidebarProps) {
   function selectedDir() {
     if (selection?.kind === 'folder') return selection.path;
     if (selection?.kind === 'file') {
-      return files.find((f) => normalizePath(f.path) === normalizePath(selection.path))?.dir ?? '';
+      let normalized = normalizePath(selection.path);
+      return files.find((f) => normalizePath(f.path) === normalized)?.dir ?? '';
     }
     return '';
   }
