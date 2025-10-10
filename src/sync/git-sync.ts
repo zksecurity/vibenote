@@ -31,13 +31,6 @@ type RemoteConfig = { owner: string; repo: string; branch: string };
 
 type CommitResponse = { commitSha: string; blobShas: Record<string, string> };
 
-type PutFilePayload = {
-  path: string;
-  text?: string;
-  binaryBase64?: string;
-  baseSha?: string;
-};
-
 const GITHUB_API_BASE = 'https://api.github.com';
 const MARKDOWN_MIME = 'text/markdown';
 const IMAGE_MIME_BY_EXT: Record<string, string> = {
@@ -119,13 +112,19 @@ export type SyncSummary = {
   merged: number;
 };
 
+type PutFilePayload = { path: string; content: string; kind: FileKind; baseSha?: string };
+
+function serializeContent(file: { path: string; content: string; kind: FileKind }) {
+  return {
+    path: file.path,
+    contentBase64: file.kind === 'binary' ? normalizeBase64(file.content) : toBase64(file.content),
+    encoding: file.kind === 'binary' ? ('base64' as const) : ('utf-8' as const),
+  };
+}
+
 // Upsert a single file and return its new content sha
 export async function putFile(config: RemoteConfig, file: PutFilePayload, message: string): Promise<string> {
-  const hasText = file.text !== undefined;
-  const contentBase64 = hasText ? toBase64(file.text ?? '') : normalizeBase64(file.binaryBase64 ?? '');
-  let res = await commitChanges(config, message, [
-    { path: file.path, contentBase64, encoding: hasText ? 'utf-8' : 'base64' },
-  ]);
+  let res = await commitChanges(config, message, [serializeContent(file)]);
   return extractBlobSha(res, file.path) ?? res.commitSha;
 }
 
@@ -135,15 +134,7 @@ export async function commitBatch(
   message: string
 ): Promise<string | null> {
   if (files.length === 0) return null;
-  let res = await commitChanges(
-    config,
-    message,
-    files.map((f) => ({
-      path: f.path,
-      contentBase64: f.text !== undefined ? toBase64(f.text) : normalizeBase64(f.binaryBase64 ?? ''),
-      encoding: f.text !== undefined ? 'utf-8' : 'base64',
-    }))
-  );
+  let res = await commitChanges(config, message, files.map(serializeContent));
   // Return the first blob sha if available to align with caller expectations
   const firstPath = files[0]?.path;
   return firstPath ? extractBlobSha(res, firstPath) ?? res.commitSha : res.commitSha;
@@ -495,222 +486,137 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
   const config = buildRemoteConfig(slug);
   const storeSlug = store.slug;
   const entries = await listRepoFiles(config);
-  const remoteMap = new Map<string, RepoFileEntry>();
-  for (const entry of entries) remoteMap.set(entry.path, entry);
+  const remoteMap = new Map<string, string>(entries.map((e) => [e.path, e.sha] as const));
   const pending = listTombstones(storeSlug);
   const renameSources = new Set(pending.filter((t) => t.type === 'rename').map((t) => t.from));
   const deleteSources = new Set(pending.filter((t) => t.type === 'delete').map((t) => t.path));
 
   // Process remote files: pull new or changed, merge when both changed
-  for (const entry of entries) {
-    if (entry.kind === 'markdown') {
-      let remoteFile: RemoteFile | null = null;
-      let remoteTextHash: string | null = null;
-      let local = findFileByPath(storeSlug, entry.path);
-
-      if (!local) {
-        let renamedRecord = entry.sha ? findByRemoteSha(storeSlug, entry.sha) : null;
-        let renamed = renamedRecord && isMarkdownFile(renamedRecord.doc) ? renamedRecord : null;
-        if (!renamed) {
-          remoteFile = await pullRepoFile(config, entry.path);
-          if (!remoteFile) continue;
-          remoteTextHash = hashText(remoteFile.content || '');
-          let syncedRecord = findBySyncedHash(storeSlug, remoteTextHash);
-          renamed = syncedRecord && isMarkdownFile(syncedRecord.doc) ? syncedRecord : null;
-        }
-        if (renamed && renamed.doc.path !== entry.path) {
-          moveFilePath(storeSlug, renamed.id, entry.path);
-          local = findFileByPath(storeSlug, entry.path);
-        }
+  for (const e of entries) {
+    let remoteFile: RemoteFile | null = null;
+    let remoteTextHash: string | null = null;
+    let local = findFileByPath(storeSlug, e.path);
+    if (!local) {
+      let renamed = e.sha ? findByRemoteSha(storeSlug, e.sha) : null;
+      if (!renamed) {
+        remoteFile = await pullRepoFile(config, e.path);
+        if (!remoteFile) continue;
+        remoteTextHash = hashText(remoteFile.content || '');
+        renamed = findBySyncedHash(storeSlug, remoteTextHash);
       }
-
-      if (!local) {
-        if (renameSources.has(entry.path) || deleteSources.has(entry.path)) continue;
-        const rf = remoteFile ?? (await pullRepoFile(config, entry.path));
-        if (!rf) continue;
-        remoteTextHash = remoteTextHash ?? hashText(rf.content || '');
-        const id = store.createFile(entry.path, rf.content, { kind: 'markdown', mime: MARKDOWN_MIME });
-        markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: remoteTextHash });
-        remoteMap.set(entry.path, { path: entry.path, sha: rf.sha, kind: 'markdown', mime: MARKDOWN_MIME });
-        pulled++;
-        debugLog(slug, 'sync:pull:new', { path: entry.path });
-        continue;
+      if (renamed && renamed.doc.path !== e.path) {
+        moveFilePath(storeSlug, renamed.id, e.path);
+        local = findFileByPath(storeSlug, e.path);
       }
-
-      const { id, doc } = local;
-      const lastRemoteSha = doc.lastRemoteSha;
-      const localText = doc.content;
-      const localHash = hashText(localText);
-
-      if (entry.sha === lastRemoteSha) {
-        const changedLocally = doc.lastSyncedHash !== localHash;
-        if (changedLocally) {
-          const newSha = await putFile(
-            config,
-            { path: doc.path, text: localText, baseSha: entry.sha },
-            'vibenote: update notes'
-          );
-          markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: localHash });
-          remoteMap.set(doc.path, { path: doc.path, sha: newSha, kind: 'markdown', mime: MARKDOWN_MIME });
-          pushed++;
-          debugLog(slug, 'sync:push:unchanged-remote', { path: doc.path });
-        }
-        continue;
+    }
+    if (!local) {
+      if (renameSources.has(e.path) || deleteSources.has(e.path)) continue;
+      // New remote file → pull
+      const rf = remoteFile ?? (await pullRepoFile(config, e.path));
+      if (!rf) continue;
+      remoteFile = rf;
+      remoteTextHash = remoteTextHash ?? hashText(rf.content || '');
+      // Create local note using the store so index stays consistent
+      const id = store.createFile(e.path, rf.content, { kind: rf.kind, mime: rf.mime });
+      // Mark sync metadata
+      markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: remoteTextHash });
+      remoteMap.set(e.path, rf.sha);
+      pulled++;
+      debugLog(slug, 'sync:pull:new', { path: e.path });
+      continue;
+    }
+    const { id, doc } = local;
+    const lastRemoteSha = doc.lastRemoteSha;
+    let localHash = hashText(doc.content);
+    if (e.sha === lastRemoteSha) {
+      // Remote unchanged since base
+      const changedLocally = doc.lastSyncedHash !== localHash;
+      if (changedLocally) {
+        const newSha = await putFile(
+          config,
+          { path: doc.path, content: doc.content, baseSha: e.sha, kind: doc.kind },
+          'vibenote: update notes'
+        );
+        markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: localHash });
+        remoteMap.set(doc.path, newSha);
+        pushed++;
+        debugLog(slug, 'sync:push:unchanged-remote', { path: doc.path });
       }
-
-      const rf = remoteFile ?? (await pullRepoFile(config, entry.path));
+    } else {
+      // Remote changed; fetch remote content
+      const rf = remoteFile ?? (await pullRepoFile(config, e.path));
       if (!rf) continue;
       const base = lastRemoteSha ? await fetchBlob(config, lastRemoteSha) : '';
-      const remoteText = rf.content || '';
-      const remoteHash = hashText(remoteText);
-
+      const remoteHash = hashText(rf.content);
+      const baseHash = hashText(base ?? '');
       if (remoteHash === localHash) {
         markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: localHash });
-        remoteMap.set(entry.path, { path: entry.path, sha: rf.sha, kind: 'markdown', mime: MARKDOWN_MIME });
+        remoteMap.set(e.path, rf.sha);
         debugLog(slug, 'sync:remote-equal-local', { path: doc.path });
         continue;
       }
-
       const remoteMatchesBase = doc.lastSyncedHash !== undefined && remoteHash === doc.lastSyncedHash;
       const localChangedFromBase = doc.lastSyncedHash !== localHash;
       if (remoteMatchesBase && localChangedFromBase) {
         debugLog(slug, 'sync:push:rename-detected', {
           path: doc.path,
           remoteHash,
-          baseHash: hashText(base ?? ''),
+          baseHash,
           localHash,
           lastRemoteSha,
           remoteSha: rf.sha,
         });
         const newSha = await putFile(
           config,
-          { path: doc.path, text: localText, baseSha: entry.sha },
+          { path: doc.path, content: doc.content, baseSha: e.sha, kind: doc.kind },
           'vibenote: update notes'
         );
         markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: localHash });
-        remoteMap.set(doc.path, { path: doc.path, sha: newSha, kind: 'markdown', mime: MARKDOWN_MIME });
+        remoteMap.set(doc.path, newSha);
         pushed++;
         debugLog(slug, 'sync:push:remote-rename-only', { path: doc.path });
         continue;
       }
-
       if (localChangedFromBase) {
-        const mergedText = mergeMarkdown(base ?? '', localText, remoteText);
-        if (mergedText !== localText) {
-          updateFile(storeSlug, id, mergedText);
+        // both changed → merge
+        if (doc.kind === 'markdown') {
+          // custom merge strategy for markdown files
+          const mergedText = mergeMarkdown(base ?? '', doc.content, rf.content);
+          if (mergedText !== doc.content) {
+            updateFile(storeSlug, id, mergedText);
+          }
+          const newSha = await putFile(
+            config,
+            { path: doc.path, content: mergedText, baseSha: rf.sha, kind: 'markdown' },
+            'vibenote: merge notes'
+          );
+          markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: hashText(mergedText) });
+          remoteMap.set(doc.path, newSha);
+          merged++;
+          pushed++;
+          debugLog(slug, 'sync:merge', { path: doc.path });
+        } else if (doc.kind === 'binary') {
+          // TODO how to resolve conflicts for binary files?
+          // currently we just use the remote version (seems fairer to pick the version that made it to github first)
+          updateFile(storeSlug, id, rf.content);
+          markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: remoteHash });
+          remoteMap.set(e.path, rf.sha);
+          pulled++;
+          debugLog(slug, 'sync:pull:binary-conflict', { path: doc.path });
+        } else {
+          // in the future, we could handle other plaintext files than markdown here,
+          // using a plaintext-based merge strategy
+          doc.kind satisfies never;
+          throw Error('unexpected case: file is neither binary nor markdown');
         }
-        const newSha = await putFile(
-          config,
-          { path: doc.path, text: mergedText, baseSha: rf.sha },
-          'vibenote: merge notes'
-        );
-        markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: hashText(mergedText) });
-        remoteMap.set(doc.path, { path: doc.path, sha: newSha, kind: 'markdown', mime: MARKDOWN_MIME });
-        merged++;
-        pushed++;
-        debugLog(slug, 'sync:merge', { path: doc.path });
       } else {
-        updateFile(storeSlug, id, remoteText);
+        // only remote changed → pull
+        updateFile(storeSlug, id, rf.content);
         markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: remoteHash });
-        remoteMap.set(entry.path, { path: entry.path, sha: rf.sha, kind: 'markdown', mime: MARKDOWN_MIME });
+        remoteMap.set(e.path, rf.sha);
         pulled++;
         debugLog(slug, 'sync:pull:remote-changed', { path: doc.path });
       }
-
-      continue;
-    }
-
-    // Binary assets
-    let localFile = findFileByPath(storeSlug, entry.path);
-    let fetchedBinary: RemoteFile | null = null;
-    if (!localFile) {
-      if (renameSources.has(entry.path) || deleteSources.has(entry.path)) continue;
-      let renamedRecord = entry.sha ? findByRemoteSha(storeSlug, entry.sha) : null;
-      let renamed = renamedRecord && isBinaryFile(renamedRecord.doc) ? renamedRecord : null;
-      if (!renamed) {
-        fetchedBinary = await pullRepoFile(config, entry.path);
-        if (!fetchedBinary) continue;
-        let remoteHash = hashText(fetchedBinary.content ?? '');
-        let syncedRecord = findBySyncedHash(storeSlug, remoteHash);
-        renamed = syncedRecord && isBinaryFile(syncedRecord.doc) ? syncedRecord : null;
-      }
-      if (renamed && renamed.doc.path !== entry.path) {
-        moveFilePath(storeSlug, renamed.id, entry.path);
-        localFile = findFileByPath(storeSlug, entry.path);
-      }
-      if (!localFile) {
-        if (!fetchedBinary) {
-          fetchedBinary = await pullRepoFile(config, entry.path);
-          if (!fetchedBinary) continue;
-        }
-        const rf = fetchedBinary;
-        const id = store.createFile(rf.path, rf.content ?? '', { kind: 'binary', mime: rf.mime });
-        markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: hashText(rf.content ?? '') });
-        remoteMap.set(entry.path, { path: entry.path, sha: rf.sha, kind: 'binary', mime: rf.mime });
-        pulled++;
-        debugLog(slug, 'sync:pull:new-binary', { path: entry.path });
-        continue;
-      }
-    }
-
-    const { id, doc } = localFile;
-    const lastRemoteSha = doc.lastRemoteSha;
-    const localBinary = doc.content;
-    const localHash = hashText(localBinary);
-
-    if (entry.sha === lastRemoteSha) {
-      const changedLocally = doc.lastSyncedHash !== localHash;
-      if (changedLocally) {
-        const newSha = await putFile(
-          config,
-          { path: doc.path, binaryBase64: localBinary },
-          'vibenote: update assets'
-        );
-        markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: hashText(localBinary) });
-        remoteMap.set(doc.path, {
-          path: doc.path,
-          sha: newSha,
-          kind: 'binary',
-          mime: doc.mime ?? inferMimeFromPath(doc.path),
-        });
-        pushed++;
-        debugLog(slug, 'sync:push:asset', { path: doc.path });
-      }
-      continue;
-    }
-
-    const rf = fetchedBinary ?? (await pullRepoFile(config, entry.path));
-    if (!rf) continue;
-    const remoteBase64 = rf.content ?? '';
-    const remoteHash = hashText(remoteBase64);
-    if (remoteHash === localHash) {
-      markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: localHash });
-      remoteMap.set(entry.path, { path: entry.path, sha: rf.sha, kind: 'binary', mime: rf.mime });
-      debugLog(slug, 'sync:asset-remote-equal-local', { path: doc.path });
-      continue;
-    }
-
-    if (doc.lastSyncedHash !== localHash) {
-      const newSha = await putFile(
-        config,
-        { path: doc.path, binaryBase64: localBinary },
-        'vibenote: update assets'
-      );
-      markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: hashText(localBinary) });
-      remoteMap.set(doc.path, {
-        path: doc.path,
-        sha: newSha,
-        kind: 'binary',
-        mime: doc.mime ?? inferMimeFromPath(doc.path),
-      });
-      pushed++;
-      debugLog(slug, 'sync:asset-push', { path: doc.path });
-    } else {
-      updateFile(storeSlug, id, remoteBase64, rf.mime);
-      markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: remoteHash });
-      remoteMap.set(entry.path, { path: entry.path, sha: rf.sha, kind: 'binary', mime: rf.mime });
-      pulled++;
-      debugLog(slug, 'sync:pull:asset-remote-changed', { path: doc.path });
     }
   }
 
@@ -722,40 +628,13 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       const local = findFileByPath(storeSlug, meta.path);
       if (!local) continue;
       const { id, doc } = local;
-      let docKind: FileKind;
-      let localText = '';
-      let localBinary = '';
-      let localHash = '';
-      if (doc.kind === 'binary') {
-        docKind = 'binary';
-        localBinary = doc.content;
-        localHash = hashText(localBinary);
-      } else {
-        docKind = 'markdown';
-        localText = doc.content;
-        localHash = hashText(localText);
-      }
+      const localHash = hashText(doc.content);
       const changedLocally = doc.lastSyncedHash !== localHash;
       if (changedLocally) {
         // Restore to remote
-        if (docKind === 'binary') {
-          const newSha = await putFile(
-            config,
-            { path: doc.path, binaryBase64: localBinary },
-            'vibenote: restore file'
-          );
-          markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: hashText(localBinary) });
-          remoteMap.set(doc.path, {
-            path: doc.path,
-            sha: newSha,
-            kind: 'binary',
-            mime: doc.mime ?? inferMimeFromPath(doc.path),
-          });
-        } else {
-          const newSha = await putFile(config, { path: doc.path, text: localText }, 'vibenote: restore note');
-          markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: hashText(localText) });
-          remoteMap.set(doc.path, { path: doc.path, sha: newSha, kind: 'markdown', mime: MARKDOWN_MIME });
-        }
+        const newSha = await putFile(config, doc, 'vibenote: restore note');
+        markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: localHash });
+        remoteMap.set(doc.path, newSha);
         pushed++;
         debugLog(slug, 'sync:restore-remote-missing', { path: doc.path });
       } else {
@@ -771,8 +650,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
   const tombs = listTombstones(storeSlug);
   for (const t of tombs) {
     if (t.type === 'delete') {
-      const entry = remoteMap.get(t.path);
-      const sha = entry?.sha;
+      const sha = remoteMap.get(t.path);
       if (!sha) {
         // already gone remotely
         removeTombstones(
@@ -801,37 +679,17 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       }
     } else if (t.type === 'rename') {
       const targetLocal = findFileByPath(storeSlug, t.to);
-      const remoteTarget = remoteMap.get(t.to);
-      if (targetLocal && !remoteTarget) {
+      const remoteTargetSha = remoteMap.get(t.to);
+      if (targetLocal && !remoteTargetSha) {
         const { id, doc } = targetLocal;
-        let nextSha: string;
-        if (doc.kind === 'binary') {
-          nextSha = await putFile(
-            config,
-            { path: doc.path, binaryBase64: doc.content },
-            'vibenote: update assets'
-          );
-          markSynced(storeSlug, id, {
-            remoteSha: nextSha,
-            syncedHash: hashText(doc.content),
-          });
-          remoteMap.set(t.to, {
-            path: t.to,
-            sha: nextSha,
-            kind: 'binary',
-            mime: doc.mime ?? inferMimeFromPath(doc.path),
-          });
-        } else {
-          nextSha = await putFile(config, { path: doc.path, text: doc.content }, 'vibenote: update notes');
-          markSynced(storeSlug, id, { remoteSha: nextSha, syncedHash: hashText(doc.content) });
-          remoteMap.set(t.to, { path: t.to, sha: nextSha, kind: 'markdown', mime: MARKDOWN_MIME });
-        }
+        const nextSha = await putFile(config, doc, 'vibenote: update notes');
+        markSynced(storeSlug, id, { remoteSha: nextSha, syncedHash: hashText(doc.content) });
+        remoteMap.set(t.to, nextSha);
         pushed++;
         debugLog(slug, 'sync:tombstone:rename:ensure-target', { to: t.to });
       }
 
-      const remoteEntry = remoteMap.get(t.from);
-      let remoteSha = remoteEntry?.sha;
+      const remoteSha = remoteMap.get(t.from);
       if (!remoteSha && !t.lastRemoteSha) {
         // Nothing tracked for this rename: remote already missing
         removeTombstones(
@@ -852,12 +710,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
           continue;
         }
         shaToDelete = remoteFile.sha;
-        remoteMap.set(t.from, {
-          path: remoteFile.path,
-          sha: remoteFile.sha,
-          kind: remoteFile.kind,
-          mime: remoteFile.mime,
-        });
+        remoteMap.set(t.from, shaToDelete);
       }
       if (!t.lastRemoteSha || t.lastRemoteSha === shaToDelete) {
         await deleteFiles(
@@ -879,58 +732,25 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       const remoteFile = await pullRepoFile(config, t.from);
       if (remoteFile) {
         if (existing) {
-          if (existing.doc.kind === 'binary') {
-            updateFile(storeSlug, existing.id, remoteFile.content ?? '', remoteFile.mime);
-            markSynced(storeSlug, existing.id, {
-              remoteSha: remoteFile.sha,
-              syncedHash: hashText(remoteFile.content ?? ''),
-            });
-          } else {
-            if (existing.doc.content !== (remoteFile.content ?? '')) {
-              updateFile(storeSlug, existing.id, remoteFile.content ?? '');
-            }
-            markSynced(storeSlug, existing.id, {
-              remoteSha: remoteFile.sha,
-              syncedHash: hashText(remoteFile.content ?? ''),
-            });
-          }
-          remoteMap.set(remoteFile.path, {
-            path: remoteFile.path,
-            sha: remoteFile.sha,
-            kind: remoteFile.kind,
-            mime: remoteFile.mime,
+          updateFile(storeSlug, existing.id, remoteFile.content, remoteFile.mime);
+          markSynced(storeSlug, existing.id, {
+            remoteSha: remoteFile.sha,
+            syncedHash: hashText(remoteFile.content),
           });
+          remoteMap.set(remoteFile.path, remoteFile.sha);
         } else {
-          if (remoteFile.kind === 'binary') {
-            const newId = store.createFile(remoteFile.path, remoteFile.content ?? '', {
-              kind: remoteFile.kind,
-              mime: remoteFile.mime,
-            });
-            markSynced(storeSlug, newId, {
-              remoteSha: remoteFile.sha,
-              syncedHash: hashText(remoteFile.content ?? ''),
-            });
-            pulled++;
-            debugLog(slug, 'sync:tombstone:rename:recreate-local-binary', { from: t.from });
-          } else {
-            const newId = store.createFile(remoteFile.path, remoteFile.content ?? '', {
-              kind: 'markdown',
-              mime: MARKDOWN_MIME,
-            });
-            moveFilePath(storeSlug, newId, t.from);
-            markSynced(storeSlug, newId, {
-              remoteSha: remoteFile.sha,
-              syncedHash: hashText(remoteFile.content ?? ''),
-            });
-            pulled++;
-            debugLog(slug, 'sync:tombstone:rename:recreate-local', { from: t.from });
-          }
-          remoteMap.set(remoteFile.path, {
-            path: remoteFile.path,
-            sha: remoteFile.sha,
+          const newId = store.createFile(remoteFile.path, remoteFile.content, {
             kind: remoteFile.kind,
             mime: remoteFile.mime,
           });
+          moveFilePath(storeSlug, newId, t.from);
+          markSynced(storeSlug, newId, {
+            remoteSha: remoteFile.sha,
+            syncedHash: hashText(remoteFile.content),
+          });
+          pulled++;
+          debugLog(slug, 'sync:tombstone:rename:recreate-local', { from: t.from });
+          remoteMap.set(remoteFile.path, remoteFile.sha);
         }
       }
       removeTombstones(
@@ -942,9 +762,4 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
 
   const summary = { pulled, pushed, deletedRemote, deletedLocal, merged };
   return summary;
-}
-
-function basename(p: string) {
-  const i = p.lastIndexOf('/');
-  return i >= 0 ? p.slice(i + 1) : p;
 }
