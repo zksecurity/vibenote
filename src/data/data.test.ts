@@ -23,7 +23,7 @@ type BackendMocks = {
 type SyncMocks = {
   buildRemoteConfig: ReturnType<typeof vi.fn>;
   listRepoFiles: ReturnType<typeof vi.fn>;
-  pullNote: ReturnType<typeof vi.fn>;
+  pullRepoFile: ReturnType<typeof vi.fn>;
   syncBidirectional: ReturnType<typeof vi.fn>;
 };
 
@@ -46,7 +46,7 @@ const syncModule = vi.hoisted<SyncMocks>(() => ({
     return { owner: owner ?? '', repo: repo ?? '', branch: 'main' };
   }),
   listRepoFiles: vi.fn(),
-  pullNote: vi.fn(),
+  pullRepoFile: vi.fn(),
   syncBidirectional: vi.fn(),
 }));
 
@@ -66,7 +66,7 @@ vi.mock('../lib/backend', () => ({
 vi.mock('../sync/git-sync', () => ({
   buildRemoteConfig: syncModule.buildRemoteConfig,
   listRepoFiles: syncModule.listRepoFiles,
-  pullNote: syncModule.pullNote,
+  pullRepoFile: syncModule.pullRepoFile,
   syncBidirectional: syncModule.syncBidirectional,
 }));
 
@@ -86,7 +86,7 @@ const mockGetRepoMetadata = backendModule.getRepoMetadata;
 
 const mockBuildRemoteConfig = syncModule.buildRemoteConfig;
 const mockListRepoFiles = syncModule.listRepoFiles;
-const mockPullNote = syncModule.pullNote;
+const mockPullRepoFile = syncModule.pullRepoFile;
 const mockSyncBidirectional = syncModule.syncBidirectional;
 
 const writableMeta: RepoMetadata = {
@@ -167,7 +167,7 @@ describe('useRepoData', () => {
     mockGetRepoMetadata.mockReset();
     mockBuildRemoteConfig.mockReset();
     mockListRepoFiles.mockReset();
-    mockPullNote.mockReset();
+    mockPullRepoFile.mockReset();
     mockSyncBidirectional.mockReset();
 
     mockGetSessionToken.mockReturnValue(null);
@@ -294,7 +294,7 @@ describe('useRepoData', () => {
     mockListRepoFiles.mockResolvedValue([
       { path: 'guides/Intro.md', sha: 'sha-intro', kind: 'markdown', mime: 'text/markdown' },
     ]);
-    mockPullNote.mockResolvedValue({
+    mockPullRepoFile.mockResolvedValue({
       path: 'guides/Intro.md',
       content: '# Intro',
       sha: 'sha-intro',
@@ -308,7 +308,7 @@ describe('useRepoData', () => {
 
     await waitFor(() => expect(result.current.state.activePath).toBe('guides/Intro.md'));
     await waitFor(() => expect(result.current.state.activeFile?.content).toBe('# Intro'));
-    expect(mockPullNote).toHaveBeenCalledWith(expect.anything(), 'guides/Intro.md');
+    expect(mockPullRepoFile).toHaveBeenCalledWith(expect.anything(), 'guides/Intro.md');
   });
 
   // Writable repos should sync on demand and reflect updated auth/session state without losing edits.
@@ -402,7 +402,7 @@ describe('useRepoData', () => {
     mockListRepoFiles.mockResolvedValue([
       { path: 'docs/alpha.md', sha: 'sha-alpha', kind: 'markdown', mime: 'text/markdown' },
     ]);
-    mockPullNote.mockImplementation(
+    mockPullRepoFile.mockImplementation(
       async (_config, path: string): Promise<RemoteFile> => ({
         path,
         content: `# ${path}`,
@@ -438,10 +438,10 @@ describe('useRepoData', () => {
     });
 
     await waitFor(() => expect(result.current.state.activeFile?.content).toBe('# docs/alpha.md'));
-    expect(mockPullNote).toHaveBeenCalledTimes(1);
+    expect(mockPullRepoFile).toHaveBeenCalledTimes(1);
 
-    mockPullNote.mockClear();
-    mockPullNote.mockResolvedValue({
+    mockPullRepoFile.mockClear();
+    mockPullRepoFile.mockResolvedValue({
       path: 'docs/alpha.md',
       content: '# updated remote',
       sha: 'sha-updated',
@@ -454,7 +454,7 @@ describe('useRepoData', () => {
     });
 
     await waitFor(() => expect(result.current.state.activeFile?.content).toBe('# updated remote'));
-    expect(mockPullNote).toHaveBeenCalledTimes(1);
+    expect(mockPullRepoFile).toHaveBeenCalledTimes(1);
   });
 
   test('read-only repos list README without auto-selecting it', async () => {
@@ -467,7 +467,7 @@ describe('useRepoData', () => {
       { path: 'docs/alpha.md', sha: 'sha-alpha', kind: 'markdown', mime: 'text/markdown' },
       { path: 'README.md', sha: 'sha-readme', kind: 'markdown', mime: 'text/markdown' },
     ]);
-    mockPullNote.mockImplementation(
+    mockPullRepoFile.mockImplementation(
       async (_config, path: string): Promise<RemoteFile> => ({
         path,
         content: `# ${path}`,
@@ -486,7 +486,7 @@ describe('useRepoData', () => {
     await waitFor(() => expect(result.current.state.files.length).toBe(2));
     expect(result.current.state.activePath).toBe('README.md');
     await waitFor(() => expect(result.current.state.activeFile?.path).toBe('README.md'));
-    expect(mockPullNote).toHaveBeenCalledWith(expect.anything(), 'README.md');
+    expect(mockPullRepoFile).toHaveBeenCalledWith(expect.anything(), 'README.md');
   });
 
   test('linked repos focus README after initial import', async () => {
@@ -504,7 +504,7 @@ describe('useRepoData', () => {
       { path: 'notes/first.md', sha: 'sha-first', kind: 'markdown', mime: 'text/markdown' },
       { path: 'README.md', sha: 'sha-readme', kind: 'markdown', mime: 'text/markdown' },
     ]);
-    mockPullNote.mockImplementation(
+    mockPullRepoFile.mockImplementation(
       async (_config, path: string): Promise<RemoteFile> => ({
         path,
         content: `# ${path}`,
@@ -835,7 +835,7 @@ describe('useRepoData', () => {
       { path: 'docs/beta.md', sha: 'sha-beta', kind: 'markdown', mime: 'text/markdown' },
     ]);
 
-    mockPullNote.mockImplementation(
+    mockPullRepoFile.mockImplementation(
       async (_config, path: string): Promise<RemoteFile> => ({
         path,
         content: `# ${path}`,

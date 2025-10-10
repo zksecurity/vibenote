@@ -3,7 +3,7 @@ import type { FileKind, FileMeta, NoteDoc } from '../storage/local';
 import { normalizePath } from '../lib/util';
 import { basename, extractDir, hashText, stripExtension } from '../storage/local';
 import { logError } from '../lib/logging';
-import { buildRemoteConfig, listRepoFiles, pullNote } from '../sync/git-sync';
+import { buildRemoteConfig, listRepoFiles, pullRepoFile } from '../sync/git-sync';
 
 export { useReadOnlyFiles };
 
@@ -79,8 +79,7 @@ function useReadOnlyFiles(params: {
   async function loadFile(entry: FileMeta) {
     let cfg = buildRemoteConfig(slug, defaultBranch);
     try {
-      // TODO: pull any file, not just markdown
-      let remote = await pullNote(cfg, entry.path);
+      let remote = await pullRepoFile(cfg, entry.path);
       if (!remote) return;
       setActiveFile({
         id: entry.id,

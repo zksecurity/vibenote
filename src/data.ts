@@ -34,11 +34,11 @@ import {
 } from './lib/backend';
 import {
   buildRemoteConfig,
-  pullNote,
   syncBidirectional,
   type RemoteConfig,
   type SyncSummary,
   listRepoFiles,
+  pullRepoFile,
 } from './sync/git-sync';
 import { logError } from './lib/logging';
 import { useReadOnlyFiles } from './data/readonly-notes';
@@ -254,7 +254,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
         let entries = await listRepoFiles(cfg);
         let files: { path: string; text: string; sha?: string }[] = [];
         for (let e of entries) {
-          let rf = await pullNote(cfg, e.path);
+          let rf = await pullRepoFile(cfg, e.path);
           if (rf) files.push({ path: rf.path, text: rf.content, sha: rf.sha });
         }
         let localStore = getRepoStore(slug);

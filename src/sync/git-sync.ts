@@ -114,12 +114,6 @@ export async function pullRepoFile(config: RemoteConfig, path: string): Promise<
   }
 }
 
-export async function pullNote(config: RemoteConfig, path: string): Promise<RemoteFile | null> {
-  let file = await pullRepoFile(config, path);
-  if (!file || file.kind !== 'markdown') return null;
-  return file;
-}
-
 export type SyncSummary = {
   pulled: number;
   pushed: number;
@@ -521,7 +515,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         let renamedRecord = entry.sha ? findByRemoteSha(storeSlug, entry.sha) : null;
         let renamed = renamedRecord && isMarkdownDoc(renamedRecord.doc) ? renamedRecord : null;
         if (!renamed) {
-          remoteFile = await pullNote(config, entry.path);
+          remoteFile = await pullRepoFile(config, entry.path);
           if (!remoteFile) continue;
           remoteTextHash = hashText(remoteFile.content || '');
           let syncedRecord = findBySyncedHash(storeSlug, remoteTextHash);
@@ -535,7 +529,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
 
       if (!local) {
         if (renameSources.has(entry.path) || deleteSources.has(entry.path)) continue;
-        const rf = remoteFile ?? (await pullNote(config, entry.path));
+        const rf = remoteFile ?? (await pullRepoFile(config, entry.path));
         if (!rf) continue;
         remoteTextHash = remoteTextHash ?? hashText(rf.content || '');
         const id = store.createFile(entry.path, rf.content, { kind: 'markdown', mime: MARKDOWN_MIME });
@@ -567,7 +561,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         continue;
       }
 
-      const rf = remoteFile ?? (await pullNote(config, entry.path));
+      const rf = remoteFile ?? (await pullRepoFile(config, entry.path));
       if (!rf) continue;
       const base = lastRemoteSha ? await fetchBlob(config, lastRemoteSha) : '';
       const remoteText = rf.content || '';
