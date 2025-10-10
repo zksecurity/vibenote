@@ -721,46 +721,13 @@ export function markSynced(slug: string, id: string, patch: { remoteSha?: string
   emitRepoChange(slug);
 }
 
-// TODO why does this exist separately from LocalStore?
-export function updateNoteText(slug: string, id: string, text: string) {
-  mutateFileDoc(
-    slug,
-    id,
-    (doc) => {
-      if (!isMarkdownFile(doc)) return null;
-      let updatedAt = Date.now();
-      let next: MarkdownFile = { ...doc, content: text, updatedAt };
-      return { doc: next };
-    },
-    'updateNoteText'
-  );
-}
-
-// TODO why does this exist separately from LocalStore?
-export function updateBinaryContent(slug: string, id: string, base64: string, mime?: string) {
-  mutateFileDoc(
-    slug,
-    id,
-    (doc) => {
-      let updatedAt = Date.now();
-      let inferredMime = mime ?? doc.mime ?? inferMimeFromPath(doc.path);
-      let next: RepoFile;
-      if (isBinaryFile(doc)) {
-        next = { ...doc, content: base64, mime: inferredMime, updatedAt };
-      } else {
-        next = {
-          ...doc,
-          updatedAt,
-          kind: 'binary',
-          mime: inferredMime,
-          content: base64,
-        };
-      }
-      next.lastSyncedHash = hashText(base64);
-      return { doc: next };
-    },
-    'updateBinary'
-  );
+export function updateFile(slug: string, id: string, content: string, mime?: string) {
+  mutateFile(slug, id, (doc) => {
+    let updatedAt = Date.now();
+    mime ??= doc.mime;
+    let next: RepoFile = { ...doc, content, updatedAt, mime };
+    return { doc: next };
+  });
 }
 
 export function findFileByPath(slug: string, path: string): { id: string; doc: RepoFile } | null {
@@ -808,20 +775,15 @@ export function findBySyncedHash(
 
 export function moveFilePath(slug: string, id: string, toPath: string) {
   let normalizedPath = normalizePath(toPath);
-  mutateFileDoc(
-    slug,
-    id,
-    (doc) => {
-      if (doc.path === normalizedPath) return null;
-      let dir = extractDir(normalizedPath);
-      let updatedAt = Date.now();
-      return {
-        doc: { ...doc, path: normalizedPath, dir, updatedAt },
-        indexPatch: { path: normalizedPath, dir },
-      };
-    },
-    'moveFilePath'
-  );
+  mutateFile(slug, id, (doc) => {
+    if (doc.path === normalizedPath) return null;
+    let dir = extractDir(normalizedPath);
+    let updatedAt = Date.now();
+    return {
+      doc: { ...doc, path: normalizedPath, dir, updatedAt },
+      indexPatch: { path: normalizedPath, dir },
+    };
+  });
   rebuildFolderIndex(slug);
 }
 
@@ -857,16 +819,14 @@ function loadFoldersForSlug(slug: string): string[] {
 function touchIndexUpdatedAt(slug: string, id: string, updatedAt: number, patch?: Partial<FileMeta>) {
   let idx = loadIndexForSlug(slug);
   let i = idx.findIndex((n) => n.id === id);
-  if (i >= 0) {
-    let merged = normalizeMeta({ ...idx[i]!, updatedAt, ...patch });
-    if (merged) idx[i] = merged;
-  }
+  if (i >= 0) idx[i] = { ...idx[i]!, updatedAt, ...patch };
   localStorage.setItem(repoKey(slug, 'index'), serializeIndex(idx));
 }
 
 type DocMutationResult = { doc: RepoFile; indexPatch?: Partial<FileMeta> } | null;
 
-function mutateFileDoc(slug: string, id: string, mutate: (doc: RepoFile) => DocMutationResult, op: string) {
+// TODO this seems like a shit abstraction to me
+function mutateFile(slug: string, id: string, mutate: (doc: RepoFile) => DocMutationResult) {
   let key = `${repoKey(slug, 'note')}:${id}`;
   let current = loadFileForKey(slug, id);
   if (!current) return;
@@ -878,7 +838,7 @@ function mutateFileDoc(slug: string, id: string, mutate: (doc: RepoFile) => DocM
   let indexPatch: Partial<FileMeta> = { kind: next.kind, mime: next.mime, ...result.indexPatch };
   localStorage.setItem(key, serializeFile(next));
   touchIndexUpdatedAt(slug, id, updatedAt, indexPatch);
-  debugLog(slug, op, { id, updatedAt });
+  debugLog(slug, 'updateFile', { id, updatedAt });
   emitRepoChange(slug);
 }
 

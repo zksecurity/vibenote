@@ -17,8 +17,7 @@ import {
   findByRemoteSha,
   findBySyncedHash,
   markSynced,
-  updateNoteText,
-  updateBinaryContent,
+  updateFile,
   moveFilePath,
   debugLog,
   isMarkdownFile,
@@ -598,7 +597,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       if (localChangedFromBase) {
         const mergedText = mergeMarkdown(base ?? '', localText, remoteText);
         if (mergedText !== localText) {
-          updateNoteText(storeSlug, id, mergedText);
+          updateFile(storeSlug, id, mergedText);
         }
         const newSha = await putFile(
           config,
@@ -611,7 +610,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         pushed++;
         debugLog(slug, 'sync:merge', { path: doc.path });
       } else {
-        updateNoteText(storeSlug, id, remoteText);
+        updateFile(storeSlug, id, remoteText);
         markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: remoteHash });
         remoteMap.set(entry.path, { path: entry.path, sha: rf.sha, kind: 'markdown', mime: MARKDOWN_MIME });
         pulled++;
@@ -707,7 +706,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       pushed++;
       debugLog(slug, 'sync:asset-push', { path: doc.path });
     } else {
-      updateBinaryContent(storeSlug, id, remoteBase64, rf.mime);
+      updateFile(storeSlug, id, remoteBase64, rf.mime);
       markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: remoteHash });
       remoteMap.set(entry.path, { path: entry.path, sha: rf.sha, kind: 'binary', mime: rf.mime });
       pulled++;
@@ -881,14 +880,14 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       if (remoteFile) {
         if (existing) {
           if (existing.doc.kind === 'binary') {
-            updateBinaryContent(storeSlug, existing.id, remoteFile.content ?? '', remoteFile.mime);
+            updateFile(storeSlug, existing.id, remoteFile.content ?? '', remoteFile.mime);
             markSynced(storeSlug, existing.id, {
               remoteSha: remoteFile.sha,
               syncedHash: hashText(remoteFile.content ?? ''),
             });
           } else {
             if (existing.doc.content !== (remoteFile.content ?? '')) {
-              updateNoteText(storeSlug, existing.id, remoteFile.content ?? '');
+              updateFile(storeSlug, existing.id, remoteFile.content ?? '');
             }
             markSynced(storeSlug, existing.id, {
               remoteSha: remoteFile.sha,
