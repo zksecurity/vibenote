@@ -87,10 +87,10 @@ function useReadOnlyFiles(params: {
         path: entry.path,
         title: entry.title,
         dir: entry.dir,
-        content: remote.text,
+        content: remote.content,
         updatedAt: Date.now(),
         lastRemoteSha: remote.sha,
-        lastSyncedHash: hashText(remote.text),
+        lastSyncedHash: hashText(remote.content),
         kind: 'markdown',
         mime: 'text/markdown',
       });

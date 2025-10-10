@@ -255,7 +255,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
         let files: { path: string; text: string; sha?: string }[] = [];
         for (let e of entries) {
           let rf = await pullNote(cfg, e.path);
-          if (rf) files.push({ path: rf.path, text: rf.text, sha: rf.sha });
+          if (rf) files.push({ path: rf.path, text: rf.content, sha: rf.sha });
         }
         let localStore = getRepoStore(slug);
         localStore.replaceWithRemote(files);

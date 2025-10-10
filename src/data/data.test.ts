@@ -5,8 +5,7 @@ import { beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { RepoMetadata } from '../lib/backend';
 import type { RepoRoute } from '../ui/routing';
 import { LocalStore, markRepoLinked, recordAutoSyncRun, setLastActiveFileId } from '../storage/local';
-
-type RemoteFile = { path: string; text: string; sha: string };
+import type { RemoteFile } from '../sync/git-sync';
 
 type AuthMocks = {
   signInWithGitHubApp: ReturnType<typeof vi.fn>;
@@ -292,11 +291,15 @@ describe('useRepoData', () => {
   test('loads a read-only note that matches the route note path', async () => {
     const slug = 'acme/docs';
     setRepoMetadata(readOnlyMeta);
-    mockListRepoFiles.mockResolvedValue([{ path: 'guides/Intro.md', sha: 'sha-intro' }]);
+    mockListRepoFiles.mockResolvedValue([
+      { path: 'guides/Intro.md', sha: 'sha-intro', kind: 'markdown', mime: 'text/markdown' },
+    ]);
     mockPullNote.mockResolvedValue({
       path: 'guides/Intro.md',
-      text: '# Intro',
+      content: '# Intro',
       sha: 'sha-intro',
+      kind: 'markdown',
+      mime: 'text/markdown',
     });
 
     const recordRecent = vi.fn<RecordRecentFn>();
@@ -396,12 +399,16 @@ describe('useRepoData', () => {
 
     mockGetSessionToken.mockReturnValue(null);
     setRepoMetadata(readOnlyMeta);
-    mockListRepoFiles.mockResolvedValue([{ path: 'docs/alpha.md', sha: 'sha-alpha' }]);
+    mockListRepoFiles.mockResolvedValue([
+      { path: 'docs/alpha.md', sha: 'sha-alpha', kind: 'markdown', mime: 'text/markdown' },
+    ]);
     mockPullNote.mockImplementation(
       async (_config, path: string): Promise<RemoteFile> => ({
         path,
-        text: `# ${path}`,
+        content: `# ${path}`,
         sha: `sha-${path}`,
+        kind: 'markdown',
+        mime: 'text/markdown',
       })
     );
 
@@ -436,8 +443,10 @@ describe('useRepoData', () => {
     mockPullNote.mockClear();
     mockPullNote.mockResolvedValue({
       path: 'docs/alpha.md',
-      text: '# updated remote',
+      content: '# updated remote',
       sha: 'sha-updated',
+      kind: 'markdown',
+      mime: 'text/markdown',
     });
 
     act(() => {
@@ -455,14 +464,16 @@ describe('useRepoData', () => {
     mockGetSessionToken.mockReturnValue(null);
     setRepoMetadata(readOnlyMeta);
     mockListRepoFiles.mockResolvedValue([
-      { path: 'docs/alpha.md', sha: 'sha-alpha' },
-      { path: 'README.md', sha: 'sha-readme' },
+      { path: 'docs/alpha.md', sha: 'sha-alpha', kind: 'markdown', mime: 'text/markdown' },
+      { path: 'README.md', sha: 'sha-readme', kind: 'markdown', mime: 'text/markdown' },
     ]);
     mockPullNote.mockImplementation(
       async (_config, path: string): Promise<RemoteFile> => ({
         path,
-        text: `# ${path}`,
+        content: `# ${path}`,
         sha: `sha-${path}`,
+        kind: 'markdown',
+        mime: 'text/markdown',
       })
     );
 
@@ -490,14 +501,16 @@ describe('useRepoData', () => {
     });
     setRepoMetadata(writableMeta);
     mockListRepoFiles.mockResolvedValue([
-      { path: 'notes/first.md', sha: 'sha-first' },
-      { path: 'README.md', sha: 'sha-readme' },
+      { path: 'notes/first.md', sha: 'sha-first', kind: 'markdown', mime: 'text/markdown' },
+      { path: 'README.md', sha: 'sha-readme', kind: 'markdown', mime: 'text/markdown' },
     ]);
     mockPullNote.mockImplementation(
       async (_config, path: string): Promise<RemoteFile> => ({
         path,
-        text: `# ${path}`,
+        content: `# ${path}`,
         sha: `sha-${path}`,
+        kind: 'markdown',
+        mime: 'text/markdown',
       })
     );
 
@@ -818,15 +831,17 @@ describe('useRepoData', () => {
     setRepoMetadata(readOnlyMeta);
 
     mockListRepoFiles.mockResolvedValue([
-      { path: 'docs/alpha.md', sha: 'sha-alpha' },
-      { path: 'docs/beta.md', sha: 'sha-beta' },
+      { path: 'docs/alpha.md', sha: 'sha-alpha', kind: 'markdown', mime: 'text/markdown' },
+      { path: 'docs/beta.md', sha: 'sha-beta', kind: 'markdown', mime: 'text/markdown' },
     ]);
 
     mockPullNote.mockImplementation(
       async (_config, path: string): Promise<RemoteFile> => ({
         path,
-        text: `# ${path}`,
+        content: `# ${path}`,
         sha: `sha-${path}`,
+        kind: 'markdown',
+        mime: 'text/markdown',
       })
     );
 
