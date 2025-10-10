@@ -99,14 +99,6 @@ function deserializeFile(raw: string | null): RepoFileDoc | null {
     return null;
   }
 }
-/**
- * @deprecated refactor to use `deserializeFile()` instead
- */
-function deserializeNote(raw: string | null): NoteDoc | null {
-  let doc = deserializeFile(raw);
-  if (!doc) return null;
-  return isMarkdownDoc(doc) ? doc : null;
-}
 
 export { debugLog };
 
@@ -660,10 +652,7 @@ export class LocalStore {
   private touchIndex(id: string, patch: Partial<FileMeta>) {
     let idx = this.loadIndex();
     let i = idx.findIndex((n) => n.id === id);
-    if (i >= 0) {
-      let updated = normalizeMeta({ ...idx[i]!, ...patch }) ?? idx[i]!;
-      idx[i] = updated;
-    }
+    if (i >= 0) idx[i] = { ...idx[i]!, ...patch };
     localStorage.setItem(this.indexKey, serializeIndex(idx));
     this.index = idx;
     debugLog(this.slug, 'touchIndex', { id, patch });
@@ -884,7 +873,6 @@ export function findFileByPath(slug: string, path: string): { id: string; doc: R
   return null;
 }
 
-// TODO why does this return only NoteDocs?
 export function findByRemoteSha(
   slug: string,
   remoteSha: string | undefined
@@ -901,7 +889,6 @@ export function findByRemoteSha(
   return null;
 }
 
-// TODO why does this return only NoteDocs?
 export function findBySyncedHash(
   slug: string,
   syncedHash: string | undefined
@@ -1078,7 +1065,7 @@ function inferMimeFromPath(path: string): string {
 
 function normalizeMeta(raw: unknown): FileMeta | null {
   if (!raw || typeof raw !== 'object') return null;
-  let stored = raw as StoredFileMeta;
+  let stored = raw as Partial<StoredFileMeta>;
   if (typeof stored.id !== 'string') return null;
   if (typeof stored.path !== 'string') return null;
   let path = stored.path.replace(/^\/+/g, '').replace(/\/+$/g, '') || stored.path;

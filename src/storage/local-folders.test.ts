@@ -1,12 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { LocalStore, isMarkdownMeta } from './local';
-
-function listPaths(store: LocalStore) {
-  return store
-    .listFiles()
-    .map((file) => file.path)
-    .sort();
-}
+import { LocalStore } from './local';
 
 describe('LocalStore folder operations', () => {
   test('create/rename/move/delete folder updates notes and index', () => {
@@ -19,20 +12,25 @@ describe('LocalStore folder operations', () => {
 
     // Rename folder a -> x
     store.renameFolder('a', 'x');
-    expect(listPaths(store)).toEqual(['x/One.md', 'x/b/Two.md']);
+    let paths1 = store
+      .listFiles()
+      .map((n) => n.path)
+      .sort();
+    expect(paths1).toEqual(['x/One.md', 'x/b/Two.md']);
     expect(store.listFolders().sort()).toEqual(['x', 'x/b']);
 
     // Move folder x/b -> y
     store.moveFolder('x/b', 'y');
-    expect(listPaths(store)).toEqual(['x/One.md', 'y/Two.md']);
+    let paths2 = store
+      .listFiles()
+      .map((n) => n.path)
+      .sort();
+    expect(paths2).toEqual(['x/One.md', 'y/Two.md']);
     expect(store.listFolders().sort()).toEqual(['x', 'y']);
 
     // Delete folder x removes contained note
     store.deleteFolder('x');
-    let ids = store
-      .listFiles()
-      .filter(isMarkdownMeta)
-      .map((file) => file.id);
+    let ids = store.listFiles().map((file) => file.id);
     expect(ids).toEqual([id2]);
   });
 });
