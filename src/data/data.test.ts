@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { RepoMetadata } from '../lib/backend';
 import type { RepoRoute } from '../ui/routing';
-import { LocalStore, markRepoLinked, recordAutoSyncRun, setLastActiveNoteId } from '../storage/local';
+import { LocalStore, markRepoLinked, recordAutoSyncRun, setLastActiveFileId } from '../storage/local';
 
 type RemoteFile = { path: string; text: string; sha: string };
 
@@ -193,9 +193,9 @@ describe('useRepoData', () => {
 
     expect(result.current.state.canEdit).toBe(true);
     expect(result.current.state.canSync).toBe(false);
-    expect(result.current.state.notes).toHaveLength(1);
-    expect(result.current.state.notes[0]?.title).toBe('Welcome');
-    const welcomePath = result.current.state.notes[0]?.path;
+    expect(result.current.state.files).toHaveLength(1);
+    expect(result.current.state.files[0]?.title).toBe('Welcome');
+    const welcomePath = result.current.state.files[0]?.path;
     expect(welcomePath).toBeDefined();
 
     act(() => {
@@ -212,7 +212,7 @@ describe('useRepoData', () => {
     const store = new LocalStore('new');
     const alphaId = store.createFile('Alpha.md', 'alpha text');
     const welcome = store.listFiles().find((note) => note.title === 'Welcome');
-    const alpha = store.loadFile(alphaId);
+    const alpha = store.loadFileById(alphaId);
     if (!alpha) throw new Error('Failed to seed alpha note');
     if (!welcome) throw new Error('Missing welcome note');
 
@@ -244,7 +244,7 @@ describe('useRepoData', () => {
     const store = new LocalStore(slug);
     store.createFile('Alpha.md', '# Alpha');
     const targetId = store.createFile('Beta.md', '# Beta');
-    const target = store.loadFile(targetId);
+    const target = store.loadFileById(targetId);
     if (target === null) throw new Error('Failed to load newly created note');
     markRepoLinked(slug);
 
@@ -317,7 +317,7 @@ describe('useRepoData', () => {
     const uuidSpy = vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValueOnce(seededUuid);
     const seedStore = new LocalStore(slug);
     const noteId = seedStore.createFile('Seed.md', 'initial text');
-    const notePath = seedStore.loadFile(noteId)?.path;
+    const notePath = seedStore.loadFileById(noteId)?.path;
     if (!notePath) throw new Error('Missing note path after seeding');
     uuidSpy.mockRestore();
     markRepoLinked(slug);
@@ -348,7 +348,7 @@ describe('useRepoData', () => {
     });
 
     await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
-    await waitFor(() => expect(result.current.state.notes).toHaveLength(1));
+    await waitFor(() => expect(result.current.state.files).toHaveLength(1));
 
     expect(result.current.state.canEdit).toBe(true);
     expect(result.current.state.canSync).toBe(true);
@@ -367,7 +367,7 @@ describe('useRepoData', () => {
       result.current.actions.saveFile(notePath, 'updated text');
     });
 
-    const storedAfterEdit = new LocalStore(slug).loadFile(noteId);
+    const storedAfterEdit = new LocalStore(slug).loadFileById(noteId);
     expect(storedAfterEdit?.content).toBe('updated text');
 
     await act(async () => {
@@ -415,8 +415,8 @@ describe('useRepoData', () => {
     expect(result.current.state.canEdit).toBe(false);
     expect(result.current.state.canRead).toBe(true);
 
-    await waitFor(() => expect(result.current.state.notes.length).not.toBe(0));
-    expect(result.current.state.notes).toEqual([
+    await waitFor(() => expect(result.current.state.files.length).not.toBe(0));
+    expect(result.current.state.files).toEqual([
       expect.objectContaining({ id: 'docs/alpha.md', title: 'alpha' }),
     ]);
     expect(result.current.state.activePath).toBeUndefined();
@@ -472,7 +472,7 @@ describe('useRepoData', () => {
       recordRecent,
     });
 
-    await waitFor(() => expect(result.current.state.notes.length).toBe(2));
+    await waitFor(() => expect(result.current.state.files.length).toBe(2));
     expect(result.current.state.activePath).toBe('README.md');
     await waitFor(() => expect(result.current.state.doc?.path).toBe('README.md'));
     expect(mockPullNote).toHaveBeenCalledWith(expect.anything(), 'README.md');
@@ -512,8 +512,8 @@ describe('useRepoData', () => {
       recordRecent,
     });
 
-    await waitFor(() => expect(result.current.state.notes.length).toBe(2));
-    const readmeEntry = result.current.state.notes.find((note) => note.path === 'README.md');
+    await waitFor(() => expect(result.current.state.files.length).toBe(2));
+    const readmeEntry = result.current.state.files.find((file) => file.path === 'README.md');
     await waitFor(() => expect(result.current.state.activePath).toBe('README.md'));
     await waitFor(() => expect(result.current.state.doc?.path).toBe('README.md'));
     expect(readmeEntry?.id).toBe('00000000-0000-0000-0000-000000000222');
@@ -530,7 +530,7 @@ describe('useRepoData', () => {
     const uuidSpy = vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValueOnce(seededUuid);
     const seedStore = new LocalStore(slug);
     const noteId = seedStore.createFile('Seed.md', 'initial text');
-    setLastActiveNoteId(slug, noteId);
+    setLastActiveFileId(slug, noteId);
     markRepoLinked(slug);
     uuidSpy.mockRestore();
 
@@ -587,7 +587,7 @@ describe('useRepoData', () => {
       .mockReturnValueOnce('00000000-0000-0000-0000-000000000051');
     const store = new LocalStore(slug);
     const noteId = store.createFile('Seed.md', 'initial text');
-    const notePath = store.loadFile(noteId)?.path;
+    const notePath = store.loadFileById(noteId)?.path;
     if (!notePath) throw new Error('Missing note path after seeding');
     uuidSpy.mockRestore();
     markRepoLinked(slug);
@@ -661,13 +661,13 @@ describe('useRepoData', () => {
 
     const storeA = new LocalStore(slugA);
     const noteA = storeA.createFile('A.md', 'text a');
-    const noteAPath = storeA.loadFile(noteA)?.path;
+    const noteAPath = storeA.loadFileById(noteA)?.path;
     if (!noteAPath) throw new Error('Missing path for note A');
     markRepoLinked(slugA);
 
     const storeB = new LocalStore(slugB);
     const noteB = storeB.createFile('B.md', 'text b');
-    const noteBPath = storeB.loadFile(noteB)?.path;
+    const noteBPath = storeB.loadFileById(noteB)?.path;
     if (!noteBPath) throw new Error('Missing path for note B');
     markRepoLinked(slugB);
 
@@ -746,7 +746,7 @@ describe('useRepoData', () => {
 
     const store = new LocalStore(slug);
     const noteId = store.createFile('Secret.md', 'classified');
-    const notePath = store.loadFile(noteId)?.path;
+    const notePath = store.loadFileById(noteId)?.path;
     if (!notePath) throw new Error('Missing path for private repo note');
     markRepoLinked(slug);
 
@@ -847,7 +847,7 @@ describe('useRepoData', () => {
     });
 
     await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
-    await waitFor(() => expect(result.current.state.notes.length).not.toBe(0));
+    await waitFor(() => expect(result.current.state.files.length).not.toBe(0));
     expect(result.current.state.activePath).toBeUndefined();
     act(() => {
       result.current.actions.selectFile('docs/alpha.md');
@@ -869,7 +869,7 @@ describe('useRepoData', () => {
 
     const store = new LocalStore(slug);
     const noteId = store.createFile('Seed.md', 'content');
-    const notePath = store.loadFile(noteId)?.path;
+    const notePath = store.loadFileById(noteId)?.path;
     if (!notePath) throw new Error('Missing path for sign-out test');
     markRepoLinked(slug);
 

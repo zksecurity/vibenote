@@ -14,8 +14,8 @@ import {
   isMarkdownMeta,
   isMarkdownDoc,
   clearAllLocalData,
-  getLastActiveNoteId,
-  setLastActiveNoteId,
+  getLastActiveFileId,
+  setLastActiveFileId,
   hashText,
   getRepoStore,
 } from './storage/local';
@@ -78,7 +78,6 @@ type RepoDataState = {
   doc: RepoFileDoc | undefined;
   activePath: string | undefined;
   files: FileMeta[];
-  notes: RepoNoteListItem[];
   folders: string[];
 
   // sync state
@@ -188,69 +187,53 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     defaultBranch,
   });
 
-  let files = useMemo<FileMeta[]>(() => {
-    if (isReadOnly) {
-      return readOnlyNotes.map((note) => ({
-        id: note.id,
-        path: note.path,
-        title: note.title,
-        dir: note.dir,
-        updatedAt: 0,
-        kind: 'markdown',
-        mime: 'text/markdown',
-      }));
-    }
-    return localFiles;
-  }, [isReadOnly, readOnlyNotes, localFiles]);
+  // TODO: readonly has to support non-markdown files too
+  let readOnlyFiles: FileMeta[] = readOnlyNotes.map((note) => ({
+    id: note.id,
+    path: note.path,
+    title: note.title,
+    dir: note.dir,
+    updatedAt: 0,
+    kind: 'markdown',
+    mime: 'text/markdown',
+  }));
 
-  let localNoteMetas = useMemo<NoteMeta[]>(() => {
-    return localFiles.filter(isMarkdownMeta) as NoteMeta[];
-  }, [localFiles]);
-
-  // Derive the notes/folders from whichever source is powering the tree.
-  let notes: RepoNoteListItem[] = isReadOnly ? readOnlyNotes : localNoteMetas;
+  // Derive the files/folders from whichever source is powering the tree.
+  let files = isReadOnly ? readOnlyFiles : localFiles;
   let folders = isReadOnly ? readOnlyFolders : localFolders;
 
   // determine the active note
-  let activeNote = useMemo(() => {
+  let activeFile = useMemo(() => {
     // if specified in the route, that takes precedence
-    if (desiredPath !== undefined) return findByPath(notes, desiredPath);
+    if (desiredPath !== undefined) return findByPath(files, desiredPath);
     if (!canEdit) return undefined;
-    // otherwise try to restore last active note (if any)
-    let storedId = getLastActiveNoteId(slug);
+    // otherwise try to restore last active file (if any)
+    let storedId = getLastActiveFileId(slug);
     if (storedId !== undefined) {
-      return notes.find((note) => note.id === storedId);
+      return files.find((file) => file.id === storedId);
     }
-    // otherwise we don't show any note, that's fine
+    // otherwise we don't show any file, that's fine
     return undefined;
-  }, [notes, desiredPath]);
+  }, [canEdit, files, desiredPath]);
 
-  let activeId = activeNote?.id;
-
-  let resolvedPath = desiredPath ?? activeNote?.path;
-
-  let activeFileMeta = useMemo(() => {
-    if (resolvedPath === undefined) return undefined;
-    return files.find((file) => normalizePath(file.path) === normalizePath(resolvedPath));
-  }, [files, resolvedPath]);
+  let activeId = activeFile?.id;
 
   let localDoc = useMemo<RepoFileDoc | undefined>(() => {
     if (!canEdit) return undefined;
-    if (!activeFileMeta) return undefined;
-    let store = getRepoStore(slug);
-    return store.loadFile(activeFileMeta.id) ?? undefined;
-  }, [canEdit, activeFileMeta, slug, files]);
+    if (!activeId) return undefined;
+    return getRepoStore(slug).loadFileById(activeId) ?? undefined;
+  }, [canEdit, activeId]);
 
   let doc: RepoFileDoc | undefined = canEdit ? localDoc : readOnlyDoc;
 
-  let activePath = doc?.path ?? resolvedPath;
+  let activePath = doc?.path ?? activeFile?.path ?? desiredPath;
 
   // EFFECTS
   // please avoid adding more effects here, keep logic clean/separated
 
-  // Persist last active note id so writable repos can restore it later.
+  // Persist last active file id so writable repos can restore it later.
   useEffect(() => {
-    if (canEdit) setLastActiveNoteId(slug, activeId ?? null);
+    if (canEdit) setLastActiveFileId(slug, activeId ?? null);
   }, [canEdit, activeId]);
 
   // When the loaded doc changes path (e.g., rename or sync or restoring last active), push the route forward.
@@ -297,7 +280,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
         let synced = localStore.listFiles().filter(isMarkdownMeta);
         // if we are not on a specific path yet and there's no stored active id, show README.md
         if (desiredPath === undefined) {
-          let storedId = getLastActiveNoteId(slug);
+          let storedId = getLastActiveFileId(slug);
           let storedPath =
             storedId !== undefined ? synced.find((note) => note.id === storedId)?.path : undefined;
           let readmePath = synced.find((note) => note.path.toLowerCase() === 'readme.md')?.path;
@@ -322,13 +305,6 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   const ensureActivePath = (nextPath: string | undefined) => {
     if (pathsEqual(route.notePath, nextPath)) return;
     setActivePath(nextPath);
-  };
-
-  const resolveEditableFile = (path: string | undefined): FileMeta | undefined => {
-    if (path === undefined) return undefined;
-    let normalized = normalizePath(path);
-    let list = getRepoStore(slug).listFiles();
-    return list.find((file) => normalizePath(file.path) === normalized);
   };
 
   // "Connect GitHub" button in the header
@@ -415,9 +391,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
 
   const saveFile = (path: string, content: string) => {
     if (!canEdit) return;
-    let meta = resolveEditableFile(path);
-    if (!meta) return;
-    getRepoStore(slug).saveFile(meta.id, content);
+    getRepoStore(slug).saveFile(path, content);
     scheduleAutoSync();
   };
 
@@ -429,7 +403,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     let trimmedDir = dir.trim();
     let basePath = trimmedDir === '' ? `${name}.md` : `${trimmedDir}/${name}.md`;
     let id = store.createFile(basePath, '');
-    let created = store.loadFile(id);
+    let created = store.loadFileById(id);
     scheduleAutoSync();
     if (created) {
       ensureActivePath(created.path);
@@ -524,7 +498,6 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     doc,
     activePath,
     files,
-    notes,
     folders,
 
     autosync,
@@ -770,7 +743,7 @@ function useSync(params: { slug: string; canSync: boolean; defaultBranch?: strin
         let pending = localStore
           .listFiles()
           .filter(isMarkdownMeta)
-          .map((meta) => localStore.loadFile(meta.id))
+          .map((meta) => localStore.loadFileById(meta.id))
           .filter((note): note is NoteDoc => note !== null && isMarkdownDoc(note))
           .filter((note) => note.lastSyncedHash !== hashText(note.content))
           .map((note) => ({

@@ -1,4 +1,5 @@
 // Local storage persistence for repo files (markdown notes plus binary assets).
+import { normalizePath } from '../lib/util';
 import { logError } from '../lib/logging';
 
 export type FileKind = 'markdown' | 'binary';
@@ -293,7 +294,7 @@ export class LocalStore {
     return snapshot.files.slice();
   }
 
-  loadFile(id: string): RepoFileDoc | null {
+  loadFileById(id: string): RepoFileDoc | null {
     let raw = localStorage.getItem(this.noteKey(id));
     return deserializeFile(raw);
   }
@@ -318,8 +319,14 @@ export class LocalStore {
     return doc;
   }
 
-  saveFile(id: string, content: string) {
-    let doc = this.loadFile(id);
+  saveFile(path: string, content: string) {
+    let meta = this.findMetaByPath(path);
+    if (meta === undefined) return;
+    this.saveFileById(meta.id, content);
+  }
+
+  private saveFileById(id: string, content: string) {
+    let doc = this.loadFileById(id);
     if (!doc) return;
     let updatedAt = Date.now();
     let next: RepoFileDoc = { ...doc, content, updatedAt };
@@ -331,7 +338,7 @@ export class LocalStore {
 
   createFile(path: string, content: string, params: { kind?: FileKind; mime?: string } = {}): string {
     let id = crypto.randomUUID();
-    path = normalizeFilePath(path);
+    path = normalizePath(path);
     let kind = params.kind ?? inferKindFromPath(path);
     let updatedAt = Date.now();
     let dir = normalizeDir(extractDir(path));
@@ -353,13 +360,13 @@ export class LocalStore {
    */
   renameFile(path: string, newName: string): string | undefined {
     let meta = this.findMetaByPath(path);
-    if (!meta) return undefined;
+    if (meta === undefined) return undefined;
 
     // get previous extension from path, and determine new path
     let ext = extractExtensionWithDot(basename(meta.path));
     let newFileName = newName + ext;
 
-    let doc = this.loadFile(meta.id);
+    let doc = this.loadFileById(meta.id);
     if (!doc) return undefined;
     let safeName = ensureValidFileName(newFileName);
     let normDir = normalizeDir(doc.dir);
@@ -404,13 +411,13 @@ export class LocalStore {
 
   deleteFile(path: string): boolean {
     let meta = this.findMetaByPath(path);
-    if (!meta) return false;
+    if (meta === undefined) return false;
     this.deleteFileById(meta.id);
     return true;
   }
 
   deleteFileById(id: string) {
-    let doc = this.loadFile(id);
+    let doc = this.loadFileById(id);
     let idx = this.loadIndex().filter((n) => n.id !== id);
     localStorage.setItem(this.indexKey, serializeIndex(idx));
     if (doc) {
@@ -425,21 +432,6 @@ export class LocalStore {
     rebuildFolderIndex(this.slug);
     debugLog(this.slug, 'deleteFileById', { id, path: doc?.path });
     emitRepoChange(this.slug);
-  }
-
-  resetToWelcome(): string {
-    let toRemove: string[] = [];
-    let prefix = `${this.notePrefix}`;
-    for (let i = 0; i < localStorage.length; i++) {
-      let key = localStorage.key(i);
-      if (!key) continue;
-      if (key === this.indexKey || key.startsWith(prefix)) toRemove.push(key);
-    }
-    for (let key of toRemove) localStorage.removeItem(key);
-    let id = this.createFile('Welcome.md', WELCOME_NOTE);
-    this.index = this.loadIndex();
-    emitRepoChange(this.slug);
-    return id;
   }
 
   replaceWithRemote(
@@ -598,7 +590,7 @@ export class LocalStore {
   }
 
   moveFileToDir(id: string, dir: string) {
-    let doc = this.loadFile(id);
+    let doc = this.loadFileById(id);
     if (!doc) return;
     let normDir = normalizeDir(dir);
     let fileName = basename(doc.path);
@@ -609,13 +601,10 @@ export class LocalStore {
     this.applyRename(doc, { title: nextTitle, dir: normDir, path: nextPath });
   }
 
-  private findMetaByPath(path: string): FileMeta | null {
-    let normalized = normalizeFilePath(path);
+  findMetaByPath(path: string): FileMeta | undefined {
+    let normalized = normalizePath(path);
     let idx = this.loadIndex();
-    for (let meta of idx) {
-      if (normalizeFilePath(meta.path) === normalized) return meta;
-    }
-    return null;
+    return idx.find((meta) => normalizePath(meta.path) === normalized);
   }
 
   private loadIndex(): FileMeta[] {
@@ -663,10 +652,6 @@ function normalizeDir(dir: string): string {
   d = d.replace(/(^\/+|\/+?$)/g, '');
   if (d === '.' || d === '..') d = '';
   return d;
-}
-
-function normalizeFilePath(path: string): string {
-  return path.replace(/^\/+/, '');
 }
 
 function ensureValidFolderName(name: string): string {
@@ -913,7 +898,7 @@ export function findBySyncedHash(
 }
 
 export function moveNotePath(slug: string, id: string, toPath: string) {
-  let normalizedPath = normalizeFilePath(toPath);
+  let normalizedPath = normalizePath(toPath);
   if (!normalizedPath.toLowerCase().endsWith('.md')) return;
   mutateFileDoc(
     slug,
@@ -933,7 +918,7 @@ export function moveNotePath(slug: string, id: string, toPath: string) {
 }
 
 export function moveFilePath(slug: string, id: string, toPath: string) {
-  let normalizedPath = normalizeFilePath(toPath);
+  let normalizedPath = normalizePath(toPath);
   mutateFileDoc(
     slug,
     id,
@@ -1301,12 +1286,12 @@ export function recordAutoSyncRun(slug: string, at: number = Date.now()) {
   setRepoPrefs(slug, { lastAutoSyncAt: at });
 }
 
-export function getLastActiveNoteId(slug: string): string | undefined {
+export function getLastActiveFileId(slug: string): string | undefined {
   let prefs = getRepoPrefs(slug);
   return typeof prefs.lastActiveNoteId === 'string' ? prefs.lastActiveNoteId : undefined;
 }
 
-export function setLastActiveNoteId(slug: string, id: string | null) {
+export function setLastActiveFileId(slug: string, id: string | null) {
   setRepoPrefs(slug, { lastActiveNoteId: id ?? undefined });
 }
 

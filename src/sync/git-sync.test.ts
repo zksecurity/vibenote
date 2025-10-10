@@ -46,16 +46,16 @@ describe('syncBidirectional', () => {
     await syncBidirectional(store, 'user/repo');
     expectParity(store, remote);
     expect(listTombstones(store.slug)).toHaveLength(0);
-    const firstDoc = store.loadFile(firstId);
-    const secondDoc = store.loadFile(secondId);
+    const firstDoc = store.loadFileById(firstId);
+    const secondDoc = store.loadFileById(secondId);
     expect(firstDoc?.path).toBe('First.md');
     expect(secondDoc?.path).toBe('Second.md');
   });
 
   test('applies local deletions to remote without resurrection', async () => {
-    const id = store.createFile('Ghost.md', 'haunt me');
+    store.createFile('Ghost.md', 'haunt me');
     await syncBidirectional(store, 'user/repo');
-    store.deleteFileById(id);
+    store.deleteFile('Ghost.md');
     await syncBidirectional(store, 'user/repo');
     expectParity(store, remote);
     expect(store.listFiles()).toHaveLength(0);
@@ -122,7 +122,7 @@ describe('syncBidirectional', () => {
     expectParity(store, remote);
     const notes = store.listFiles();
     expect(notes).toHaveLength(1);
-    const doc = store.loadFile(notes[0]?.id ?? '');
+    const doc = store.loadFileById(notes[0]?.id ?? '');
     expect(doc?.content).toBe('# remote');
   });
 
@@ -148,7 +148,7 @@ describe('syncBidirectional', () => {
     const imageMeta = files.find((f) => f.path === 'image.png');
     expect(imageMeta).toBeDefined();
     if (imageMeta) {
-      const imageDoc = store.loadFile(imageMeta.id);
+      const imageDoc = store.loadFileById(imageMeta.id);
       expect(imageDoc?.content).toBe(Buffer.from('asset', 'utf8').toString('base64'));
     }
     expectParity(store, remote);
@@ -159,7 +159,7 @@ describe('syncBidirectional', () => {
     await syncBidirectional(store, 'user/repo');
     const notes = store.listFiles();
     expect(notes).toHaveLength(1);
-    const doc = store.loadFile(notes[0]?.id ?? '');
+    const doc = store.loadFileById(notes[0]?.id ?? '');
     expect(doc?.path).toBe('nested/Nested.md');
     expect(doc?.dir).toBe('nested');
     expect(doc?.content).toBe('# nested');
@@ -172,7 +172,7 @@ describe('syncBidirectional', () => {
     const asset = files.find((f) => f.path === 'assets/logo.png');
     expect(asset).toBeDefined();
     if (!asset) return;
-    const doc = store.loadFile(asset.id);
+    const doc = store.loadFileById(asset.id);
     expect(doc?.content).toBe(Buffer.from('image-data', 'utf8').toString('base64'));
     expect(doc?.kind ?? 'binary').toBe('binary');
     expectParity(store, remote);
@@ -182,7 +182,7 @@ describe('syncBidirectional', () => {
     const payload = Buffer.from('asset', 'utf8').toString('base64');
     const id = store.createFile('logo.png', payload);
     await syncBidirectional(store, 'user/repo');
-    const before = store.loadFile(id);
+    const before = store.loadFileById(id);
     expect(before?.lastSyncedHash).toBeDefined();
     remote.deleteDirect('logo.png');
     remote.setFile('assets/logo.png', payload);
@@ -257,7 +257,7 @@ async function getRemoteHeadSha(remote: MockRemoteRepo, branch = 'main'): Promis
 function expectParity(store: LocalStore, remote: MockRemoteRepo) {
   const localMap = new Map<string, string>();
   for (const meta of store.listFiles()) {
-    const doc = store.loadFile(meta.id);
+    const doc = store.loadFileById(meta.id);
     if (!doc) continue;
     if (doc.kind === 'binary') {
       const decoded = Buffer.from(doc.content, 'base64').toString('utf8');

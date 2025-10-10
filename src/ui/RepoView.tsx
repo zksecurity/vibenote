@@ -65,8 +65,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
 
     doc,
     activePath,
-    files: repoFiles,
-    notes,
+    files,
     folders,
 
     autosync,
@@ -251,7 +250,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
               <div className="sidebar-title">
                 <div className="sidebar-title-main">
                   <span>Files</span>
-                  <span className="note-count">{repoFiles.length}</span>
+                  <span className="note-count">{files.length}</span>
                 </div>
                 <button
                   className="btn icon only-mobile"
@@ -263,7 +262,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
               </div>
             </div>
             <FileSidebar
-              files={repoFiles}
+              files={files}
               folders={folders}
               canEdit={canEdit}
               slug={slug}

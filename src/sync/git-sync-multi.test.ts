@@ -162,7 +162,7 @@ describe('syncBidirectional multi-device', () => {
   test('renaming on device one with edits on device two does not keep the old path', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
-    let noteId = storeOne.createFile('Draft.md', 'seed content');
+    storeOne.createFile('Draft.md', 'seed content');
     await syncBidirectional(storeOne, REPO_SLUG);
 
     let deviceTwo = createDevice('device-two', deviceOne.storage);
@@ -173,7 +173,7 @@ describe('syncBidirectional multi-device', () => {
     expect(remotePaths(remote)).toEqual(['Draft Renamed.md']);
 
     let storeTwo = useDevice(deviceTwo);
-    storeTwo.saveFile(noteId, 'local edits from device two');
+    storeTwo.saveFile('Draft.md', 'local edits from device two');
     await syncBidirectional(storeTwo, REPO_SLUG);
 
     expect(filePaths(storeTwo)).toEqual(['Draft Renamed.md']);
@@ -190,7 +190,7 @@ describe('syncBidirectional multi-device', () => {
     let deviceTwo = createDevice('device-two', deviceOne.storage);
 
     let storeTwo = useDevice(deviceTwo);
-    storeTwo.saveFile(cloneId, 'clone offline edits');
+    storeTwo.saveFile('Clone.md', 'clone offline edits');
 
     storeOne = useDevice(deviceOne);
     storeOne.renameFile('Draft.md', 'Draft Renamed');
@@ -199,12 +199,12 @@ describe('syncBidirectional multi-device', () => {
     storeTwo = useDevice(deviceTwo);
     await syncBidirectional(storeTwo, REPO_SLUG);
 
-    let renamed = storeTwo.loadFile(draftId);
+    let renamed = storeTwo.loadFileById(draftId);
     expect(renamed?.path).toBe('Draft Renamed.md');
     expect(renamed?.content).toBe('shared body');
     expect(renamed?.id).toBe(draftId);
 
-    let clone = storeTwo.loadFile(cloneId);
+    let clone = storeTwo.loadFileById(cloneId);
     expect(clone?.path).toBe('Clone.md');
     expect(clone?.content).toBe('clone offline edits');
     expect(clone?.id).toBe(cloneId);
@@ -213,12 +213,12 @@ describe('syncBidirectional multi-device', () => {
   test('device two removes a note deleted on device one', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
-    let noteId = storeOne.createFile('Shared.md', 'shared text');
+    storeOne.createFile('Shared.md', 'shared text');
     await syncBidirectional(storeOne, REPO_SLUG);
     let deviceTwo = createDevice('device-two', deviceOne.storage);
 
     storeOne = useDevice(deviceOne);
-    storeOne.deleteFileById(noteId);
+    storeOne.deleteFile('Shared.md');
     await syncBidirectional(storeOne, REPO_SLUG);
     expect(remotePaths(remote)).toEqual([]);
 
@@ -289,15 +289,15 @@ describe('syncBidirectional multi-device', () => {
   test('device two with local edits resurrects a note removed on device one', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
-    let noteId = storeOne.createFile('Keep.md', 'shared text');
+    storeOne.createFile('Keep.md', 'shared text');
     await syncBidirectional(storeOne, REPO_SLUG);
     let deviceTwo = createDevice('device-two', deviceOne.storage);
 
     let storeTwo = useDevice(deviceTwo);
-    storeTwo.saveFile(noteId, 'offline edits from device two');
+    storeTwo.saveFile('Keep.md', 'offline edits from device two');
 
     storeOne = useDevice(deviceOne);
-    storeOne.deleteFileById(noteId);
+    storeOne.deleteFile('Keep.md');
     await syncBidirectional(storeOne, REPO_SLUG);
     expect(remotePaths(remote)).toEqual([]);
 
@@ -342,10 +342,10 @@ describe('syncBidirectional multi-device', () => {
     await syncBidirectional(storeOne, REPO_SLUG);
 
     let storeTwo = useDevice(deviceTwo);
-    storeTwo.saveFile(noteId, 'offline edit after rename');
+    storeTwo.saveFile('docs/Doc.md', 'offline edit after rename');
     await syncBidirectional(storeTwo, REPO_SLUG);
 
-    let updated = storeTwo.loadFile(noteId);
+    let updated = storeTwo.loadFileById(noteId);
     expect(updated?.path).toBe('guides/Doc.md');
     expect(updated?.content).toBe('offline edit after rename');
     expect(remote.snapshot().get('guides/Doc.md')).toBe('offline edit after rename');

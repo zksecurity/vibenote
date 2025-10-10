@@ -19,13 +19,13 @@ describe('LocalStore cross-tab resilience', () => {
     ).toEqual([id1, id2].sort());
 
     // Tab A deletes note A
-    a.deleteFileById(id1);
+    a.deleteFile('A.md');
     expect(a.listFiles().some((n) => n.id === id1)).toBe(false);
 
     // Tab B performs edits to the remaining note; should NOT re-add deleted id1
-    const docB = b.loadFile(id2);
+    const docB = b.loadFileById(id2);
     expect(docB).not.toBeNull();
-    if (docB) b.saveFile(docB.id, docB.content + ' updated');
+    if (docB) b.saveFile(docB.path, docB.content + ' updated');
 
     // LocalStorage should still be without id1
     const c = new LocalStore(slug);
