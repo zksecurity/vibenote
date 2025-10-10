@@ -1,5 +1,5 @@
 // Data-layer hook that orchestrates repo auth, storage, and sync state for RepoView.
-import { useMemo, useState, useEffect, useRef, useSyncExternalStore } from 'react';
+import { useMemo, useState, useEffect, useRef, useSyncExternalStore, useCallback } from 'react';
 import {
   isRepoLinked,
   markRepoLinked,
@@ -26,7 +26,11 @@ import {
 import {
   getRepoMetadata as apiGetRepoMetadata,
   getInstallUrl as apiGetInstallUrl,
+  getShareLinkForNote as apiGetShareLinkForNote,
+  createShareLink as apiCreateShareLink,
+  revokeShareLink as apiRevokeShareLink,
   type RepoMetadata,
+  type ShareLink,
 } from './lib/backend';
 import {
   buildRemoteConfig,
@@ -49,6 +53,7 @@ export type {
   RepoDataActions,
   RepoNoteListItem,
   ReadOnlyNote,
+  ShareState,
 };
 
 const AUTO_SYNC_MIN_INTERVAL_MS = 60_000;
@@ -56,6 +61,12 @@ const AUTO_SYNC_DEBOUNCE_MS = 10_000;
 const AUTO_SYNC_POLL_INTERVAL_MS = 180_000;
 
 type RepoNoteListItem = NoteMeta | ReadOnlyNote;
+
+type ShareState = {
+  status: 'idle' | 'loading' | 'ready' | 'error';
+  link?: ShareLink;
+  error?: string;
+};
 
 type RepoDataState = {
   // session state
@@ -81,6 +92,7 @@ type RepoDataState = {
   syncing: boolean;
 
   // general info
+  share: ShareState;
   statusMessage: string | undefined;
 };
 
@@ -103,6 +115,9 @@ type RepoDataActions = {
   renameFolder: (dir: string, newName: string) => void;
   deleteFolder: (dir: string) => void;
   updateNoteText: (path: string, text: string) => void;
+  createShareLink: () => Promise<void>;
+  refreshShareLink: () => Promise<void>;
+  revokeShareLink: () => Promise<void>;
 };
 
 type RepoDataInputs = {
@@ -142,6 +157,9 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   // TODO make this disappear after a timeout
   let [statusMessage, setSyncMessage] = useState<string | undefined>(undefined);
 
+  // Track share metadata for the active note.
+  let [shareState, setShareState] = useState<ShareState>({ status: 'idle' });
+
   // Track whether this repo slug has already been linked to GitHub sync.
   let [linked, setLinked] = useState(() => isRepoLinked(slug));
 
@@ -154,6 +172,8 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   // DERIVED STATE (and hooks that depend on it)
 
   let { defaultBranch, manageUrl } = repoAccess;
+  let repoOwner = route.kind === 'repo' ? route.owner : undefined;
+  let repoName = route.kind === 'repo' ? route.repo : undefined;
   let accessStatusReady =
     repoAccess.status === 'ready' || repoAccess.status === 'rate-limited' || repoAccess.status === 'error';
 
@@ -242,6 +262,33 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   }, [slug, route, linked, recordRecent, repoAccess.level]);
 
   let initialPullRef = useRef({ done: false });
+  let shareRequestRef = useRef<{ owner: string; repo: string; path: string } | null>(null);
+
+  const loadShareForTarget = useCallback(
+    async (target: { owner: string; repo: string; path: string }) => {
+      shareRequestRef.current = target;
+      setShareState((prev) => {
+        if (prev.status === 'ready' && prev.link && shareMatchesTarget(prev.link, target)) {
+          return prev;
+        }
+        return { status: 'loading' };
+      });
+      try {
+        const link = await apiGetShareLinkForNote(target.owner, target.repo, target.path);
+        if (shareRequestRef.current && !shareTargetEquals(shareRequestRef.current, target)) return;
+        if (link) {
+          setShareState({ status: 'ready', link });
+        } else {
+          setShareState({ status: 'ready' });
+        }
+      } catch (error) {
+        if (shareRequestRef.current && !shareTargetEquals(shareRequestRef.current, target)) return;
+        logError(error);
+        setShareState({ status: 'error', error: formatError(error) });
+      }
+    },
+    []
+  );
 
   // Kick off the one-time remote import when visiting a writable repo we have not linked yet.
   useEffect(() => {
@@ -283,6 +330,20 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       }
     })();
   }, [route, repoAccess.level, linked, slug, canEdit, defaultBranch, desiredPath]);
+
+  useEffect(() => {
+    if (!repoOwner || !repoName || !hasSession) {
+      shareRequestRef.current = null;
+      setShareState((prev) => (prev.status === 'idle' ? prev : { status: 'idle' }));
+      return;
+    }
+    if (activePath === undefined) {
+      shareRequestRef.current = null;
+      setShareState((prev) => (prev.status === 'idle' ? prev : { status: 'idle' }));
+      return;
+    }
+    void loadShareForTarget({ owner: repoOwner, repo: repoName, path: activePath });
+  }, [repoOwner, repoName, activePath, hasSession, loadShareForTarget]);
 
   // CLICK HANDLERS
 
@@ -467,6 +528,65 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     scheduleAutoSync();
   };
 
+  const createShare = async () => {
+    if (!repoOwner || !repoName) return;
+    if (!hasSession) {
+      setShareState({ status: 'error', error: 'Sign in with GitHub to share notes.' });
+      return;
+    }
+    if (activePath === undefined) {
+      setShareState({ status: 'error', error: 'Select a note to share.' });
+      return;
+    }
+    const target = { owner: repoOwner, repo: repoName, path: activePath };
+    shareRequestRef.current = target;
+    setShareState({ status: 'loading' });
+    try {
+      const branch = defaultBranch ?? 'main';
+      const share = await apiCreateShareLink({
+        owner: target.owner,
+        repo: target.repo,
+        path: target.path,
+        branch,
+      });
+      if (!shareMatchesTarget(share, target)) {
+        return;
+      }
+      setShareState({ status: 'ready', link: share });
+    } catch (error) {
+      logError(error);
+      setShareState({ status: 'error', error: formatError(error) });
+      throw error;
+    }
+  };
+
+  const revokeShare = async () => {
+    const existing = shareState.link;
+    if (!existing) return;
+    setShareState({ status: 'loading' });
+    try {
+      const target = { owner: existing.owner, repo: existing.repo, path: existing.path };
+      const updated = await apiRevokeShareLink(existing.id);
+      if (updated.status === 'active' && shareMatchesTarget(updated, target)) {
+        setShareState({ status: 'ready', link: updated });
+      } else {
+        setShareState({ status: 'ready' });
+      }
+    } catch (error) {
+      logError(error);
+      setShareState({ status: 'error', error: formatError(error) });
+      throw error;
+    }
+  };
+
+  const refreshShare = async () => {
+    if (!repoOwner || !repoName || !hasSession || activePath === undefined) {
+      setShareState({ status: 'idle' });
+      return;
+    }
+    await loadShareForTarget({ owner: repoOwner, repo: repoName, path: activePath });
+  };
+
   let state: RepoDataState = {
     hasSession,
     user,
@@ -485,6 +605,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
 
     autosync,
     syncing,
+    share: shareState,
     statusMessage,
   };
 
@@ -503,6 +624,9 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     renameFolder,
     deleteFolder,
     updateNoteText,
+    createShareLink: createShare,
+    refreshShareLink: refreshShare,
+    revokeShareLink: revokeShare,
   };
 
   return { state, actions };
@@ -776,6 +900,30 @@ function isPathInsideDir(path: string, dir: string): boolean {
   let normalizedDir = normalizePath(dir);
   if (normalizedDir === '') return true;
   return normalizedPath.startsWith(normalizedDir + '/');
+}
+
+function shareMatchesTarget(link: ShareLink, target: { owner: string; repo: string; path: string }): boolean {
+  return (
+    link.owner.toLowerCase() === target.owner.toLowerCase() &&
+    link.repo.toLowerCase() === target.repo.toLowerCase() &&
+    normalizePath(link.path) === normalizePath(target.path)
+  );
+}
+
+function shareTargetEquals(
+  a: { owner: string; repo: string; path: string },
+  b: { owner: string; repo: string; path: string }
+): boolean {
+  return (
+    a.owner.toLowerCase() === b.owner.toLowerCase() &&
+    a.repo.toLowerCase() === b.repo.toLowerCase() &&
+    normalizePath(a.path) === normalizePath(b.path)
+  );
+}
+
+function formatError(error: unknown): string {
+  if (error instanceof Error && typeof error.message === 'string') return error.message;
+  return String(error);
 }
 
 function findByPath<T extends { id: string; path: string }>(notes: T[], targetPath: string): T | undefined {

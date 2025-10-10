@@ -165,7 +165,17 @@ The system design should leave room for these extensions — especially snapshot
 - Backend:
 
   - Share link creation and resolution endpoints.
+    - `POST /v1/shares { owner, repo, path, branch? }`
+    - `GET /v1/shares?owner=...&repo=...&path=...`
+    - `DELETE /v1/shares/:id`
+  - Environment:
+    - `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` (used to mint installation tokens).
+    - `SHARE_STORE_FILE` (JSON persistence for share records).
+    - `PUBLIC_VIEWER_BASE_URL` (sets the domain used in generated links).
   - Proxy for note and asset fetching from GitHub.
+    - `GET /v1/share-links/:id`
+    - `GET /v1/share-links/:id/content`
+    - `GET /v1/share-links/:id/assets/*`
   - Basic admin/revocation endpoint.
 
 - Public Viewer SPA:
@@ -173,6 +183,8 @@ The system design should leave room for these extensions — especially snapshot
   - New route for shared links.
   - Fetch + render flow using existing components.
   - Tombstone state for invalid shares.
+  - The standalone build (`share.html`) reads `VIBENOTE_API_BASE`/`VITE_VIBENOTE_API_BASE` to contact the API.
+  - The viewer rewrites relative asset links through `/v1/share-links/:id/assets/*` and renders Markdown with the same sanitisation rules as the main app.
 
 - Main SPA:
 

@@ -1,6 +1,8 @@
+import crypto from 'node:crypto';
+import path from 'node:path';
 import express from 'express';
 import cors from 'cors';
-import { getEnv } from './env.ts';
+import { getEnv, type Env } from './env.ts';
 import {
   createAuthStartRedirect,
   handleAuthCallback,
@@ -11,7 +13,9 @@ import {
   verifyBearerSession,
   type SessionClaims,
 } from './api.ts';
-import { createSessionStore } from './session-store.ts';
+import { createSessionStore, type SessionStoreInstance } from './session-store.ts';
+import { createShareStore, type ShareRecord } from './share-store.ts';
+import { getRepoInstallationId, installationRequest } from './github-app.ts';
 
 declare module 'express-serve-static-core' {
   interface Request {
@@ -25,6 +29,10 @@ const sessionStore = createSessionStore({
   encryptionKey: env.SESSION_ENCRYPTION_KEY,
 });
 await sessionStore.init();
+const shareStore = createShareStore({
+  filePath: env.SHARE_STORE_FILE,
+});
+await shareStore.init();
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -135,6 +143,219 @@ app.post('/v1/webhooks/github', (_req, res) => {
   res.status(204).end();
 });
 
+app.post('/v1/shares', requireSession, async (req, res) => {
+  try {
+    const body = req.body ?? {};
+    const owner = parseOwnerRepo(body.owner);
+    const repo = parseOwnerRepo(body.repo);
+    const notePath = parseNotePath(body.path);
+    const branch = parseBranch(body.branch);
+    if (!owner || !repo || !notePath) {
+      return res.status(400).json({ error: 'missing or invalid owner/repo/path' });
+    }
+    if (!branch) {
+      return res.status(400).json({ error: 'missing or invalid branch' });
+    }
+    const existing = shareStore.findActiveByNote(owner, repo, notePath);
+    if (existing) {
+      return res.status(200).json(shareResponse(existing, env));
+    }
+    const session = req.sessionUser;
+    if (!session) {
+      return res.status(401).json({ error: 'missing session' });
+    }
+    const repoAccessToken = await refreshAccessToken(env, sessionStore, session.sessionId);
+    const noteExists = await verifyNoteExistsWithUserToken({
+      owner,
+      repo,
+      path: notePath,
+      branch,
+      accessToken: repoAccessToken.accessToken,
+    });
+    if (!noteExists) {
+      return res.status(404).json({ error: 'note not found' });
+    }
+    const installationId = await getRepoInstallationId(env, owner, repo);
+    const id = generateShareId();
+    const record = await shareStore.create({
+      id,
+      owner,
+      repo,
+      branch,
+      path: notePath,
+      createdByLogin: session.login,
+      createdByUserId: session.sub,
+      installationId,
+    });
+    console.log(`[vibenote] share created ${id} ${owner}/${repo}/${notePath}`);
+    res.status(201).json(shareResponse(record, env));
+  } catch (error) {
+    res.status(400).json({ error: getErrorMessage(error) });
+  }
+});
+
+app.get('/v1/shares', requireSession, async (req, res) => {
+  try {
+    const owner = parseOwnerRepo(String(req.query.owner ?? ''));
+    const repo = parseOwnerRepo(String(req.query.repo ?? ''));
+    const notePath = parseNotePath(String(req.query.path ?? ''));
+    if (!owner || !repo || !notePath) {
+      return res.status(400).json({ error: 'missing or invalid owner/repo/path' });
+    }
+    const session = req.sessionUser;
+    if (!session) {
+      return res.status(401).json({ error: 'missing session' });
+    }
+    await ensureRepoReadableByUser(env, sessionStore, session.sessionId, owner, repo);
+    const existing = shareStore.findActiveByNote(owner, repo, notePath);
+    res.json({ share: existing ? shareResponse(existing, env) : null });
+  } catch (error) {
+    res.status(400).json({ error: getErrorMessage(error) });
+  }
+});
+
+app.delete('/v1/shares/:id', requireSession, async (req, res) => {
+  try {
+    const id = getPathParam(req, 'id');
+    if (!id || !isValidShareId(id)) {
+      return res.status(404).json({ error: 'share not found' });
+    }
+    const record = shareStore.get(id);
+    if (!record) {
+      return res.status(404).json({ error: 'share not found' });
+    }
+    const session = req.sessionUser;
+    if (!session) {
+      return res.status(401).json({ error: 'missing session' });
+    }
+    const canRevoke = await canUserRevokeShare(env, sessionStore, session, record);
+    if (!canRevoke) {
+      return res.status(403).json({ error: 'insufficient permissions to revoke share' });
+    }
+    const updated = await shareStore.revoke(id, {
+      revokedByLogin: session.login,
+      revokedByUserId: session.sub,
+    });
+    console.log(`[vibenote] share revoked ${id} ${record.owner}/${record.repo}/${record.path}`);
+    res.json(shareResponse(updated ?? record, env));
+  } catch (error) {
+    res.status(400).json({ error: getErrorMessage(error) });
+  }
+});
+
+app.get('/v1/share-links/:id', async (req, res) => {
+  const id = getPathParam(req, 'id');
+  if (!id || !isValidShareId(id)) {
+    return res.status(404).json({ error: 'share not found' });
+  }
+  const record = shareStore.get(id);
+  if (!record) {
+    return res.status(404).json({ error: 'share not found' });
+  }
+  if (record.status !== 'active') {
+    return res.status(410).json({ error: 'share revoked' });
+  }
+  res.json({
+    id: record.id,
+    owner: record.owner,
+    repo: record.repo,
+    path: record.path,
+    branch: record.branch,
+    createdAt: record.createdAt,
+    createdBy: {
+      login: record.createdByLogin,
+    },
+  });
+});
+
+app.get('/v1/share-links/:id/content', async (req, res) => {
+  try {
+    const id = getPathParam(req, 'id');
+    if (!id) {
+      return res.status(404).json({ error: 'share not found' });
+    }
+    const record = shareStore.get(id);
+    if (!record) {
+      return res.status(404).json({ error: 'share not found' });
+    }
+    if (record.status !== 'active') {
+      return res.status(410).json({ error: 'share revoked' });
+    }
+    const ghRes = await installationRequest(
+      env,
+      record.installationId,
+      `/repos/${encodeURIComponent(record.owner)}/${encodeURIComponent(record.repo)}/contents/${encodeURIComponent(
+        record.path
+      )}?ref=${encodeURIComponent(record.branch)}`,
+      {
+        headers: { Accept: 'application/vnd.github.raw' },
+      }
+    );
+    if (ghRes.status === 404) {
+      return res.status(404).json({ error: 'note not found' });
+    }
+    if (!ghRes.ok) {
+      const text = await ghRes.text();
+      return res.status(502).json({ error: `github error ${ghRes.status}: ${text}` });
+    }
+    const text = await ghRes.text();
+    res
+      .status(200)
+      .setHeader('Content-Type', 'text/markdown; charset=utf-8')
+      .setHeader('Cache-Control', 'no-store')
+      .send(text);
+  } catch (error) {
+    res.status(400).json({ error: getErrorMessage(error) });
+  }
+});
+
+app.get('/v1/share-links/:id/assets/*', async (req, res) => {
+  try {
+    const id = getPathParam(req, 'id');
+    if (!id) {
+      return res.status(404).json({ error: 'share not found' });
+    }
+    const record = shareStore.get(id);
+    if (!record) {
+      return res.status(404).json({ error: 'share not found' });
+    }
+    if (record.status !== 'active') {
+      return res.status(410).json({ error: 'share revoked' });
+    }
+    const assetParam = (getPathParam(req, '0') ?? '').toString();
+    const pathCandidate = resolveAssetPath(record.path, assetParam);
+    if (!pathCandidate) {
+      return res.status(400).json({ error: 'invalid asset path' });
+    }
+    const ghRes = await installationRequest(
+      env,
+      record.installationId,
+      `/repos/${encodeURIComponent(record.owner)}/${encodeURIComponent(record.repo)}/contents/${encodeURIComponent(
+        pathCandidate
+      )}?ref=${encodeURIComponent(record.branch)}`,
+      {
+        headers: { Accept: 'application/vnd.github.raw' },
+      }
+    );
+    if (ghRes.status === 404) {
+      return res.status(404).json({ error: 'asset not found' });
+    }
+    if (!ghRes.ok) {
+      const text = await ghRes.text();
+      return res.status(502).json({ error: `github error ${ghRes.status}: ${text}` });
+    }
+    const buffer = Buffer.from(await ghRes.arrayBuffer());
+    const contentType = ghRes.headers.get('Content-Type') ?? 'application/octet-stream';
+    res
+      .status(200)
+      .setHeader('Content-Type', contentType)
+      .setHeader('Cache-Control', 'public, max-age=300')
+      .send(buffer);
+  } catch (error) {
+    res.status(400).json({ error: getErrorMessage(error) });
+  }
+});
+
 const server = app.listen(env.PORT, () => {
   console.log(`[vibenote] api listening on :${env.PORT}`);
 });
@@ -182,6 +403,28 @@ function getErrorMessage(error: unknown): string {
   return String(error);
 }
 
+function shareResponse(record: ShareRecord, env: Env) {
+  return {
+    id: record.id,
+    owner: record.owner,
+    repo: record.repo,
+    path: record.path,
+    branch: record.branch,
+    status: record.status,
+    createdAt: record.createdAt,
+    createdBy: {
+      login: record.createdByLogin,
+      userId: record.createdByUserId,
+    },
+    url: buildShareUrl(env.PUBLIC_VIEWER_BASE_URL, record.id),
+  };
+}
+
+function buildShareUrl(base: string, id: string): string {
+  const normalized = base.replace(/\/+$/, '');
+  return `${normalized}/s/${id}`;
+}
+
 function normalizeReturnTo(value: string, allowedOrigins: string[]): string | null {
   // Ensure callbacks only ever return control to trusted frontend origins.
   let trimmed = value.trim();
@@ -216,4 +459,145 @@ function requireSession(req: express.Request, res: express.Response, next: expre
       next();
     })
     .catch(() => res.status(401).json({ error: 'invalid session' }));
+}
+
+async function verifyNoteExistsWithUserToken(options: {
+  owner: string;
+  repo: string;
+  path: string;
+  branch: string;
+  accessToken: string;
+}): Promise<boolean> {
+  const { owner, repo, path, branch, accessToken } = options;
+  const res = await fetch(
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+      repo
+    )}/contents/${encodeURIComponent(path)}?ref=${encodeURIComponent(branch)}`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/vnd.github+json',
+      },
+    }
+  );
+  if (res.status === 404) return false;
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`github note lookup failed (${res.status}): ${text}`);
+  }
+  return true;
+}
+
+async function ensureRepoReadableByUser(
+  env: Env,
+  store: SessionStoreInstance,
+  sessionId: string,
+  owner: string,
+  repo: string
+): Promise<void> {
+  const tokens = await refreshAccessToken(env, store, sessionId);
+  const res = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, {
+    headers: {
+      Authorization: `Bearer ${tokens.accessToken}`,
+      Accept: 'application/vnd.github+json',
+    },
+  });
+  if (res.status === 404) {
+    throw new Error('repository not found or not accessible');
+  }
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`github repo permissions check failed (${res.status}): ${text}`);
+  }
+}
+
+async function canUserRevokeShare(env: Env, store: SessionStoreInstance, session: SessionClaims, record: ShareRecord
+): Promise<boolean> {
+  if (session.sub === record.createdByUserId) return true;
+  try {
+    const tokens = await refreshAccessToken(env, store, session.sessionId);
+    const res = await fetch(
+      `https://api.github.com/repos/${encodeURIComponent(record.owner)}/${encodeURIComponent(record.repo)}`,
+      {
+        headers: {
+          Authorization: `Bearer ${tokens.accessToken}`,
+          Accept: 'application/vnd.github+json',
+        },
+      }
+    );
+    if (!res.ok) {
+      return false;
+    }
+    const json = (await res.json()) as any;
+    const permissions = json && typeof json.permissions === 'object' ? json.permissions : undefined;
+    if (permissions && permissions.push === true) {
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+function parseOwnerRepo(input: unknown): string | null {
+  if (typeof input !== 'string') return null;
+  const value = input.trim();
+  if (!/^[A-Za-z0-9._-]+$/.test(value)) {
+    return null;
+  }
+  return value;
+}
+
+function parseNotePath(input: unknown): string | null {
+  if (typeof input !== 'string') return null;
+  let value = input.trim();
+  if (value.length === 0) return null;
+  value = value.replace(/\\/g, '/');
+  value = value.replace(/^\/+/, '');
+  if (value.includes('..')) return null;
+  if (!value.toLowerCase().endsWith('.md')) return null;
+  return value;
+}
+
+function parseBranch(input: unknown): string | null {
+  const fallback = 'main';
+  if (typeof input !== 'string') return fallback;
+  const value = input.trim();
+  if (value.length === 0) return fallback;
+  if (!/^[\w./-]+$/.test(value)) return null;
+  return value;
+}
+
+function generateShareId(): string {
+  return crypto.randomBytes(18).toString('base64url');
+}
+
+function isValidShareId(id: string): boolean {
+  return /^[A-Za-z0-9_-]{10,}$/.test(id);
+}
+
+function getPathParam(req: express.Request, key: string): string | undefined {
+  const params = req.params as Record<string, string | undefined>;
+  const value = params[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+function resolveAssetPath(notePath: string, requestPath: string): string | null {
+  let candidate = requestPath.trim();
+  if (candidate.length === 0) return null;
+  candidate = candidate.replace(/\\/g, '/');
+  if (candidate.startsWith('http://') || candidate.startsWith('https://')) {
+    return null;
+  }
+  if (candidate.startsWith('/')) {
+    candidate = candidate.replace(/^\/+/, '');
+  } else {
+    const noteDir = path.posix.dirname(notePath);
+    candidate = noteDir === '.' ? candidate : `${noteDir}/${candidate}`;
+  }
+  const normalized = path.posix.normalize(candidate);
+  if (normalized.startsWith('../') || normalized === '..') {
+    return null;
+  }
+  return normalized;
 }

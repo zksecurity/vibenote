@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { useEffect, useState } from 'react';
 import { beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
-import type { RepoMetadata } from '../lib/backend';
+import type { RepoMetadata, ShareLink } from '../lib/backend';
 import type { RepoRoute } from '../ui/routing';
 import { LocalStore, markRepoLinked, recordAutoSyncRun, setLastActiveNoteId } from '../storage/local';
 
@@ -18,6 +18,9 @@ type AuthMocks = {
 type BackendMocks = {
   getRepoMetadata: ReturnType<typeof vi.fn>;
   getInstallUrl: ReturnType<typeof vi.fn>;
+  getShareLinkForNote: ReturnType<typeof vi.fn>;
+  createShareLink: ReturnType<typeof vi.fn>;
+  revokeShareLink: ReturnType<typeof vi.fn>;
 };
 
 type SyncMocks = {
@@ -38,6 +41,9 @@ const authModule = vi.hoisted<AuthMocks>(() => ({
 const backendModule = vi.hoisted<BackendMocks>(() => ({
   getRepoMetadata: vi.fn(),
   getInstallUrl: vi.fn(),
+  getShareLinkForNote: vi.fn(),
+  createShareLink: vi.fn(),
+  revokeShareLink: vi.fn(),
 }));
 
 const syncModule = vi.hoisted<SyncMocks>(() => ({
@@ -61,6 +67,9 @@ vi.mock('../auth/app-auth', () => ({
 vi.mock('../lib/backend', () => ({
   getRepoMetadata: backendModule.getRepoMetadata,
   getInstallUrl: backendModule.getInstallUrl,
+  getShareLinkForNote: backendModule.getShareLinkForNote,
+  createShareLink: backendModule.createShareLink,
+  revokeShareLink: backendModule.revokeShareLink,
 }));
 
 vi.mock('../sync/git-sync', () => ({
@@ -83,6 +92,9 @@ const mockEnsureFreshAccessToken = authModule.ensureFreshAccessToken;
 const mockSignOutFromGitHubApp = authModule.signOutFromGitHubApp;
 
 const mockGetRepoMetadata = backendModule.getRepoMetadata;
+const mockGetShareLinkForNote = backendModule.getShareLinkForNote;
+const mockCreateShareLink = backendModule.createShareLink;
+const mockRevokeShareLink = backendModule.revokeShareLink;
 
 const mockBuildRemoteConfig = syncModule.buildRemoteConfig;
 const mockListNoteFiles = syncModule.listNoteFiles;
@@ -105,6 +117,19 @@ const readOnlyMeta: RepoMetadata = {
   defaultBranch: 'main',
   manageUrl: null,
   rateLimited: false,
+};
+
+const baseShare: ShareLink = {
+  id: 'share-test-id',
+  owner: 'acme',
+  repo: 'notes',
+  path: 'alpha.md',
+  branch: 'main',
+  status: 'active',
+  createdAt: new Date(0).toISOString(),
+  createdByLogin: 'tester',
+  createdByUserId: 'user-1',
+  url: 'https://share.example/s/share-test-id',
 };
 
 function setRepoMetadata(meta: RepoMetadata) {
@@ -165,6 +190,9 @@ describe('useRepoData', () => {
     mockSignOutFromGitHubApp.mockReset();
 
     mockGetRepoMetadata.mockReset();
+    mockGetShareLinkForNote.mockReset();
+    mockCreateShareLink.mockReset();
+    mockRevokeShareLink.mockReset();
     mockBuildRemoteConfig.mockReset();
     mockListNoteFiles.mockReset();
     mockPullNote.mockReset();
@@ -181,6 +209,10 @@ describe('useRepoData', () => {
       const [owner, repo] = slug.split('/', 2);
       return { owner: owner ?? '', repo: repo ?? '', branch: 'main' };
     });
+
+    mockGetShareLinkForNote.mockResolvedValue(null);
+    mockCreateShareLink.mockResolvedValue({ ...baseShare });
+    mockRevokeShareLink.mockResolvedValue({ ...baseShare, status: 'revoked' });
 
     setRepoMetadata(writableMeta);
   });

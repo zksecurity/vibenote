@@ -1,0 +1,121 @@
+/* Minimal styles for the public share viewer layout. */
+body {
+  margin: 0;
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: #f6f8fa;
+  color: #0f172a;
+}
+
+#share-root {
+  min-height: 100vh;
+}
+
+.share-layout {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.share-header {
+  background: #ffffff;
+  border-bottom: 1px solid #d0d7de;
+  padding: clamp(24px, 8vw, 48px);
+}
+
+.share-header-content {
+  margin: 0 auto;
+  max-width: 720px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.share-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #0f172a;
+  background: rgba(9, 105, 218, 0.12);
+  border: 1px solid rgba(9, 105, 218, 0.25);
+  border-radius: 999px;
+  padding: 6px 12px;
+  width: fit-content;
+}
+
+.share-header h1 {
+  margin: 0;
+  font-size: clamp(1.8rem, 4vw, 2.4rem);
+  font-weight: 700;
+}
+
+.share-header p {
+  margin: 0;
+  color: #57606a;
+  font-size: 1rem;
+}
+
+.share-main {
+  flex: 1;
+  padding: clamp(24px, 6vw, 48px);
+  display: flex;
+  justify-content: center;
+}
+
+.share-article {
+  max-width: 720px;
+  width: 100%;
+  background: #ffffff;
+  border: 1px solid #d0d7de;
+  border-radius: 20px;
+  padding: clamp(24px, 5vw, 40px);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+}
+
+.share-article img {
+  max-width: 100%;
+  display: block;
+  margin: 16px auto;
+  border-radius: 12px;
+}
+
+.share-article a {
+  color: #0969da;
+  text-decoration: none;
+}
+
+.share-article a:hover {
+  text-decoration: underline;
+}
+
+.share-card {
+  max-width: 560px;
+  margin: clamp(40px, 12vh, 120px) auto;
+  background: #ffffff;
+  border-radius: 16px;
+  border: 1px solid #d0d7de;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.12);
+  padding: clamp(24px, 6vw, 40px);
+  text-align: center;
+}
+
+.share-card h1 {
+  margin-top: 0;
+  font-size: clamp(1.6rem, 4vw, 2.2rem);
+}
+
+.share-card p,
+.share-status-text {
+  color: #57606a;
+  font-size: 1rem;
+  margin: 12px 0 0;
+}
+
+.share-app {
+  min-height: 100vh;
+  padding: clamp(32px, 12vh, 96px) clamp(16px, 6vw, 40px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
