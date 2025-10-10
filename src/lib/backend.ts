@@ -1,8 +1,16 @@
-// Backend adapter that resolves GitHub repo metadata and installation state.
-import { ensureFreshAccessToken, refreshAccessTokenNow, getApiBase } from '../auth/app-auth';
+// Backend adapter that resolves GitHub repo metadata, installation state, and share link APIs.
+import { ensureFreshAccessToken, refreshAccessTokenNow, getApiBase, getSessionToken } from '../auth/app-auth';
 import { fetchPublicRepoInfo } from './github-public';
 
-export { type RepoMetadata, getRepoMetadata, getInstallUrl };
+export {
+  type RepoMetadata,
+  type ShareLink,
+  getRepoMetadata,
+  getInstallUrl,
+  getShareLinkForNote,
+  createShareLink,
+  revokeShareLink,
+};
 
 const GITHUB_API_BASE = 'https://api.github.com';
 
@@ -14,6 +22,19 @@ type RepoMetadata = {
   rateLimited?: boolean;
   // Manage URL deep-links into the GitHub App installation settings when known.
   manageUrl?: string | null;
+};
+
+type ShareLink = {
+  id: string;
+  owner: string;
+  repo: string;
+  path: string;
+  branch: string;
+  status: 'active' | 'revoked';
+  createdAt: string;
+  createdByLogin: string;
+  createdByUserId: string;
+  url: string;
 };
 
 async function getRepoMetadata(owner: string, repo: string): Promise<RepoMetadata> {
@@ -101,6 +122,89 @@ async function getInstallUrl(owner: string, repo: string, returnTo: string): Pro
   if (!res.ok) throw new Error('failed to build install url');
   let j = await res.json();
   return String(j.url || '');
+}
+
+async function getShareLinkForNote(owner: string, repo: string, path: string): Promise<ShareLink | null> {
+  const sessionToken = getSessionToken();
+  if (!sessionToken) return null;
+  const base = getApiBase();
+  const url = new URL(`${base}/v1/shares`);
+  url.searchParams.set('owner', owner);
+  url.searchParams.set('repo', repo);
+  url.searchParams.set('path', path);
+  const res = await fetch(url.toString(), {
+    headers: {
+      Authorization: `Bearer ${sessionToken}`,
+      Accept: 'application/json',
+    },
+  });
+  if (res.status === 401) {
+    return null;
+  }
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`share lookup failed (${res.status}): ${text}`);
+  }
+  const payload = (await res.json()) as { share?: unknown };
+  if (!payload || payload.share === undefined || payload.share === null) {
+    return null;
+  }
+  const parsed = parseShare(payload.share);
+  if (!parsed) {
+    throw new Error('invalid share payload');
+  }
+  return parsed;
+}
+
+async function createShareLink(options: {
+  owner: string;
+  repo: string;
+  path: string;
+  branch: string;
+}): Promise<ShareLink> {
+  const sessionToken = getSessionToken();
+  if (!sessionToken) throw new Error('missing session token');
+  const base = getApiBase();
+  const res = await fetch(`${base}/v1/shares`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${sessionToken}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(options),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`share create failed (${res.status}): ${text}`);
+  }
+  const parsed = parseShare(await res.json());
+  if (!parsed) {
+    throw new Error('invalid share payload');
+  }
+  return parsed;
+}
+
+async function revokeShareLink(id: string): Promise<ShareLink> {
+  const sessionToken = getSessionToken();
+  if (!sessionToken) throw new Error('missing session token');
+  const base = getApiBase();
+  const res = await fetch(`${base}/v1/shares/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${sessionToken}`,
+      Accept: 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`share revoke failed (${res.status}): ${text}`);
+  }
+  const parsed = parseShare(await res.json());
+  if (!parsed) {
+    throw new Error('invalid share payload');
+  }
+  return parsed;
 }
 
 async function githubGet(token: string, path: string): Promise<Response> {
@@ -225,6 +329,43 @@ async function installationIncludesRepo(
     page += 1;
   }
   return false;
+}
+
+function parseShare(input: unknown): ShareLink | null {
+  if (!input || typeof input !== 'object') return null;
+  const data = input as Record<string, unknown>;
+  const id = asString(data.id);
+  const owner = asString(data.owner);
+  const repo = asString(data.repo);
+  const path = asString(data.path);
+  const branch = asString(data.branch);
+  const statusRaw = asString(data.status);
+  const createdAt = asString(data.createdAt);
+  const url = asString(data.url);
+  const createdBy = data.createdBy && typeof data.createdBy === 'object' ? (data.createdBy as Record<string, unknown>) : null;
+  const createdByLogin = createdBy ? asString(createdBy.login) : null;
+  const createdByUserId = createdBy ? asString(createdBy.userId) : null;
+  if (!id || !owner || !repo || !path || !branch || !createdAt || !url || !createdByLogin || !createdByUserId) {
+    return null;
+  }
+  const status: 'active' | 'revoked' = statusRaw === 'revoked' ? 'revoked' : 'active';
+  return {
+    id,
+    owner,
+    repo,
+    path,
+    branch,
+    status,
+    createdAt,
+    createdByLogin,
+    createdByUserId,
+    url,
+  };
+}
+
+function asString(value: unknown): string | null {
+  if (typeof value === 'string' && value.length > 0) return value;
+  return null;
 }
 
 function buildInstallationManageUrl(

@@ -5,7 +5,7 @@ import { Editor } from './Editor';
 import { RepoSwitcher } from './RepoSwitcher';
 import { Toggle } from './Toggle';
 import { GitHubIcon, ExternalLinkIcon, NotesIcon, CloseIcon, SyncIcon } from './RepoIcons';
-import { useRepoData, type RepoNoteListItem } from '../data';
+import { useRepoData, type RepoNoteListItem, type ShareState } from '../data';
 import { getExpandedFolders, setExpandedFolders } from '../storage/local';
 import type { RepoRoute, Route } from './routing';
 import { normalizePath, pathsEqual } from '../lib/util';
@@ -29,6 +29,138 @@ export function RepoView(props: RepoViewProps) {
   return <RepoViewInner key={props.slug} {...props} />;
 }
 
+type ShareDialogProps = {
+  share: ShareState;
+  notePath: string | undefined;
+  onClose: () => void;
+  onCreate: () => Promise<void>;
+  onRevoke: () => Promise<void>;
+  onRefresh: () => Promise<void>;
+};
+
+function ShareDialog({ share, notePath, onClose, onCreate, onRevoke, onRefresh }: ShareDialogProps) {
+  const shareUrl = share.link?.url ?? '';
+  const noteLabel = notePath ? notePath.split('/').pop() ?? notePath : 'note';
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
+
+  useEffect(() => {
+    setCopyState('idle');
+  }, [shareUrl]);
+
+  const copyLink = async () => {
+    if (!shareUrl) return;
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopyState('copied');
+      window.setTimeout(() => setCopyState('idle'), 2000);
+      return;
+    } catch {
+      try {
+        const area = document.createElement('textarea');
+        area.value = shareUrl;
+        area.setAttribute('readonly', '');
+        area.style.position = 'absolute';
+        area.style.left = '-9999px';
+        document.body.appendChild(area);
+        area.select();
+        document.execCommand('copy');
+        document.body.removeChild(area);
+        setCopyState('copied');
+        window.setTimeout(() => setCopyState('idle'), 2000);
+        return;
+      } catch {
+        setCopyState('error');
+        window.setTimeout(() => setCopyState('idle'), 2000);
+      }
+    }
+  };
+
+  const renderBody = () => {
+    if (share.status === 'loading') {
+      return <p className="share-status">Checking share status...</p>;
+    }
+    if (share.status === 'error') {
+      return (
+        <div className="share-error">
+          <p>Could not load the share status.</p>
+          {share.error && <p className="share-error-detail">{share.error}</p>}
+          <button
+            className="btn secondary"
+            onClick={() => {
+              void onRefresh().catch(() => undefined);
+            }}
+          >
+            Try again
+          </button>
+        </div>
+      );
+    }
+    if (share.link) {
+      return (
+        <div className="share-success">
+          <div className="share-url-row">
+            <span className="share-url" title={shareUrl}>
+              {shareUrl}
+            </span>
+            <button className="btn secondary" onClick={copyLink} disabled={!shareUrl}>
+              {copyState === 'copied' ? 'Copied' : copyState === 'error' ? 'Copy failed' : 'Copy link'}
+            </button>
+          </div>
+          <p className="share-hint">The link stays live until you revoke it.</p>
+        <button
+          className="btn subtle share-revoke"
+          onClick={() => {
+            void onRevoke().catch(() => undefined);
+          }}
+        >
+          Revoke link
+        </button>
+        </div>
+      );
+    }
+    return (
+      <div className="share-create">
+        <button
+          className="btn primary"
+          onClick={() => {
+            void onCreate().catch(() => undefined);
+          }}
+        >
+          Create share link
+        </button>
+        <p className="share-hint">Links are unlisted and anyone with the URL can read the note.</p>
+      </div>
+    );
+  };
+
+  return (
+    <div className="share-overlay" role="dialog" aria-modal="true" aria-label="Share note dialog">
+      <div className="share-dialog">
+        <div className="share-dialog-header">
+          <h2 className="share-dialog-title">Share this note</h2>
+          <button className="btn ghost icon" onClick={onClose} aria-label="Close share dialog">
+            <CloseIcon />
+          </button>
+        </div>
+        <div className="share-dialog-body">
+          <p className="share-dialog-subtitle">
+            {share.link
+              ? 'Anyone with the link can view the latest version.'
+              : 'Generate a secret link to share the rendered Markdown with anyone.'}
+          </p>
+          <div className="share-note-summary">
+            <span className="share-note-label">Note</span>
+            <span className="share-note-name" title={notePath ?? ''}>
+              {noteLabel}
+            </span>
+          </div>
+          {renderBody()}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
   const setActivePath = useCallback(
     (nextPath: string | undefined) => {
@@ -50,6 +182,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
 
   // Data layer exposes repo-backed state and the high-level actions the UI needs.
   const { state, actions } = useRepoData({ slug, route, recordRecent, setActivePath });
+  const { createShareLink, refreshShareLink, revokeShareLink } = actions;
   const {
     hasSession,
     user,
@@ -69,6 +202,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
     autosync,
     syncing,
     statusMessage,
+    share,
   } = state;
 
   const userAvatarSrc = user?.avatarDataUrl ?? user?.avatarUrl ?? undefined;
@@ -76,10 +210,12 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
   const showSidebar = canRead;
   const isReadOnly = !canEdit && canRead;
   const layoutClass = showSidebar ? '' : 'single';
+  const canShare = hasSession && route.kind === 'repo' && activePath !== undefined && canRead;
 
   // Pure UI state: sidebar visibility and account menu.
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
 
   // Close the account dropdown when clicking anywhere else on the page.
   useEffect(() => {
@@ -92,6 +228,11 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
     document.addEventListener('click', onDoc);
     return () => document.removeEventListener('click', onDoc);
   }, []);
+
+  useEffect(() => {
+    if (!shareOpen) return;
+    void refreshShareLink();
+  }, [shareOpen, refreshShareLink]);
 
   const [showSwitcher, setShowSwitcher] = useState(false);
 
@@ -211,6 +352,15 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
             </button>
           ) : (
             <>
+              {canShare && (
+                <button
+                  className={`btn secondary share-btn${share.link ? ' share-btn-active' : ''}`}
+                  onClick={() => setShareOpen(true)}
+                  title={share.link ? 'View share link' : 'Create a share link'}
+                >
+                  {share.status === 'loading' ? 'Sharing...' : share.link ? 'Shared' : 'Share'}
+                </button>
+              )}
               {canSync && (
                 <button
                   className={`btn secondary sync-btn ${syncing ? 'is-syncing' : ''}`}
@@ -408,6 +558,16 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
           navigate={navigate}
           onRecordRecent={recordRecent}
           onClose={() => setShowSwitcher(false)}
+        />
+      )}
+      {shareOpen && (
+        <ShareDialog
+          share={share}
+          notePath={activePath}
+          onClose={() => setShareOpen(false)}
+          onCreate={createShareLink}
+          onRevoke={revokeShareLink}
+          onRefresh={refreshShareLink}
         />
       )}
     </div>
