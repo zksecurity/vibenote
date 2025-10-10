@@ -3,11 +3,11 @@ import { normalizePath } from '../lib/util';
 import { logError } from '../lib/logging';
 import type { RemoteFile } from '../sync/git-sync';
 
-export type FileKind = 'markdown' | 'binary';
+export type { FileKind, FileMeta, RepoFile, MarkdownFile, BinaryFile, RepoStoreSnapshot };
 
-export type { FileMeta, RepoFile, MarkdownFile, BinaryFile };
+export { basename, stripExtension, extractDir, isMarkdownFile, isBinaryFile, debugLog };
 
-export { basename, stripExtension, extractDir, isMarkdownFile, isBinaryFile };
+type FileKind = 'markdown' | 'binary';
 
 const DEFAULT_MARKDOWN_MIME = 'text/markdown' as const;
 
@@ -89,8 +89,6 @@ function deserializeFile(raw: string | null): RepoFile | null {
     return null;
   }
 }
-
-export { debugLog };
 
 // --- Debug logging ---
 const DEBUG_ENABLED = false;
@@ -194,7 +192,7 @@ function readRepoSnapshot(slug: string): RepoStoreSnapshot {
   };
 }
 
-export type RepoStoreSnapshot = {
+type RepoStoreSnapshot = {
   files: FileMeta[];
   folders: string[];
 };
@@ -285,26 +283,6 @@ export class LocalStore {
     return deserializeFile(raw);
   }
 
-  private persistNewFile(
-    meta: FileMeta,
-    content: string,
-    extras?: { lastRemoteSha?: string; lastSyncedHash?: string }
-  ): RepoFile {
-    let doc: RepoFile = {
-      ...meta,
-      content,
-      lastRemoteSha: extras?.lastRemoteSha,
-      lastSyncedHash: extras?.lastSyncedHash,
-    };
-    let idx = this.loadIndex();
-    idx.push(meta);
-    localStorage.setItem(this.indexKey, serializeIndex(idx));
-    localStorage.setItem(this.noteKey(meta.id), serializeFile(doc));
-    this.index = idx;
-    ensureFolderForSlug(this.slug, meta.dir);
-    return doc;
-  }
-
   saveFile(path: string, content: string) {
     let meta = this.findMetaByPath(path);
     if (meta === undefined) return;
@@ -334,7 +312,13 @@ export class LocalStore {
     let mime = params.mime ?? inferMimeFromPath(path);
     let meta: FileMeta = { id, path, title, dir, updatedAt, kind, mime };
     debugLog(this.slug, 'createFile', { id, path, kind });
-    this.persistNewFile(meta, content);
+    let doc: RepoFile = { ...meta, content };
+    let idx = this.loadIndex();
+    idx.push(meta);
+    localStorage.setItem(this.indexKey, serializeIndex(idx));
+    localStorage.setItem(this.noteKey(meta.id), serializeFile(doc));
+    this.index = idx;
+    ensureFolderForSlug(this.slug, meta.dir);
     emitRepoChange(this.slug);
     return id;
   }
@@ -374,13 +358,7 @@ export class LocalStore {
       delete next.lastSyncedHash;
     }
     localStorage.setItem(this.noteKey(doc.id), serializeFile(next));
-    this.touchIndex(doc.id, {
-      title: target.title,
-      dir: target.dir,
-      path: target.path,
-      updatedAt,
-      kind: next.kind,
-    });
+    this.touchIndex(doc.id, { title: target.title, dir: target.dir, path: target.path, updatedAt });
     ensureFolderForSlug(this.slug, target.dir);
     if (pathChanged) {
       recordRenameTombstone(this.slug, {
@@ -420,7 +398,7 @@ export class LocalStore {
     emitRepoChange(this.slug);
   }
 
-  replaceWithRemote(files: Array<RemoteFile>) {
+  replaceWithRemote(files: RemoteFile[]) {
     let previous = this.loadIndex();
     for (let note of previous) {
       localStorage.removeItem(this.noteKey(note.id));
@@ -428,47 +406,13 @@ export class LocalStore {
     let now = Date.now();
     let index: FileMeta[] = [];
     let folderSet = new Set<string>();
-    for (let file of files) {
+    for (let { path, kind, content, mime, sha } of files) {
       let id = crypto.randomUUID();
-      let kind = file.kind ?? inferKindFromPath(file.path);
-      let dir = extractDir(file.path);
+      let dir = extractDir(path);
       if (dir !== '') folderSet.add(dir);
-      if (kind === 'binary') {
-        let base64 = file.content ?? '';
-        let mime = file.mime ?? inferMimeFromPath(file.path);
-        let fileName = basename(file.path);
-        let stripped = stripExtension(fileName);
-        let title = ensureValidTitle(stripped || 'Untitled');
-        let meta: FileMeta = { id, path: file.path, title, dir, updatedAt: now, kind: 'binary', mime };
-        let doc: RepoFile = {
-          ...meta,
-          content: base64,
-          lastRemoteSha: file.sha,
-          lastSyncedHash: hashText(base64),
-        };
-        index.push(meta);
-        localStorage.setItem(this.noteKey(id), serializeFile(doc));
-        continue;
-      }
-      let text = file.content ?? '';
-      let fileName = basename(file.path);
-      let stripped = stripExtension(fileName);
-      let title = ensureValidTitle(stripped || 'Untitled');
-      let meta: FileMeta = {
-        id,
-        path: file.path,
-        title,
-        dir,
-        updatedAt: now,
-        kind: 'markdown',
-        mime: DEFAULT_MARKDOWN_MIME,
-      };
-      let doc: RepoFile = {
-        ...meta,
-        content: text,
-        lastRemoteSha: file.sha,
-        lastSyncedHash: hashText(text),
-      };
+      let title = stripExtension(basename(path));
+      let meta: FileMeta = { id, path, title, dir, updatedAt: now, kind, mime };
+      let doc: RepoFile = { ...meta, content, lastRemoteSha: sha, lastSyncedHash: hashText(content) };
       index.push(meta);
       localStorage.setItem(this.noteKey(id), serializeFile(doc));
     }
@@ -656,14 +600,14 @@ function ancestorsOf(dir: string): string[] {
   return out;
 }
 
-export type DeleteTombstone = {
+type DeleteTombstone = {
   type: 'delete';
   path: string;
   lastRemoteSha?: string;
   deletedAt: number;
 };
 
-export type RenameTombstone = {
+type RenameTombstone = {
   type: 'rename';
   from: string;
   to: string;
@@ -671,7 +615,7 @@ export type RenameTombstone = {
   renamedAt: number;
 };
 
-export type Tombstone = DeleteTombstone | RenameTombstone;
+type Tombstone = DeleteTombstone | RenameTombstone;
 
 export function listTombstones(slug: string): Tombstone[] {
   let raw = localStorage.getItem(repoKey(slug, 'tombstones'));
@@ -770,10 +714,9 @@ export function markSynced(slug: string, id: string, patch: { remoteSha?: string
   let key = `${repoKey(slug, 'note')}:${id}`;
   let doc = loadFileForKey(slug, id);
   if (!doc) return;
-  let next: RepoFile = { ...doc };
-  if (patch.remoteSha !== undefined) next.lastRemoteSha = patch.remoteSha;
-  if (patch.syncedHash !== undefined) next.lastSyncedHash = patch.syncedHash;
-  localStorage.setItem(key, serializeFile(next));
+  if (patch.remoteSha !== undefined) doc.lastRemoteSha = patch.remoteSha;
+  if (patch.syncedHash !== undefined) doc.lastSyncedHash = patch.syncedHash;
+  localStorage.setItem(key, serializeFile(doc));
   debugLog(slug, 'markSynced', { id, patch });
   emitRepoChange(slug);
 }
@@ -820,17 +763,6 @@ export function updateBinaryContent(slug: string, id: string, base64: string, mi
   );
 }
 
-export function findByPath(slug: string, path: string): { id: string; doc: MarkdownFile } | null {
-  let idx = loadIndexForSlug(slug);
-  for (let meta of idx) {
-    if (meta.path !== path) continue;
-    let doc = loadFileForKey(slug, meta.id);
-    if (!doc || !isMarkdownFile(doc)) continue;
-    return { id: meta.id, doc };
-  }
-  return null;
-}
-
 export function findFileByPath(slug: string, path: string): { id: string; doc: RepoFile } | null {
   let idx = loadIndexForSlug(slug);
   for (let meta of idx) {
@@ -872,26 +804,6 @@ export function findBySyncedHash(
     }
   }
   return null;
-}
-
-export function moveNotePath(slug: string, id: string, toPath: string) {
-  let normalizedPath = normalizePath(toPath);
-  if (!normalizedPath.toLowerCase().endsWith('.md')) return;
-  mutateFileDoc(
-    slug,
-    id,
-    (doc) => {
-      if (!isMarkdownFile(doc)) return null;
-      let updatedAt = Date.now();
-      let dir = extractDir(normalizedPath);
-      return {
-        doc: { ...doc, path: normalizedPath, dir, updatedAt },
-        indexPatch: { path: normalizedPath, dir },
-      };
-    },
-    'moveNotePath'
-  );
-  rebuildFolderIndex(slug);
 }
 
 export function moveFilePath(slug: string, id: string, toPath: string) {
@@ -993,6 +905,13 @@ function basename(p: string) {
   return i >= 0 ? p.slice(i + 1) : p;
 }
 
+function ensureValidFileName(name: string): string {
+  let trimmed = name.trim();
+  if (!trimmed || trimmed === '.' || trimmed === '..') throw Error('Invalid file name');
+  if (/[\\/\0]/.test(trimmed)) throw Error('Invalid file name: contains illegal characters');
+  return trimmed;
+}
+
 function stripExtension(baseName: string): string {
   let idx = baseName.lastIndexOf('.');
   if (idx < 0) return baseName;
@@ -1075,23 +994,6 @@ function normalizeFile(raw: unknown): RepoFile | null {
   let lastSyncedHash = typeof stored.lastSyncedHash === 'string' ? stored.lastSyncedHash : undefined;
   let content = typeof stored.text === 'string' ? stored.text : '';
   return { ...meta, content, lastRemoteSha, lastSyncedHash };
-}
-
-function ensureValidTitle(title: string): string {
-  let t = title.trim();
-  if (!t) return 'Untitled';
-  if (t === '.' || t === '..') return 'Untitled';
-  if (/[\\/\0]/.test(t)) {
-    throw new Error('Invalid title: contains illegal characters');
-  }
-  return t;
-}
-
-function ensureValidFileName(name: string): string {
-  let trimmed = name.trim();
-  if (!trimmed || trimmed === '.' || trimmed === '..') throw Error('Invalid file name');
-  if (/[\\/\0]/.test(trimmed)) throw Error('Invalid file name: contains illegal characters');
-  return trimmed;
 }
 
 function joinPath(dir: string, file: string) {

@@ -14,13 +14,11 @@ import {
   listTombstones,
   removeTombstones,
   findFileByPath,
-  findByPath,
   findByRemoteSha,
   findBySyncedHash,
   markSynced,
   updateNoteText,
   updateBinaryContent,
-  moveNotePath,
   moveFilePath,
   debugLog,
   isMarkdownFile,
@@ -509,7 +507,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
     if (entry.kind === 'markdown') {
       let remoteFile: RemoteFile | null = null;
       let remoteTextHash: string | null = null;
-      let local = findByPath(storeSlug, entry.path);
+      let local = findFileByPath(storeSlug, entry.path);
 
       if (!local) {
         let renamedRecord = entry.sha ? findByRemoteSha(storeSlug, entry.sha) : null;
@@ -522,8 +520,8 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
           renamed = syncedRecord && isMarkdownFile(syncedRecord.doc) ? syncedRecord : null;
         }
         if (renamed && renamed.doc.path !== entry.path) {
-          moveNotePath(storeSlug, renamed.id, entry.path);
-          local = findByPath(storeSlug, entry.path);
+          moveFilePath(storeSlug, renamed.id, entry.path);
+          local = findFileByPath(storeSlug, entry.path);
         }
       }
 
@@ -920,7 +918,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
               kind: 'markdown',
               mime: MARKDOWN_MIME,
             });
-            moveNotePath(storeSlug, newId, t.from);
+            moveFilePath(storeSlug, newId, t.from);
             markSynced(storeSlug, newId, {
               remoteSha: remoteFile.sha,
               syncedHash: hashText(remoteFile.content ?? ''),
