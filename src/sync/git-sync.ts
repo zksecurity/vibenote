@@ -20,8 +20,6 @@ import {
   updateFile,
   moveFilePath,
   debugLog,
-  isMarkdownFile,
-  isBinaryFile,
 } from '../storage/local';
 import { mergeMarkdown } from '../merge/merge';
 
@@ -121,6 +119,7 @@ type PutFilePayload = { path: string; content: string; kind: FileKind; baseSha?:
 function serializeContent(file: { path: string; content: string; kind: FileKind }) {
   return {
     path: file.path,
+    // FIXME
     contentBase64: file.kind === 'binary' ? normalizeBase64(file.content) : toBase64(file.content),
     encoding: file.kind === 'binary' ? ('base64' as const) : ('utf-8' as const),
   };
@@ -441,14 +440,20 @@ function encodePath(input: string): string {
 function deserializeRemoteFile(path: string, kind: FileKind, sha: string, contentBase64: string): RemoteFile {
   if (kind === 'markdown') {
     return { path, sha, kind, mime: MARKDOWN_MIME, content: fromBase64(contentBase64) };
+  } else if (kind === 'binary') {
+    return { path, sha, kind, mime: inferMimeFromPath(path), content: contentBase64 };
+  } else if (kind === 'asset-url') {
+    // FIXME
+    throw Error('todo');
   }
-  return { path, sha, kind, mime: inferMimeFromPath(path), content: contentBase64 };
+  throw Error('invalid file type');
 }
 
 function normalizeBase64(content: string): string {
   return content.replace(/\s+/g, '');
 }
 
+// FIXME
 function fileKindFromPath(path: string): FileKind | null {
   const idx = path.lastIndexOf('.');
   if (idx < 0 || idx === path.length - 1) return null;
@@ -551,6 +556,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       const rf = remoteFile ?? (await pullRepoFile(config, e.path));
       if (!rf) continue;
       const baseRaw = lastRemoteSha ? await fetchBlob(config, lastRemoteSha) : '';
+      // FIXME
       const baseContent = doc.kind === 'markdown' ? fromBase64(baseRaw ?? '') : baseRaw ?? '';
       const remoteHash = hashText(rf.content);
       const baseHash = hashText(baseContent);
@@ -611,7 +617,8 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         } else {
           // in the future, we could handle other plaintext files than markdown here,
           // using a plaintext-based merge strategy
-          doc.kind satisfies never;
+          // FIXME
+          doc.kind satisfies 'asset-url';
           throw Error('unexpected case: file is neither binary nor markdown');
         }
       } else {

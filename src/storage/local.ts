@@ -7,7 +7,7 @@ export type { FileKind, FileMeta, RepoFile, MarkdownFile, BinaryFile, RepoStoreS
 
 export { basename, stripExtension, extractDir, isMarkdownFile, isBinaryFile, debugLog };
 
-type FileKind = 'markdown' | 'binary';
+type FileKind = 'markdown' | 'binary' | 'asset-url';
 
 const DEFAULT_MARKDOWN_MIME = 'text/markdown' as const;
 
@@ -884,6 +884,7 @@ function extractExtensionWithDot(baseName: string): string {
   return baseName.slice(idx);
 }
 
+// FIXME this is no longer possible, so has to be used sparingly / only as fallback
 function inferKindFromPath(path: string): FileKind {
   return /\.md$/i.test(path) ? 'markdown' : 'binary';
 }
@@ -915,18 +916,10 @@ function normalizeMeta(raw: unknown): FileMeta | null {
   let dir = typeof stored.dir === 'string' ? normalizeDir(stored.dir) : extractDir(path);
   let updatedAt =
     typeof stored.updatedAt === 'number' && Number.isFinite(stored.updatedAt) ? stored.updatedAt : Date.now();
-  let inferredKind =
-    stored.kind === 'markdown' || stored.kind === 'binary'
-      ? stored.kind
-      : inferKindFromPath(path) ?? 'markdown';
+  let inferredKind = typeof stored.kind === 'string' ? stored.kind : 'markdown';
   let rawTitle = typeof stored.title === 'string' ? stored.title.trim() : '';
   let title = rawTitle;
-  let mime =
-    typeof stored.mime === 'string' && stored.mime.trim()
-      ? stored.mime
-      : inferredKind === 'markdown'
-      ? DEFAULT_MARKDOWN_MIME
-      : inferMimeFromPath(path);
+  let mime = typeof stored.mime === 'string' ? stored.mime : inferMimeFromPath(path);
   return { id: stored.id, path, title, dir, updatedAt, kind: inferredKind, mime };
 }
 

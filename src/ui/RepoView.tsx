@@ -357,7 +357,8 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
                       />
                     ) : isBinaryFile(activeFile) ? (
                       <AssetViewer key={activeFile.id} file={activeFile} />
-                    ) : null}
+                    ) : // FIXME handle 'asset-url'
+                    null}
                   </div>
                 ) : (
                   <div className="empty-state">
