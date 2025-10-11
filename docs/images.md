@@ -5,10 +5,10 @@
 ## Current Objectives
 
 - **Step 1 – Sync Foundations**
-  - Broaden local storage metadata (notes + assets) while keeping Markdown helpers intact.
-  - Teach Git sync to track binary asset files (png/jpg/jpeg/webp/gif/svg/avif) end-to-end once the sync module is free to change.
-  - Keep UI limited to Markdown for now by filtering asset entries.
-  - Fold Markdown-first helpers so they operate on the shared file types (first up: unify LocalStore actions like create/rename/delete to stop branching on note vs asset).
+  - ~~Broaden local storage metadata (notes + assets) while keeping Markdown helpers intact.~~
+  - ~~Teach Git sync to track binary asset files (png/jpg/jpeg/webp/gif/svg/avif) end-to-end once the sync module is free to change.~~
+  - ~~Keep UI limited to Markdown for now by filtering asset entries.~~
+  - ~~Fold Markdown-first helpers so they operate on the shared file types (first up: unify LocalStore actions like create/rename/delete to stop branching on note vs asset).~~
 - **Step 2 – Surface Assets in UI**
   - Expose combined file listings from the data layer.
   - Render images in the file tree and repo view while preserving existing keyboard + context flows.
@@ -23,6 +23,9 @@
 - Git sync now lists/pulls/pushes tracked image assets alongside Markdown while retaining merge behaviour for notes only; regression tests cover the new flows.
 - Data layer surfaces combined file metadata (markdown + images) to consumers, while UI continues filtering to notes for now.
 - Repo sidebar now derives entries from the combined file list (showing extensions) while binary selections open an interim asset viewer placeholder; added regression coverage for mixed file state.
+- Sync now prefers lightweight blob placeholders for private assets and rehydrates content on demand (no more tokenised URLs or redundant storage); multi-device tests cover rename/merge scenarios.
+- Asset Viewer fetches private images via blob placeholders and presents download-ready previews without caching large payloads locally.
+
 
 ## Decisions
 
