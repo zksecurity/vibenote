@@ -1,6 +1,6 @@
 // Multi-device sync regression tests that exercise cross-device note and folder workflows.
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { LocalStore, resetRepoStore } from '../storage/local';
+import { LocalStore, resetRepoStore, listTombstones } from '../storage/local';
 import { MockRemoteRepo } from '../test/mock-remote';
 
 const authModule = vi.hoisted(() => ({
@@ -106,6 +106,7 @@ function remotePaths(repo: MockRemoteRepo): string[] {
 describe('syncBidirectional multi-device', () => {
   let remote: MockRemoteRepo;
   let syncBidirectional: typeof import('./git-sync').syncBidirectional;
+  let fetchBlobSpy: any;
 
   beforeEach(async () => {
     authModule.ensureFreshAccessToken.mockReset();
@@ -117,10 +118,12 @@ describe('syncBidirectional multi-device', () => {
     globalAny.fetch = fetchMock as unknown as typeof fetch;
     let module = await import('./git-sync');
     syncBidirectional = module.syncBidirectional;
+    fetchBlobSpy = vi.spyOn(module, 'fetchBlob');
     resetRepoStore(REPO_SLUG);
   });
 
   afterEach(() => {
+    fetchBlobSpy?.mockRestore();
     resetRepoStore(REPO_SLUG);
   });
 
@@ -263,6 +266,68 @@ describe('syncBidirectional multi-device', () => {
 
     expect(filePaths(storeTwo)).toEqual(['brand.png']);
     expect(remotePaths(remote)).toEqual(['brand.png']);
+  });
+
+  test('asset-url placeholders propagate between devices and support renames', async () => {
+    let deviceOne = createDevice('device-one');
+    let storeOne = deviceOne.store;
+    const assetPayload = Buffer.from('placeholder-image').toString('base64');
+    storeOne.createFile('images/photo.png', assetPayload);
+    await syncBidirectional(storeOne, REPO_SLUG);
+    expect(remotePaths(remote)).toEqual(['images/photo.png']);
+
+    let deviceTwo = createDevice('device-two');
+    let storeTwo = deviceTwo.store;
+    await syncBidirectional(storeTwo, REPO_SLUG);
+
+    const filesTwo = storeTwo.listFiles();
+    expect(filesTwo.map((f) => f.path)).toEqual(['images/photo.png']);
+    const docTwo = storeTwo.loadFileById(filesTwo[0]?.id ?? '');
+    expect(docTwo?.kind).toBe('asset-url');
+    expect(docTwo?.content).toMatch(/^gh-blob:/);
+    expect(docTwo?.lastRemoteSha).toBeDefined();
+    if (docTwo?.lastRemoteSha) {
+      const blobRes = await remote.handleFetch(
+        `https://api.github.com/repos/user/repo/git/blobs/${docTwo.lastRemoteSha}`,
+        { method: 'GET' }
+      );
+      const blobJson = await blobRes.json();
+      expect(typeof blobJson.content).toBe('string');
+      expect(blobJson.content.length).toBeGreaterThan(0);
+    }
+    expect(remotePaths(remote)).toEqual(['images/photo.png']);
+
+    storeTwo.renameFile('images/photo.png', 'photo-renamed');
+    expect(filePaths(storeTwo)).toEqual(['images/photo-renamed.png']);
+    const renamedDocBeforeSync = storeTwo.loadFileById(filesTwo[0]?.id ?? '');
+    expect(renamedDocBeforeSync?.kind).toBe('asset-url');
+    expect(renamedDocBeforeSync?.lastRemoteSha).toBeDefined();
+    expect(listTombstones(REPO_SLUG).length).toBeGreaterThan(0);
+    const renameTombstone = listTombstones(REPO_SLUG).find(
+      (t) => t.type === 'rename' && t.from === 'images/photo.png' && t.to === 'images/photo-renamed.png'
+    );
+    expect(renameTombstone).toBeDefined();
+    const summary = await syncBidirectional(storeTwo, REPO_SLUG);
+    expect(fetchBlobSpy?.mock.calls.length ?? 0).toBe(0);
+    expect(summary.pushed).toBeGreaterThan(0);
+    expect(filePaths(storeTwo)).toEqual(['images/photo-renamed.png']);
+    expect(remotePaths(remote)).toEqual(['images/photo-renamed.png']);
+    expect(listTombstones(REPO_SLUG)).toHaveLength(0);
+
+    storeOne = useDevice(deviceOne);
+    await syncBidirectional(storeOne, REPO_SLUG);
+    const updatedMeta = storeOne.listFiles().find((f) => f.path === 'images/photo-renamed.png');
+    const updatedDoc = storeOne.loadFileById(updatedMeta?.id ?? '');
+    expect(updatedDoc?.path).toBe('images/photo-renamed.png');
+    if (updatedDoc?.kind === 'asset-url') {
+      expect(updatedDoc.content).toMatch(/^gh-blob:/);
+    } else {
+      expect(updatedDoc?.kind).toBe('binary');
+      expect(updatedDoc?.content).toBe(assetPayload);
+    }
+
+    const remoteContent = remote.snapshot().get('images/photo-renamed.png');
+    expect(remoteContent).toBe(assetPayload);
   });
 
   test('device two removes a binary asset deleted on device one', async () => {

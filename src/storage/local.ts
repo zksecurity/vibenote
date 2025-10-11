@@ -367,8 +367,13 @@ export class LocalStore {
     let next: RepoFile = { ...doc, title: target.title, dir: target.dir, path: target.path, updatedAt };
     let pathChanged = fromPath !== target.path;
     if (pathChanged) {
-      delete next.lastRemoteSha;
-      delete next.lastSyncedHash;
+      if (doc.kind === 'asset-url') {
+        next.lastRemoteSha = doc.lastRemoteSha;
+        next.lastSyncedHash = doc.lastSyncedHash;
+      } else {
+        delete next.lastRemoteSha;
+        delete next.lastSyncedHash;
+      }
     }
     localStorage.setItem(this.noteKey(doc.id), serializeFile(next));
     this.touchIndex(doc.id, { title: target.title, dir: target.dir, path: target.path, updatedAt });
@@ -739,11 +744,14 @@ export function markSynced(slug: string, id: string, patch: { remoteSha?: string
   emitRepoChange(slug);
 }
 
-export function updateFile(slug: string, id: string, content: string, mime?: string) {
+export function updateFile(slug: string, id: string, content: string, mime?: string, kind?: FileKind) {
   mutateFile(slug, id, (doc) => {
     let updatedAt = Date.now();
     mime ??= doc.mime;
     let next: RepoFile = { ...doc, content, updatedAt, mime };
+    if (kind !== undefined) {
+      next.kind = kind;
+    }
     return { doc: next };
   });
 }
