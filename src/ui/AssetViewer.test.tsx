@@ -1,6 +1,6 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, cleanup } from '@testing-library/react';
 import { describe, expect, test, beforeEach, afterEach, vi } from 'vitest';
-import type { BinaryFile } from '../storage/local';
+import type { BinaryFile, AssetUrlFile } from '../storage/local';
 import { AssetViewer } from './AssetViewer';
 
 const BASE_FILE: BinaryFile = {
@@ -36,6 +36,7 @@ describe('AssetViewer', () => {
     };
     delete urlApi.createObjectURL;
     delete urlApi.revokeObjectURL;
+    cleanup();
   });
 
   test('renders an image preview and download link when content is present', () => {
@@ -52,6 +53,21 @@ describe('AssetViewer', () => {
     expect(link.getAttribute('download')).toBe('logo.png');
     unmount();
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:preview');
+  });
+
+  test('renders direct URL assets without creating blobs', () => {
+    const urlFile: AssetUrlFile = {
+      ...BASE_FILE,
+      kind: 'asset-url',
+      content: 'https://cdn.example.com/logo.png',
+    };
+    render(<AssetViewer file={urlFile} />);
+    expect(createObjectURL).not.toHaveBeenCalled();
+    const image = screen.getByRole('img', { name: 'logo.png' }) as HTMLImageElement;
+    expect(image.getAttribute('src')).toBe('https://cdn.example.com/logo.png');
+    const link = screen.getByRole('link', { name: 'Download' });
+    expect(link.getAttribute('href')).toBe('https://cdn.example.com/logo.png');
+    expect(link.getAttribute('download')).toBe('logo.png');
   });
 
   test('shows fallback messaging when content is empty', () => {

@@ -1,20 +1,32 @@
 // Renders a preview for binary assets (currently image files) inside the workspace.
 import { useEffect, useMemo } from 'react';
-import type { BinaryFile } from '../storage/local';
+import type { BinaryFile, AssetUrlFile } from '../storage/local';
 import { basename } from '../storage/local';
 
 type AssetViewerProps = {
-  file: BinaryFile;
+  file: BinaryFile | AssetUrlFile;
 };
 
 export function AssetViewer({ file }: AssetViewerProps) {
-  const cleanedBase64 = useMemo(() => sanitizeBase64(file.content), [file.content]);
-  const preview = useMemo(() => buildPreviewUrl(cleanedBase64, file.mime), [cleanedBase64, file.mime]);
+  const cleanedBase64 = useMemo(
+    () => (file.kind === 'binary' ? sanitizeBase64(file.content) : null),
+    [file.kind, file.content]
+  );
+  const preview = useMemo(() => {
+    if (file.kind === 'asset-url') {
+      const url = file.content.trim();
+      return url ? ({ kind: 'remote', url } as const) : null;
+    }
+    return buildPreviewUrl(cleanedBase64, file.mime);
+  }, [file.kind, file.content, cleanedBase64, file.mime]);
   const assetName = useMemo(() => (file.title ? file.title : basename(file.path)), [file.title, file.path]);
-  const sizeLabel = useMemo(() => formatFileSize(estimateBytes(cleanedBase64)), [cleanedBase64]);
+  const sizeLabel = useMemo(
+    () => (file.kind === 'binary' ? formatFileSize(estimateBytes(cleanedBase64)) : null),
+    [file.kind, cleanedBase64]
+  );
 
   useEffect(() => {
-    if (preview?.kind !== 'blob') return;
+    if (!preview || preview.kind !== 'blob') return;
     return () => {
       try {
         URL.revokeObjectURL(preview.url);
@@ -22,6 +34,11 @@ export function AssetViewer({ file }: AssetViewerProps) {
         // ignore revoke issues; preview already gone or unsupported
       }
     };
+  }, [preview]);
+
+  const downloadHref = useMemo(() => {
+    if (!preview) return undefined;
+    return preview.url;
   }, [preview]);
 
   return (
@@ -37,8 +54,8 @@ export function AssetViewer({ file }: AssetViewerProps) {
             <span>Path:</span> <code>{file.path}</code>
           </p>
         </div>
-        {preview && (
-          <a className="btn subtle" download={assetName} href={preview.url}>
+        {preview && downloadHref && (
+          <a className="btn subtle" download={assetName} href={downloadHref}>
             Download
           </a>
         )}
@@ -53,7 +70,10 @@ export function AssetViewer({ file }: AssetViewerProps) {
   );
 }
 
-type PreviewUrl = { kind: 'blob'; url: string } | { kind: 'data'; url: string };
+type PreviewUrl =
+  | { kind: 'blob'; url: string }
+  | { kind: 'data'; url: string }
+  | { kind: 'remote'; url: string };
 
 function buildPreviewUrl(contentBase64: string | null, mime: string | undefined): PreviewUrl | null {
   if (!contentBase64 || contentBase64.length === 0) return null;
@@ -113,7 +133,7 @@ function estimateBytes(contentBase64: string | null): number {
   return Math.max(0, Math.floor((length * 3) / 4) - padding);
 }
 
-function formatFileSize(bytes: number): string | null {
+function formatFileSize(bytes: number | null): string | null {
   if (!bytes) return null;
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   let value = bytes;

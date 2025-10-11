@@ -13,6 +13,7 @@ import {
   setExpandedFolders,
   isMarkdownFile,
   isBinaryFile,
+  isAssetUrlFile,
   basename,
 } from '../storage/local';
 import type { RepoRoute, Route } from './routing';
@@ -355,10 +356,9 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
                           actions.saveFile(path, text);
                         }}
                       />
-                    ) : isBinaryFile(activeFile) ? (
+                    ) : isBinaryFile(activeFile) || isAssetUrlFile(activeFile) ? (
                       <AssetViewer key={activeFile.id} file={activeFile} />
-                    ) : // FIXME handle 'asset-url'
-                    null}
+                    ) : null}
                   </div>
                 ) : (
                   <div className="empty-state">

@@ -3,9 +3,17 @@ import { normalizePath } from '../lib/util';
 import { logError } from '../lib/logging';
 import type { RemoteFile } from '../sync/git-sync';
 
-export type { FileKind, FileMeta, RepoFile, MarkdownFile, BinaryFile, RepoStoreSnapshot };
+export type {
+  FileKind,
+  FileMeta,
+  RepoFile,
+  MarkdownFile,
+  BinaryFile,
+  AssetUrlFile,
+  RepoStoreSnapshot,
+};
 
-export { basename, stripExtension, extractDir, isMarkdownFile, isBinaryFile, debugLog };
+export { basename, stripExtension, extractDir, isMarkdownFile, isBinaryFile, isAssetUrlFile, debugLog };
 
 type FileKind = 'markdown' | 'binary' | 'asset-url';
 
@@ -51,6 +59,7 @@ type RepoFile = FileMeta & {
 
 type MarkdownFile = RepoFile & { kind: 'markdown' };
 type BinaryFile = RepoFile & { kind: 'binary' };
+type AssetUrlFile = RepoFile & { kind: 'asset-url' };
 
 function isMarkdownFile(doc: RepoFile): doc is MarkdownFile {
   return doc.kind === 'markdown';
@@ -58,6 +67,10 @@ function isMarkdownFile(doc: RepoFile): doc is MarkdownFile {
 
 function isBinaryFile(doc: RepoFile): doc is BinaryFile {
   return doc.kind === 'binary';
+}
+
+function isAssetUrlFile(doc: RepoFile): doc is AssetUrlFile {
+  return doc.kind === 'asset-url';
 }
 
 function serializeIndex(index: FileMeta[]): string {
@@ -412,7 +425,12 @@ export class LocalStore {
       if (dir !== '') folderSet.add(dir);
       let title = stripExtension(basename(path));
       let meta: FileMeta = { id, path, title, dir, updatedAt: now, kind, mime };
-      let doc: RepoFile = { ...meta, content, lastRemoteSha: sha, lastSyncedHash: hashText(content) };
+      let doc: RepoFile = {
+        ...meta,
+        content,
+        lastRemoteSha: sha,
+        lastSyncedHash: computeSyncedHash(kind, content, sha),
+      };
       index.push(meta);
       localStorage.setItem(this.noteKey(id), serializeFile(doc));
     }
@@ -884,7 +902,6 @@ function extractExtensionWithDot(baseName: string): string {
   return baseName.slice(idx);
 }
 
-// FIXME this is no longer possible, so has to be used sparingly / only as fallback
 function inferKindFromPath(path: string): FileKind {
   return /\.md$/i.test(path) ? 'markdown' : 'binary';
 }
@@ -1132,6 +1149,13 @@ export function setExpandedFolders(slug: string, dirs: string[]) {
   let unique = Array.from(new Set(dirs.filter((dir) => typeof dir === 'string' && dir !== '')));
   unique.sort();
   setRepoPrefs(slug, { expandedFolders: unique });
+}
+
+export function computeSyncedHash(kind: FileKind, content: string, remoteSha?: string): string {
+  if (kind === 'asset-url') {
+    return remoteSha ?? hashText(content);
+  }
+  return hashText(content);
 }
 
 export function hashText(text: string): string {

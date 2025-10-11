@@ -12,8 +12,8 @@ import {
   clearAllLocalData,
   getLastActiveFileId,
   setLastActiveFileId,
-  hashText,
   getRepoStore,
+  computeSyncedHash,
 } from './storage/local';
 import {
   signInWithGitHubApp,
@@ -711,7 +711,7 @@ function useSync(params: { slug: string; canSync: boolean; defaultBranch?: strin
           .listFiles()
           .map((meta) => localStore.loadFileById(meta.id))
           .filter((note) => note !== null)
-          .filter((note) => note.lastSyncedHash !== hashText(note.content))
+          .filter((note) => note.lastSyncedHash !== computeSyncedHash(note.kind, note.content, note.lastRemoteSha))
           .map((note) => ({
             path: note.path,
             text: note.content,

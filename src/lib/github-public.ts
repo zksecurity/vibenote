@@ -13,7 +13,7 @@ const treeCache = new Map<
 >();
 const fileCache = new Map<
   string,
-  { file: { contentBase64: string; sha: string } | null; expiresAt: number }
+  { file: { contentBase64: string; sha: string; downloadUrl?: string | null } | null; expiresAt: number }
 >();
 
 export type PublicRepoInfo = {
@@ -131,7 +131,7 @@ export async function fetchPublicFile(
   repo: string,
   path: string,
   ref?: string
-): Promise<{ contentBase64: string; sha: string }> {
+): Promise<{ contentBase64: string; sha: string; downloadUrl?: string | null }> {
   const key = `file:${cacheKey(owner, repo)}:${path}@${ref ?? ''}`;
   const now = Date.now();
   const cached = fileCache.get(key);
@@ -169,7 +169,8 @@ export async function fetchPublicFile(
       throw new Error('invalid public file response');
     }
   }
-  const file = { contentBase64, sha };
+  const downloadUrl = typeof json.download_url === 'string' ? json.download_url : undefined;
+  const file = { contentBase64, sha, downloadUrl };
   fileCache.set(key, { file, expiresAt: now + CACHE_TTL_OK });
   return file;
 }
