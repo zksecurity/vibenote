@@ -143,7 +143,8 @@ describe('syncBidirectional', () => {
     expect(imageMeta).toBeDefined();
     if (imageMeta) {
       const imageDoc = store.loadFileById(imageMeta.id);
-      expect(imageDoc?.content).toBe(Buffer.from('asset', 'utf8').toString('base64'));
+      expect(imageDoc?.kind).toBe('asset-url');
+      expect(imageDoc?.content).toMatch(/^gh-blob:/);
     }
     expectParity(store, remote);
   });
@@ -167,8 +168,8 @@ describe('syncBidirectional', () => {
     expect(asset).toBeDefined();
     if (!asset) return;
     const doc = store.loadFileById(asset.id);
-    expect(doc?.content).toBe(Buffer.from('image-data', 'utf8').toString('base64'));
-    expect(doc?.kind ?? 'binary').toBe('binary');
+    expect(doc?.kind).toBe('asset-url');
+    expect(doc?.content).toMatch(/^gh-blob:/);
     expectParity(store, remote);
   });
 
@@ -214,8 +215,8 @@ describe('syncBidirectional', () => {
     expect(asset).toBeDefined();
     if (!asset) return;
     const doc = store.loadFileById(asset.id);
-    expect(doc?.kind).toBe('binary');
-    expect(doc?.content).toBe(expectedBase64);
+    expect(doc?.kind).toBe('asset-url');
+    expect(doc?.content).toMatch(/^gh-blob:/);
     expect(capturedSha).toBeTruthy();
     expectParity(store, remote);
   });
@@ -297,22 +298,25 @@ async function getRemoteHeadSha(remote: MockRemoteRepo, branch = 'main'): Promis
 }
 
 function expectParity(store: LocalStore, remote: MockRemoteRepo) {
-  const localMap = new Map<string, string>();
+  const localDocs = new Map<string, ReturnType<LocalStore['loadFileById']>>();
   for (const meta of store.listFiles()) {
     const doc = store.loadFileById(meta.id);
     if (!doc) continue;
-    if (doc.kind === 'binary') {
-      const decoded = Buffer.from(doc.content, 'base64').toString('utf8');
-      localMap.set(meta.path, decoded);
-    } else {
-      localMap.set(meta.path, doc.content);
-    }
+    localDocs.set(meta.path, doc);
   }
   const remoteMap = remote.snapshot();
   const trackedRemoteKeys = [...remoteMap.keys()].filter(isTrackedPath).sort();
-  expect(trackedRemoteKeys).toEqual([...localMap.keys()].sort());
-  for (const [path, text] of localMap.entries()) {
-    expect(remoteMap.get(path)).toBe(text);
+  expect(trackedRemoteKeys).toEqual([...localDocs.keys()].sort());
+  for (const [path, doc] of localDocs.entries()) {
+    const remoteContent = remoteMap.get(path);
+    if (doc?.kind === 'markdown') {
+      expect(remoteContent).toBe(doc.content);
+    } else if (doc?.kind === 'binary') {
+      const decoded = Buffer.from(doc.content, 'base64').toString('utf8');
+      expect(remoteContent).toBe(decoded);
+    } else if (doc?.kind === 'asset-url') {
+      expect(remoteContent).toBeDefined();
+    }
   }
 }
 

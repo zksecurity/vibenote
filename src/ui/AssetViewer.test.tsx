@@ -2,6 +2,18 @@ import { render, screen, cleanup } from '@testing-library/react';
 import { describe, expect, test, beforeEach, afterEach, vi } from 'vitest';
 import type { BinaryFile, AssetUrlFile } from '../storage/local';
 import { AssetViewer } from './AssetViewer';
+import { fetchBlob } from '../sync/git-sync';
+
+vi.mock('../sync/git-sync', () => {
+  const mockFetchBlob = vi.fn();
+  return {
+    buildRemoteConfig: (slug: string) => {
+      const [owner, repo] = slug.split('/', 2);
+      return { owner, repo, branch: 'main' };
+    },
+    fetchBlob: mockFetchBlob,
+  };
+});
 
 const BASE_FILE: BinaryFile = {
   id: 'asset-1',
@@ -13,6 +25,8 @@ const BASE_FILE: BinaryFile = {
   mime: 'image/png',
   content: '',
 };
+
+const fetchBlobMock = fetchBlob as unknown as ReturnType<typeof vi.fn>;
 
 describe('AssetViewer', () => {
   let createObjectURL: ReturnType<typeof vi.fn>;
@@ -27,6 +41,7 @@ describe('AssetViewer', () => {
     };
     urlApi.createObjectURL = createObjectURL;
     urlApi.revokeObjectURL = revokeObjectURL;
+    fetchBlobMock.mockReset();
   });
 
   afterEach(() => {
@@ -68,6 +83,22 @@ describe('AssetViewer', () => {
     const link = screen.getByRole('link', { name: 'Download' });
     expect(link.getAttribute('href')).toBe('https://cdn.example.com/logo.png');
     expect(link.getAttribute('download')).toBe('logo.png');
+  });
+
+  test('renders placeholder assets by fetching blob on demand', async () => {
+    fetchBlobMock.mockResolvedValueOnce(btoa('fetched image payload'));
+    const placeholder: AssetUrlFile = {
+      ...BASE_FILE,
+      kind: 'asset-url',
+      content: 'gh-blob:user/repo#sha123',
+      lastRemoteSha: 'sha123',
+    };
+    render(<AssetViewer file={placeholder} />);
+    expect(createObjectURL).not.toHaveBeenCalled();
+    const image = await screen.findByRole('img', { name: 'logo.png' });
+    expect(image.getAttribute('src')).toMatch(/^blob:/);
+    expect(fetchBlobMock).toHaveBeenCalledTimes(1);
+    expect(fetchBlobMock).toHaveBeenCalledWith({ owner: 'user', repo: 'repo', branch: 'main' }, 'sha123');
   });
 
   test('shows fallback messaging when content is empty', () => {

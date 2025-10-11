@@ -47,6 +47,8 @@ type RepoFileEntry = { path: string; sha: string; kind: FileKind; mime: string }
 
 type RemoteFile = RepoFileEntry & { content: string };
 
+const BLOB_PLACEHOLDER_PREFIX = 'gh-blob:';
+
 export function buildRemoteConfig(slug: string, branch?: string): RemoteConfig {
   let [owner, repo] = slug.split('/', 2);
   if (!owner || !repo) throw Error('Invalid repository slug');
@@ -160,6 +162,7 @@ async function ensureBinaryContent(config: RemoteConfig, doc: RepoFile): Promise
     if (blob) return normalizeBase64(blob);
   }
   if (!doc.content) return null;
+  if (isBlobPlaceholder(doc.content)) return null;
   const fetched = await fetchUrlAsBase64(doc.content);
   return fetched ? normalizeBase64(fetched) : null;
 }
@@ -485,20 +488,48 @@ async function materializeRemoteFile(input: {
   downloadUrl?: string | null;
 }): Promise<RemoteFile> {
   let { config, path, kind, sha, contentBase64, downloadUrl } = input;
-  if (kind === 'binary' && downloadUrl && downloadUrl.trim() !== '') {
-    return { path, sha, kind: 'asset-url', mime: inferMimeFromPath(path), content: downloadUrl };
+  if (kind === 'markdown') {
+    let payload = contentBase64;
+    if (payload === '') {
+      const blob = await fetchBlob(config, sha);
+      if (blob !== null) payload = blob;
+    }
+    return { path, sha, kind: 'markdown', mime: MARKDOWN_MIME, content: fromBase64(payload) };
   }
-  let payload = contentBase64;
-  if (payload === '') {
-    let blob = await fetchBlob(config, sha);
-    if (blob !== null) payload = blob;
+  if (kind === 'binary') {
+    if (downloadUrl && isReusableDownloadUrl(downloadUrl)) {
+      return { path, sha, kind: 'asset-url', mime: inferMimeFromPath(path), content: downloadUrl };
+    }
+    return {
+      path,
+      sha,
+      kind: 'asset-url',
+      mime: inferMimeFromPath(path),
+      content: buildBlobPlaceholder(config, sha),
+    };
   }
-  if (kind === 'markdown') payload = fromBase64(payload);
-  return { path, sha, kind, mime: inferMimeFromPath(path), content: payload };
+  kind satisfies never;
+  throw Error('unexpected type');
 }
 
 function normalizeBase64(content: string): string {
   return content.replace(/\s+/g, '');
+}
+
+function isReusableDownloadUrl(url: string): boolean {
+  if (!url) return false;
+  const trimmed = url.trim();
+  if (trimmed === '') return false;
+  const lower = trimmed.toLowerCase();
+  return !/\b(token|access_token)=/.test(lower);
+}
+
+function buildBlobPlaceholder(config: RemoteConfig, sha: string): string {
+  return `${BLOB_PLACEHOLDER_PREFIX}${config.owner}/${config.repo}#${sha}`;
+}
+
+function isBlobPlaceholder(content: string): boolean {
+  return typeof content === 'string' && content.startsWith(BLOB_PLACEHOLDER_PREFIX);
 }
 
 async function fetchUrlAsBase64(url: string): Promise<string | null> {
@@ -699,7 +730,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
           merged++;
           pushed++;
           debugLog(slug, 'sync:merge', { path: doc.path });
-        } else if (doc.kind === 'binary') {
+        } else if (doc.kind === 'binary' || doc.kind === 'asset-url') {
           // TODO how to resolve conflicts for binary files?
           // currently we just use the remote version (seems fairer to pick the version that made it to github first)
           updateFile(storeSlug, id, rf.content, rf.mime);
@@ -707,12 +738,6 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
           remoteMap.set(e.path, rf.sha);
           pulled++;
           debugLog(slug, 'sync:pull:binary-conflict', { path: doc.path });
-        } else {
-          // in the future, we could handle other plaintext files than markdown here,
-          // using a plaintext-based merge strategy
-          // FIXME
-          doc.kind satisfies 'asset-url';
-          throw Error('unexpected case: file is neither binary nor markdown');
         }
       } else {
         // only remote changed → pull

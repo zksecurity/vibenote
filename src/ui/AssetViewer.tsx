@@ -1,7 +1,10 @@
 // Renders a preview for binary assets (currently image files) inside the workspace.
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { BinaryFile, AssetUrlFile } from '../storage/local';
 import { basename } from '../storage/local';
+import { buildRemoteConfig, fetchBlob } from '../sync/git-sync';
+
+const BLOB_PLACEHOLDER_PREFIX = 'gh-blob:';
 
 type AssetViewerProps = {
   file: BinaryFile | AssetUrlFile;
@@ -12,34 +15,83 @@ export function AssetViewer({ file }: AssetViewerProps) {
     () => (file.kind === 'binary' ? sanitizeBase64(file.content) : null),
     [file.kind, file.content]
   );
-  const preview = useMemo(() => {
-    if (file.kind === 'asset-url') {
-      const url = file.content.trim();
-      return url ? ({ kind: 'remote', url } as const) : null;
+  const blobPointer = useMemo(() => (file.kind === 'asset-url' ? parseBlobPointer(file.content) : null), [file]);
+  const directPreview = useMemo(() => {
+    if (file.kind === 'binary') {
+      return buildPreviewUrl(cleanedBase64, file.mime);
     }
-    return buildPreviewUrl(cleanedBase64, file.mime);
-  }, [file.kind, file.content, cleanedBase64, file.mime]);
+    if (file.kind === 'asset-url') {
+      if (blobPointer) return null;
+      const url = file.content.trim();
+      return url ? ({ kind: 'remote', url } as PreviewUrl) : null;
+    }
+    return null;
+  }, [file.kind, file.content, cleanedBase64, file.mime, blobPointer]);
+  const [resolvedPreview, setResolvedPreview] = useState<PreviewUrl | null>(directPreview);
+  const objectUrlRef = useRef<string | null>(resolvedPreview?.kind === 'blob' ? resolvedPreview.url : null);
+
+  useEffect(() => {
+    if (!blobPointer) {
+      setResolvedPreview(directPreview);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const slug = `${blobPointer.owner}/${blobPointer.repo}`;
+        const config = buildRemoteConfig(slug);
+        const blob = await fetchBlob(config, blobPointer.sha);
+        if (cancelled) return;
+        if (!blob) {
+          setResolvedPreview(null);
+          return;
+        }
+        const next = buildPreviewUrl(normalizeBase64(blob), file.mime);
+        setResolvedPreview(next);
+      } catch {
+        if (!cancelled) setResolvedPreview(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [blobPointer, directPreview, file.mime]);
+
+  useEffect(() => {
+    const current = resolvedPreview?.kind === 'blob' ? resolvedPreview.url : null;
+    if (objectUrlRef.current && objectUrlRef.current !== current) {
+      try {
+        URL.revokeObjectURL(objectUrlRef.current);
+      } catch {
+        // ignore revoke errors
+      }
+    }
+    objectUrlRef.current = current;
+  }, [resolvedPreview]);
+
+  useEffect(() => {
+    return () => {
+      if (objectUrlRef.current) {
+        try {
+          URL.revokeObjectURL(objectUrlRef.current);
+        } catch {
+          // ignore revoke errors
+        }
+        objectUrlRef.current = null;
+      }
+    };
+  }, []);
+
   const assetName = useMemo(() => (file.title ? file.title : basename(file.path)), [file.title, file.path]);
   const sizeLabel = useMemo(
     () => (file.kind === 'binary' ? formatFileSize(estimateBytes(cleanedBase64)) : null),
     [file.kind, cleanedBase64]
   );
 
-  useEffect(() => {
-    if (!preview || preview.kind !== 'blob') return;
-    return () => {
-      try {
-        URL.revokeObjectURL(preview.url);
-      } catch {
-        // ignore revoke issues; preview already gone or unsupported
-      }
-    };
-  }, [preview]);
-
   const downloadHref = useMemo(() => {
-    if (!preview) return undefined;
-    return preview.url;
-  }, [preview]);
+    if (!resolvedPreview) return undefined;
+    return resolvedPreview.url;
+  }, [resolvedPreview]);
 
   return (
     <div className="asset-viewer">
@@ -54,15 +106,15 @@ export function AssetViewer({ file }: AssetViewerProps) {
             <span>Path:</span> <code>{file.path}</code>
           </p>
         </div>
-        {preview && downloadHref && (
+        {resolvedPreview && downloadHref && (
           <a className="btn subtle" download={assetName} href={downloadHref}>
             Download
           </a>
         )}
       </div>
       <div className="asset-viewer-body">
-        {preview && <img key={preview.url} src={preview.url} alt={assetName} />}
-        {!preview && (
+        {resolvedPreview && <img key={resolvedPreview.url} src={resolvedPreview.url} alt={assetName} />}
+        {!resolvedPreview && (
           <p className="asset-viewer-fallback">Unable to preview this asset. Try downloading it instead.</p>
         )}
       </div>
@@ -126,6 +178,10 @@ function sanitizeBase64(content: string | undefined): string | null {
   return content.replace(/\s+/g, '');
 }
 
+function normalizeBase64(content: string): string {
+  return content.replace(/\s+/g, '');
+}
+
 function estimateBytes(contentBase64: string | null): number {
   if (!contentBase64 || contentBase64.length === 0) return 0;
   const length = contentBase64.length;
@@ -144,4 +200,16 @@ function formatFileSize(bytes: number | null): string | null {
   }
   const formatted = value >= 100 || unitIndex === 0 ? Math.round(value) : Math.round(value * 10) / 10;
   return `${formatted} ${units[unitIndex]}`;
+}
+
+type BlobPointer = { owner: string; repo: string; sha: string };
+
+function parseBlobPointer(content: string): BlobPointer | null {
+  if (!content.startsWith(BLOB_PLACEHOLDER_PREFIX)) return null;
+  const remainder = content.slice(BLOB_PLACEHOLDER_PREFIX.length);
+  const [slug, sha] = remainder.split('#', 2);
+  if (!slug || !sha) return null;
+  const [owner, repo] = slug.split('/', 2);
+  if (!owner || !repo) return null;
+  return { owner, repo, sha };
 }
