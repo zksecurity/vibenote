@@ -273,6 +273,34 @@ describe('syncBidirectional multi-device', () => {
     expect(pulled?.kind).toBe('asset-url');
   });
 
+  test('asset-url rename on device one while device two has offline edits', async () => {
+    let deviceOne = createDevice('device-one');
+    let storeOne = deviceOne.store;
+    const initialPayload = Buffer.from('camera-v1').toString('base64');
+    storeOne.createFile('media/camera.png', initialPayload);
+    await syncBidirectional(storeOne, REPO_SLUG);
+    expect(remotePaths(remote)).toEqual(['media/camera.png']);
+
+    let deviceTwo = createDevice('device-two', deviceOne.storage);
+    let storeTwo = useDevice(deviceTwo);
+    await syncBidirectional(storeTwo, REPO_SLUG);
+    storeTwo.saveFile('media/camera.png', Buffer.from('local-offline-edit').toString('base64'));
+
+    storeOne = useDevice(deviceOne);
+    storeOne.renameFile('media/camera.png', 'camera-updated');
+    await syncBidirectional(storeOne, REPO_SLUG);
+    expect(remotePaths(remote)).toEqual(['media/camera-updated.png']);
+
+    storeTwo = useDevice(deviceTwo);
+    const summary = await syncBidirectional(storeTwo, REPO_SLUG);
+    expect(summary.pulled).toBeGreaterThan(0);
+    const updatedMeta = storeTwo.listFiles().find((f) => f.path === 'media/camera-updated.png');
+    const docTwo = storeTwo.loadFileById(updatedMeta?.id ?? '');
+    expect(docTwo?.kind).toBe('asset-url');
+    expect(docTwo?.content).toMatch(/^gh-blob:/);
+    expect(remote.snapshot().get('media/camera-updated.png')).toBe(initialPayload);
+  });
+
   test('asset-url placeholders propagate between devices and support renames', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
@@ -410,6 +438,30 @@ describe('syncBidirectional multi-device', () => {
     let storeTwo = useDevice(deviceTwo);
     await syncBidirectional(storeTwo, REPO_SLUG);
 
+    expect(filePaths(storeTwo)).toEqual([]);
+    expect(remotePaths(remote)).toEqual([]);
+  });
+
+  test('asset placeholder deleted on device one while device two has offline edits', async () => {
+    let deviceOne = createDevice('device-one');
+    let storeOne = deviceOne.store;
+    const initialPayload = Buffer.from('whiteboard').toString('base64');
+    storeOne.createFile('media/whiteboard.png', initialPayload);
+    await syncBidirectional(storeOne, REPO_SLUG);
+
+    let deviceTwo = createDevice('device-two', deviceOne.storage);
+    let storeTwo = useDevice(deviceTwo);
+    await syncBidirectional(storeTwo, REPO_SLUG);
+    const fileMetaTwo = storeTwo.listFiles().find((f) => f.path === 'media/whiteboard.png');
+    expect(fileMetaTwo).toBeDefined();
+
+    storeOne = useDevice(deviceOne);
+    storeOne.deleteFile('media/whiteboard.png');
+    await syncBidirectional(storeOne, REPO_SLUG);
+    expect(remotePaths(remote)).toEqual([]);
+
+    storeTwo = useDevice(deviceTwo);
+    await syncBidirectional(storeTwo, REPO_SLUG);
     expect(filePaths(storeTwo)).toEqual([]);
     expect(remotePaths(remote)).toEqual([]);
   });

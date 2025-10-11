@@ -3,15 +3,7 @@ import { normalizePath } from '../lib/util';
 import { logError } from '../lib/logging';
 import type { RemoteFile } from '../sync/git-sync';
 
-export type {
-  FileKind,
-  FileMeta,
-  RepoFile,
-  MarkdownFile,
-  BinaryFile,
-  AssetUrlFile,
-  RepoStoreSnapshot,
-};
+export type { FileKind, FileMeta, RepoFile, MarkdownFile, BinaryFile, AssetUrlFile, RepoStoreSnapshot };
 
 export { basename, stripExtension, extractDir, isMarkdownFile, isBinaryFile, isAssetUrlFile, debugLog };
 
