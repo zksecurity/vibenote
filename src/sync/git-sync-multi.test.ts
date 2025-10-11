@@ -232,7 +232,7 @@ describe('syncBidirectional multi-device', () => {
     expect(remotePaths(remote)).toEqual([]);
   });
 
-  test('device two pulls newly created binary asset', async () => {
+  test('device two pulls newly created asset placeholder', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
     storeOne.createFile('assets/logo.png', Buffer.from('logo').toString('base64'));
@@ -244,10 +244,13 @@ describe('syncBidirectional multi-device', () => {
     await syncBidirectional(storeTwo, REPO_SLUG);
 
     expect(filePaths(storeTwo)).toEqual(['assets/logo.png']);
+    const pulled = storeTwo.loadFileById(storeTwo.listFiles()[0]?.id ?? '');
+    expect(pulled?.kind).toBe('asset-url');
+    expect(pulled?.content).toMatch(/^gh-blob:/);
     expect(remotePaths(remote)).toEqual(['assets/logo.png']);
   });
 
-  test('renaming a binary asset propagates to other devices', async () => {
+  test('renaming an asset placeholder propagates to other devices', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
     storeOne.createFile('logo.png', Buffer.from('logo').toString('base64'));
@@ -266,6 +269,8 @@ describe('syncBidirectional multi-device', () => {
 
     expect(filePaths(storeTwo)).toEqual(['brand.png']);
     expect(remotePaths(remote)).toEqual(['brand.png']);
+    const pulled = storeTwo.loadFileById(storeTwo.listFiles()[0]?.id ?? '');
+    expect(pulled?.kind).toBe('asset-url');
   });
 
   test('asset-url placeholders propagate between devices and support renames', async () => {
@@ -330,7 +335,65 @@ describe('syncBidirectional multi-device', () => {
     expect(remoteContent).toBe(assetPayload);
   });
 
-  test('device two removes a binary asset deleted on device one', async () => {
+  test('remote updates to asset placeholders sync to all devices', async () => {
+    let deviceOne = createDevice('device-one');
+    let storeOne = deviceOne.store;
+    storeOne.createFile('images/camera.png', Buffer.from('camera').toString('base64'));
+    await syncBidirectional(storeOne, REPO_SLUG);
+
+    let deviceTwo = createDevice('device-two', deviceOne.storage);
+    let storeTwo = useDevice(deviceTwo);
+    await syncBidirectional(storeTwo, REPO_SLUG);
+
+    remote.setFile('images/camera.png', 'remote-update');
+
+    storeOne = useDevice(deviceOne);
+    await syncBidirectional(storeOne, REPO_SLUG);
+    const docOneMeta = storeOne.listFiles().find((f) => f.path === 'images/camera.png');
+    const docOne = storeOne.loadFileById(docOneMeta?.id ?? '');
+    expect(docOne?.kind).toBe('asset-url');
+    expect(docOne?.content).toMatch(/^gh-blob:/);
+
+    storeTwo = useDevice(deviceTwo);
+    await syncBidirectional(storeTwo, REPO_SLUG);
+    const docTwoMeta = storeTwo.listFiles().find((f) => f.path === 'images/camera.png');
+    const docTwo = storeTwo.loadFileById(docTwoMeta?.id ?? '');
+    expect(docTwo?.kind).toBe('asset-url');
+    expect(docTwo?.content).toMatch(/^gh-blob:/);
+    expect(remote.snapshot().get('images/camera.png')).toBe('remote-update');
+  });
+
+  test('conflicting edits on asset placeholders keep the remote version', async () => {
+    let deviceOne = createDevice('device-one');
+    let storeOne = deviceOne.store;
+    storeOne.createFile('images/diagram.png', Buffer.from('diagram').toString('base64'));
+    await syncBidirectional(storeOne, REPO_SLUG);
+
+    let deviceTwo = createDevice('device-two', deviceOne.storage);
+    let storeTwo = useDevice(deviceTwo);
+    await syncBidirectional(storeTwo, REPO_SLUG);
+
+    storeTwo.saveFile('images/diagram.png', Buffer.from('local-edit').toString('base64'));
+    remote.setFile('images/diagram.png', 'remote-edit');
+
+    const summary = await syncBidirectional(storeTwo, REPO_SLUG);
+    expect(summary.pulled).toBeGreaterThan(0);
+    const docTwoMeta = storeTwo.listFiles().find((f) => f.path === 'images/diagram.png');
+    const docTwo = storeTwo.loadFileById(docTwoMeta?.id ?? '');
+    expect(docTwo?.kind).toBe('asset-url');
+    expect(docTwo?.content).toMatch(/^gh-blob:/);
+    expect(remote.snapshot().get('images/diagram.png')).toBe('remote-edit');
+
+    storeOne = useDevice(deviceOne);
+    await syncBidirectional(storeOne, REPO_SLUG);
+    const docOneMeta = storeOne.listFiles().find((f) => f.path === 'images/diagram.png');
+    const docOne = storeOne.loadFileById(docOneMeta?.id ?? '');
+    expect(docOne?.kind).toBe('asset-url');
+    expect(docOne?.content).toMatch(/^gh-blob:/);
+    expect(remote.snapshot().get('images/diagram.png')).toBe('remote-edit');
+  });
+
+  test('device two removes an asset placeholder deleted on device one', async () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
     storeOne.createFile('assets/chart.svg', Buffer.from('<svg/>').toString('base64'));
