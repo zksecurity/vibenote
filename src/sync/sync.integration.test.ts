@@ -19,14 +19,14 @@ describe('syncBidirectional integration', () => {
     remote.setFile('docs/Alpha.md', 'alpha text');
     remote.setFile('docs/Beta.md', 'beta text');
 
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
-      (input: RequestInfo | URL, init?: RequestInit) => remote.handleFetch(input, init)
-    );
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation((input: RequestInfo | URL, init?: RequestInit) => remote.handleFetch(input, init));
 
     try {
       const store = new LocalStore(slug);
-      store.createNote('Alpha', 'alpha text', 'docs');
-      store.createNote('Beta', 'beta text', 'docs');
+      store.createFile('docs/Alpha.md', 'alpha text');
+      store.createFile('docs/Beta.md', 'beta text');
       markRepoLinked(slug);
 
       await syncBidirectional(store, slug);
@@ -36,7 +36,7 @@ describe('syncBidirectional integration', () => {
       await syncBidirectional(store, slug);
 
       const localPaths = new LocalStore(slug)
-        .listNotes()
+        .listFiles()
         .map((note) => note.path)
         .sort();
       expect(localPaths).toEqual(['guides/Alpha.md', 'guides/Beta.md']);

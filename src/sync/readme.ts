@@ -1,4 +1,4 @@
-import { commitBatch, pullNote, type RemoteConfig } from './git-sync';
+import { commitBatch, pullRepoFile, type RemoteConfig } from './git-sync';
 
 const README_BODY = `Welcome! This repository is managed by [VibeNote](https://vibenote.dev).
 
@@ -14,14 +14,15 @@ function buildReadme(repoName: string): string {
 
 async function ensureIntroReadme(config: RemoteConfig): Promise<void> {
   try {
-    const existingReadme = await pullNote(config, 'README.md');
+    const existingReadme = await pullRepoFile(config, 'README.md');
     await commitBatch(
       config,
       [
         {
           path: 'README.md',
-          text: buildReadme(config.repo),
+          content: buildReadme(config.repo),
           baseSha: existingReadme?.sha,
+          kind: 'markdown',
         },
       ],
       'vibenote: add README'

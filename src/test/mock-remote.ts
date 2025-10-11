@@ -148,6 +148,25 @@ class MockRemoteRepo {
       });
     }
 
+    const blobGetMatch = url.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/git\/blobs\/([^/]+)$/);
+    if (blobGetMatch && method === 'GET') {
+      const owner = blobGetMatch[1] ?? '';
+      const repo = blobGetMatch[2] ?? '';
+      if (!this.matchesRepo(owner, repo)) {
+        return this.makeResponse(404, { message: 'not found' });
+      }
+      const sha = blobGetMatch[3] ?? '';
+      const blob = this.blobs.get(sha);
+      if (blob === undefined) {
+        return this.makeResponse(404, { message: 'not found' });
+      }
+      return this.makeResponse(200, {
+        sha,
+        content: Buffer.from(blob, 'utf8').toString('base64'),
+        encoding: 'base64',
+      });
+    }
+
     const commitGetMatch = url.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/git\/commits\/([^/]+)$/);
     if (commitGetMatch && method === 'GET') {
       const owner = commitGetMatch[1] ?? '';

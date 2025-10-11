@@ -1,11 +1,11 @@
+import { Buffer } from 'node:buffer';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { useEffect, useState } from 'react';
 import { beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { RepoMetadata } from '../lib/backend';
 import type { RepoRoute } from '../ui/routing';
-import { LocalStore, markRepoLinked, recordAutoSyncRun, setLastActiveNoteId } from '../storage/local';
-
-type RemoteFile = { path: string; text: string; sha: string };
+import { LocalStore, markRepoLinked, recordAutoSyncRun, setLastActiveFileId } from '../storage/local';
+import type { RemoteFile } from '../sync/git-sync';
 
 type AuthMocks = {
   signInWithGitHubApp: ReturnType<typeof vi.fn>;
@@ -22,8 +22,8 @@ type BackendMocks = {
 
 type SyncMocks = {
   buildRemoteConfig: ReturnType<typeof vi.fn>;
-  listNoteFiles: ReturnType<typeof vi.fn>;
-  pullNote: ReturnType<typeof vi.fn>;
+  listRepoFiles: ReturnType<typeof vi.fn>;
+  pullRepoFile: ReturnType<typeof vi.fn>;
   syncBidirectional: ReturnType<typeof vi.fn>;
 };
 
@@ -45,8 +45,8 @@ const syncModule = vi.hoisted<SyncMocks>(() => ({
     const [owner, repo] = slug.split('/', 2);
     return { owner: owner ?? '', repo: repo ?? '', branch: 'main' };
   }),
-  listNoteFiles: vi.fn(),
-  pullNote: vi.fn(),
+  listRepoFiles: vi.fn(),
+  pullRepoFile: vi.fn(),
   syncBidirectional: vi.fn(),
 }));
 
@@ -65,8 +65,8 @@ vi.mock('../lib/backend', () => ({
 
 vi.mock('../sync/git-sync', () => ({
   buildRemoteConfig: syncModule.buildRemoteConfig,
-  listNoteFiles: syncModule.listNoteFiles,
-  pullNote: syncModule.pullNote,
+  listRepoFiles: syncModule.listRepoFiles,
+  pullRepoFile: syncModule.pullRepoFile,
   syncBidirectional: syncModule.syncBidirectional,
 }));
 
@@ -85,8 +85,8 @@ const mockSignOutFromGitHubApp = authModule.signOutFromGitHubApp;
 const mockGetRepoMetadata = backendModule.getRepoMetadata;
 
 const mockBuildRemoteConfig = syncModule.buildRemoteConfig;
-const mockListNoteFiles = syncModule.listNoteFiles;
-const mockPullNote = syncModule.pullNote;
+const mockListRepoFiles = syncModule.listRepoFiles;
+const mockPullRepoFile = syncModule.pullRepoFile;
 const mockSyncBidirectional = syncModule.syncBidirectional;
 
 const writableMeta: RepoMetadata = {
@@ -166,8 +166,8 @@ describe('useRepoData', () => {
 
     mockGetRepoMetadata.mockReset();
     mockBuildRemoteConfig.mockReset();
-    mockListNoteFiles.mockReset();
-    mockPullNote.mockReset();
+    mockListRepoFiles.mockReset();
+    mockPullRepoFile.mockReset();
     mockSyncBidirectional.mockReset();
 
     mockGetSessionToken.mockReturnValue(null);
@@ -175,7 +175,7 @@ describe('useRepoData', () => {
     mockEnsureFreshAccessToken.mockResolvedValue('access-token');
     mockSignInWithGitHubApp.mockResolvedValue(null);
 
-    mockListNoteFiles.mockResolvedValue([]);
+    mockListRepoFiles.mockResolvedValue([]);
 
     mockBuildRemoteConfig.mockImplementation((slug: string) => {
       const [owner, repo] = slug.split('/', 2);
@@ -192,26 +192,26 @@ describe('useRepoData', () => {
 
     expect(result.current.state.canEdit).toBe(true);
     expect(result.current.state.canSync).toBe(false);
-    expect(result.current.state.notes).toHaveLength(1);
-    expect(result.current.state.notes[0]?.title).toBe('Welcome');
-    const welcomePath = result.current.state.notes[0]?.path;
+    expect(result.current.state.files).toHaveLength(1);
+    expect(result.current.state.files[0]?.title).toBe('Welcome');
+    const welcomePath = result.current.state.files[0]?.path;
     expect(welcomePath).toBeDefined();
 
     act(() => {
-      result.current.actions.selectNote(welcomePath);
+      result.current.actions.selectFile(welcomePath);
     });
 
-    await waitFor(() => expect(result.current.state.doc?.path).toBe(welcomePath));
-    expect(result.current.state.doc?.text).toContain('Welcome to VibeNote');
+    await waitFor(() => expect(result.current.state.activeFile?.path).toBe(welcomePath));
+    expect(result.current.state.activeFile?.content).toContain('Welcome to VibeNote');
     expect(recordRecent).not.toHaveBeenCalled();
   });
 
   test('tracks active note path on the new route', async () => {
     const recordRecent = vi.fn<RecordRecentFn>();
     const store = new LocalStore('new');
-    const alphaId = store.createNote('Alpha', 'alpha text');
-    const welcome = store.listNotes().find((note) => note.title === 'Welcome');
-    const alpha = store.loadNote(alphaId);
+    const alphaId = store.createFile('Alpha.md', 'alpha text');
+    const welcome = store.listFiles().find((note) => note.title === 'Welcome');
+    const alpha = store.loadFileById(alphaId);
     if (!alpha) throw new Error('Failed to seed alpha note');
     if (!welcome) throw new Error('Missing welcome note');
 
@@ -227,11 +227,11 @@ describe('useRepoData', () => {
     });
 
     await waitFor(() => expect(result.current.data.state.activePath).toBe(alpha.path));
-    expect(result.current.data.state.doc?.text).toBe('alpha text');
+    expect(result.current.data.state.activeFile?.content).toBe('alpha text');
     expect(result.current.routeState.notePath).toBe(alpha.path);
 
     await act(async () => {
-      await result.current.data.actions.selectNote(welcome.path);
+      await result.current.data.actions.selectFile(welcome.path);
     });
 
     await waitFor(() => expect(result.current.data.state.activePath).toBe(welcome.path));
@@ -241,9 +241,9 @@ describe('useRepoData', () => {
   test('activates the route note path when the file exists locally', async () => {
     const slug = 'acme/docs';
     const store = new LocalStore(slug);
-    store.createNote('Alpha', '# Alpha');
-    const targetId = store.createNote('Beta', '# Beta');
-    const target = store.loadNote(targetId);
+    store.createFile('Alpha.md', '# Alpha');
+    const targetId = store.createFile('Beta.md', '# Beta');
+    const target = store.loadFileById(targetId);
     if (target === null) throw new Error('Failed to load newly created note');
     markRepoLinked(slug);
 
@@ -260,17 +260,46 @@ describe('useRepoData', () => {
     const { result } = renderRepoData({ slug, route, recordRecent });
 
     await waitFor(() => expect(result.current.state.activePath).toBe(target.path));
-    expect(result.current.state.doc?.path).toBe(target.path);
+    expect(result.current.state.activeFile?.path).toBe(target.path);
+  });
+
+  test('state.files includes markdown and image entries for writable repos', async () => {
+    const slug = 'acme/assets';
+    const store = new LocalStore(slug);
+    store.createFile('Guide.md', '# usage');
+    store.createFile('art/logo.png', Buffer.from('png-data', 'utf8').toString('base64'));
+    markRepoLinked(slug);
+
+    mockGetSessionToken.mockReturnValue('token');
+    mockGetSessionUser.mockReturnValue({
+      login: 'octo',
+      name: 'Octo',
+      avatarUrl: 'https://example.com/octo.png',
+    });
+    setRepoMetadata(writableMeta);
+
+    const recordRecent = vi.fn<RecordRecentFn>();
+    const route: RepoRoute = { kind: 'repo', owner: 'acme', repo: 'assets' };
+    const { result } = renderRepoData({ slug, route, recordRecent });
+
+    await waitFor(() => expect(result.current.state.files.length).toBe(2));
+    const byPath = new Map(result.current.state.files.map((file) => [file.path, file.kind]));
+    expect(byPath.get('Guide.md')).toBe('markdown');
+    expect(byPath.get('art/logo.png')).toBe('binary');
   });
 
   test('loads a read-only note that matches the route note path', async () => {
     const slug = 'acme/docs';
     setRepoMetadata(readOnlyMeta);
-    mockListNoteFiles.mockResolvedValue([{ path: 'guides/Intro.md', sha: 'sha-intro' }]);
-    mockPullNote.mockResolvedValue({
+    mockListRepoFiles.mockResolvedValue([
+      { path: 'guides/Intro.md', sha: 'sha-intro', kind: 'markdown', mime: 'text/markdown' },
+    ]);
+    mockPullRepoFile.mockResolvedValue({
       path: 'guides/Intro.md',
-      text: '# Intro',
+      content: '# Intro',
       sha: 'sha-intro',
+      kind: 'markdown',
+      mime: 'text/markdown',
     });
 
     const recordRecent = vi.fn<RecordRecentFn>();
@@ -278,8 +307,8 @@ describe('useRepoData', () => {
     const { result } = renderRepoData({ slug, route, recordRecent });
 
     await waitFor(() => expect(result.current.state.activePath).toBe('guides/Intro.md'));
-    await waitFor(() => expect(result.current.state.doc?.text).toBe('# Intro'));
-    expect(mockPullNote).toHaveBeenCalledWith(expect.anything(), 'guides/Intro.md');
+    await waitFor(() => expect(result.current.state.activeFile?.content).toBe('# Intro'));
+    expect(mockPullRepoFile).toHaveBeenCalledWith(expect.anything(), 'guides/Intro.md');
   });
 
   // Writable repos should sync on demand and reflect updated auth/session state without losing edits.
@@ -290,8 +319,8 @@ describe('useRepoData', () => {
     const seededUuid = '00000000-0000-0000-0000-000000000001';
     const uuidSpy = vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValueOnce(seededUuid);
     const seedStore = new LocalStore(slug);
-    const noteId = seedStore.createNote('Seed', 'initial text');
-    const notePath = seedStore.loadNote(noteId)?.path;
+    const noteId = seedStore.createFile('Seed.md', 'initial text');
+    const notePath = seedStore.loadFileById(noteId)?.path;
     if (!notePath) throw new Error('Missing note path after seeding');
     uuidSpy.mockRestore();
     markRepoLinked(slug);
@@ -322,7 +351,7 @@ describe('useRepoData', () => {
     });
 
     await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
-    await waitFor(() => expect(result.current.state.notes).toHaveLength(1));
+    await waitFor(() => expect(result.current.state.files).toHaveLength(1));
 
     expect(result.current.state.canEdit).toBe(true);
     expect(result.current.state.canSync).toBe(true);
@@ -332,17 +361,17 @@ describe('useRepoData', () => {
     );
 
     act(() => {
-      result.current.actions.selectNote(notePath);
+      result.current.actions.selectFile(notePath);
     });
 
-    await waitFor(() => expect(result.current.state.doc?.path).toBe(notePath));
+    await waitFor(() => expect(result.current.state.activeFile?.path).toBe(notePath));
 
     act(() => {
-      result.current.actions.updateNoteText(notePath, 'updated text');
+      result.current.actions.saveFile(notePath, 'updated text');
     });
 
-    const storedAfterEdit = new LocalStore(slug).loadNote(noteId);
-    expect(storedAfterEdit?.text).toBe('updated text');
+    const storedAfterEdit = new LocalStore(slug).loadFileById(noteId);
+    expect(storedAfterEdit?.content).toBe('updated text');
 
     await act(async () => {
       await result.current.actions.syncNow();
@@ -370,12 +399,16 @@ describe('useRepoData', () => {
 
     mockGetSessionToken.mockReturnValue(null);
     setRepoMetadata(readOnlyMeta);
-    mockListNoteFiles.mockResolvedValue([{ path: 'docs/alpha.md', sha: 'sha-alpha' }]);
-    mockPullNote.mockImplementation(
+    mockListRepoFiles.mockResolvedValue([
+      { path: 'docs/alpha.md', sha: 'sha-alpha', kind: 'markdown', mime: 'text/markdown' },
+    ]);
+    mockPullRepoFile.mockImplementation(
       async (_config, path: string): Promise<RemoteFile> => ({
         path,
-        text: `# ${path}`,
+        content: `# ${path}`,
         sha: `sha-${path}`,
+        kind: 'markdown',
+        mime: 'text/markdown',
       })
     );
 
@@ -389,37 +422,39 @@ describe('useRepoData', () => {
     expect(result.current.state.canEdit).toBe(false);
     expect(result.current.state.canRead).toBe(true);
 
-    await waitFor(() => expect(result.current.state.notes.length).not.toBe(0));
-    expect(result.current.state.notes).toEqual([
+    await waitFor(() => expect(result.current.state.files.length).not.toBe(0));
+    expect(result.current.state.files).toEqual([
       expect.objectContaining({ id: 'docs/alpha.md', title: 'alpha' }),
     ]);
     expect(result.current.state.activePath).toBeUndefined();
-    expect(result.current.state.doc).toBeUndefined();
+    expect(result.current.state.activeFile).toBeUndefined();
 
     await waitFor(() =>
       expect(recordRecent).toHaveBeenCalledWith(expect.objectContaining({ slug, connected: false }))
     );
 
     act(() => {
-      result.current.actions.selectNote('docs/alpha.md');
+      result.current.actions.selectFile('docs/alpha.md');
     });
 
-    await waitFor(() => expect(result.current.state.doc?.text).toBe('# docs/alpha.md'));
-    expect(mockPullNote).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(result.current.state.activeFile?.content).toBe('# docs/alpha.md'));
+    expect(mockPullRepoFile).toHaveBeenCalledTimes(1);
 
-    mockPullNote.mockClear();
-    mockPullNote.mockResolvedValue({
+    mockPullRepoFile.mockClear();
+    mockPullRepoFile.mockResolvedValue({
       path: 'docs/alpha.md',
-      text: '# updated remote',
+      content: '# updated remote',
       sha: 'sha-updated',
+      kind: 'markdown',
+      mime: 'text/markdown',
     });
 
     act(() => {
-      result.current.actions.selectNote('docs/alpha.md');
+      result.current.actions.selectFile('docs/alpha.md');
     });
 
-    await waitFor(() => expect(result.current.state.doc?.text).toBe('# updated remote'));
-    expect(mockPullNote).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(result.current.state.activeFile?.content).toBe('# updated remote'));
+    expect(mockPullRepoFile).toHaveBeenCalledTimes(1);
   });
 
   test('read-only repos list README without auto-selecting it', async () => {
@@ -428,15 +463,17 @@ describe('useRepoData', () => {
 
     mockGetSessionToken.mockReturnValue(null);
     setRepoMetadata(readOnlyMeta);
-    mockListNoteFiles.mockResolvedValue([
-      { path: 'docs/alpha.md', sha: 'sha-alpha' },
-      { path: 'README.md', sha: 'sha-readme' },
+    mockListRepoFiles.mockResolvedValue([
+      { path: 'docs/alpha.md', sha: 'sha-alpha', kind: 'markdown', mime: 'text/markdown' },
+      { path: 'README.md', sha: 'sha-readme', kind: 'markdown', mime: 'text/markdown' },
     ]);
-    mockPullNote.mockImplementation(
+    mockPullRepoFile.mockImplementation(
       async (_config, path: string): Promise<RemoteFile> => ({
         path,
-        text: `# ${path}`,
+        content: `# ${path}`,
         sha: `sha-${path}`,
+        kind: 'markdown',
+        mime: 'text/markdown',
       })
     );
 
@@ -446,10 +483,10 @@ describe('useRepoData', () => {
       recordRecent,
     });
 
-    await waitFor(() => expect(result.current.state.notes.length).toBe(2));
+    await waitFor(() => expect(result.current.state.files.length).toBe(2));
     expect(result.current.state.activePath).toBe('README.md');
-    await waitFor(() => expect(result.current.state.doc?.path).toBe('README.md'));
-    expect(mockPullNote).toHaveBeenCalledWith(expect.anything(), 'README.md');
+    await waitFor(() => expect(result.current.state.activeFile?.path).toBe('README.md'));
+    expect(mockPullRepoFile).toHaveBeenCalledWith(expect.anything(), 'README.md');
   });
 
   test('linked repos focus README after initial import', async () => {
@@ -463,15 +500,17 @@ describe('useRepoData', () => {
       avatarUrl: 'https://example.com/hubot.png',
     });
     setRepoMetadata(writableMeta);
-    mockListNoteFiles.mockResolvedValue([
-      { path: 'notes/first.md', sha: 'sha-first' },
-      { path: 'README.md', sha: 'sha-readme' },
+    mockListRepoFiles.mockResolvedValue([
+      { path: 'notes/first.md', sha: 'sha-first', kind: 'markdown', mime: 'text/markdown' },
+      { path: 'README.md', sha: 'sha-readme', kind: 'markdown', mime: 'text/markdown' },
     ]);
-    mockPullNote.mockImplementation(
+    mockPullRepoFile.mockImplementation(
       async (_config, path: string): Promise<RemoteFile> => ({
         path,
-        text: `# ${path}`,
+        content: `# ${path}`,
         sha: `sha-${path}`,
+        kind: 'markdown',
+        mime: 'text/markdown',
       })
     );
 
@@ -486,10 +525,10 @@ describe('useRepoData', () => {
       recordRecent,
     });
 
-    await waitFor(() => expect(result.current.state.notes.length).toBe(2));
-    const readmeEntry = result.current.state.notes.find((note) => note.path === 'README.md');
+    await waitFor(() => expect(result.current.state.files.length).toBe(2));
+    const readmeEntry = result.current.state.files.find((file) => file.path === 'README.md');
     await waitFor(() => expect(result.current.state.activePath).toBe('README.md'));
-    await waitFor(() => expect(result.current.state.doc?.path).toBe('README.md'));
+    await waitFor(() => expect(result.current.state.activeFile?.path).toBe('README.md'));
     expect(readmeEntry?.id).toBe('00000000-0000-0000-0000-000000000222');
 
     uuidSpy.mockRestore();
@@ -503,8 +542,8 @@ describe('useRepoData', () => {
     const seededUuid = '00000000-0000-0000-0000-000000000042';
     const uuidSpy = vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValueOnce(seededUuid);
     const seedStore = new LocalStore(slug);
-    const noteId = seedStore.createNote('Seed', 'initial text');
-    setLastActiveNoteId(slug, noteId);
+    const noteId = seedStore.createFile('Seed.md', 'initial text');
+    setLastActiveFileId(slug, noteId);
     markRepoLinked(slug);
     uuidSpy.mockRestore();
 
@@ -531,13 +570,13 @@ describe('useRepoData', () => {
           setRoute((prev) => (prev.kind === 'repo' ? { ...prev, notePath: nextPath } : prev));
         },
       });
-      seenDocIds.push(value.state.doc?.id);
+      seenDocIds.push(value.state.activeFile?.id);
       seenNeedsInstall.push(value.state.needsInstall);
       seenCanEdit.push(value.state.canEdit);
       return value;
     });
 
-    expect(result.current.state.doc?.id).toBe(noteId);
+    expect(result.current.state.activeFile?.id).toBe(noteId);
 
     await act(async () => {
       pendingMeta.resolve({ ...writableMeta });
@@ -545,7 +584,7 @@ describe('useRepoData', () => {
     });
 
     await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
-    expect(result.current.state.doc?.id).toBe(noteId);
+    expect(result.current.state.activeFile?.id).toBe(noteId);
     expect(seenDocIds.every((id) => id === noteId)).toBe(true);
     expect(seenNeedsInstall.every((flag) => flag === false)).toBe(true);
     expect(seenCanEdit.every((flag) => flag === true)).toBe(true);
@@ -560,8 +599,8 @@ describe('useRepoData', () => {
       .spyOn(globalThis.crypto, 'randomUUID')
       .mockReturnValueOnce('00000000-0000-0000-0000-000000000051');
     const store = new LocalStore(slug);
-    const noteId = store.createNote('Seed', 'initial text');
-    const notePath = store.loadNote(noteId)?.path;
+    const noteId = store.createFile('Seed.md', 'initial text');
+    const notePath = store.loadFileById(noteId)?.path;
     if (!notePath) throw new Error('Missing note path after seeding');
     uuidSpy.mockRestore();
     markRepoLinked(slug);
@@ -593,10 +632,10 @@ describe('useRepoData', () => {
     await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
 
     act(() => {
-      result.current.actions.selectNote(notePath);
+      result.current.actions.selectFile(notePath);
     });
 
-    await waitFor(() => expect(result.current.state.doc?.path).toBe(notePath));
+    await waitFor(() => expect(result.current.state.activeFile?.path).toBe(notePath));
 
     act(() => {
       result.current.actions.setAutosync(true);
@@ -606,7 +645,7 @@ describe('useRepoData', () => {
     setTimeoutSpy.mockClear();
 
     act(() => {
-      result.current.actions.updateNoteText(notePath, 'updated text');
+      result.current.actions.saveFile(notePath, 'updated text');
     });
 
     const lastCall = setTimeoutSpy.mock.calls.at(-1);
@@ -634,14 +673,14 @@ describe('useRepoData', () => {
     const slugB = 'acme/wiki';
 
     const storeA = new LocalStore(slugA);
-    const noteA = storeA.createNote('A', 'text a');
-    const noteAPath = storeA.loadNote(noteA)?.path;
+    const noteA = storeA.createFile('A.md', 'text a');
+    const noteAPath = storeA.loadFileById(noteA)?.path;
     if (!noteAPath) throw new Error('Missing path for note A');
     markRepoLinked(slugA);
 
     const storeB = new LocalStore(slugB);
-    const noteB = storeB.createNote('B', 'text b');
-    const noteBPath = storeB.loadNote(noteB)?.path;
+    const noteB = storeB.createFile('B.md', 'text b');
+    const noteBPath = storeB.loadFileById(noteB)?.path;
     if (!noteBPath) throw new Error('Missing path for note B');
     markRepoLinked(slugB);
 
@@ -672,7 +711,7 @@ describe('useRepoData', () => {
             setRouteState((prev) => (prev.kind === 'repo' ? { ...prev, notePath: nextPath } : prev));
           },
         });
-        seenDocIds.push(value.state.doc?.id);
+        seenDocIds.push(value.state.activeFile?.id);
         seenNeedsInstall.push(value.state.needsInstall);
         return value;
       },
@@ -688,10 +727,10 @@ describe('useRepoData', () => {
     await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
 
     act(() => {
-      result.current.actions.selectNote(noteAPath);
+      result.current.actions.selectFile(noteAPath);
     });
 
-    await waitFor(() => expect(result.current.state.doc?.id).toBe(noteA));
+    await waitFor(() => expect(result.current.state.activeFile?.id).toBe(noteA));
 
     act(() => {
       rerender({
@@ -704,10 +743,10 @@ describe('useRepoData', () => {
     await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
 
     act(() => {
-      result.current.actions.selectNote(noteBPath);
+      result.current.actions.selectFile(noteBPath);
     });
 
-    await waitFor(() => expect(result.current.state.doc?.id).toBe(noteB));
+    await waitFor(() => expect(result.current.state.activeFile?.id).toBe(noteB));
 
     expect(seenNeedsInstall.every((flag) => flag === false)).toBe(true);
     expect(seenDocIds.at(-1)).toBe(noteB);
@@ -719,8 +758,8 @@ describe('useRepoData', () => {
     const recordRecent = vi.fn<RecordRecentFn>();
 
     const store = new LocalStore(slug);
-    const noteId = store.createNote('Secret', 'classified');
-    const notePath = store.loadNote(noteId)?.path;
+    const noteId = store.createFile('Secret.md', 'classified');
+    const notePath = store.loadFileById(noteId)?.path;
     if (!notePath) throw new Error('Missing path for private repo note');
     markRepoLinked(slug);
 
@@ -776,10 +815,10 @@ describe('useRepoData', () => {
     await waitFor(() => expect(result.current.state.needsInstall).toBe(false));
 
     act(() => {
-      result.current.actions.selectNote(notePath);
+      result.current.actions.selectFile(notePath);
     });
 
-    await waitFor(() => expect(result.current.state.doc?.id).toBe(noteId));
+    await waitFor(() => expect(result.current.state.activeFile?.id).toBe(noteId));
     expect(seenNeedsInstall.includes(true)).toBe(true);
   });
 
@@ -791,16 +830,18 @@ describe('useRepoData', () => {
     mockGetSessionToken.mockReturnValue(null);
     setRepoMetadata(readOnlyMeta);
 
-    mockListNoteFiles.mockResolvedValue([
-      { path: 'docs/alpha.md', sha: 'sha-alpha' },
-      { path: 'docs/beta.md', sha: 'sha-beta' },
+    mockListRepoFiles.mockResolvedValue([
+      { path: 'docs/alpha.md', sha: 'sha-alpha', kind: 'markdown', mime: 'text/markdown' },
+      { path: 'docs/beta.md', sha: 'sha-beta', kind: 'markdown', mime: 'text/markdown' },
     ]);
 
-    mockPullNote.mockImplementation(
+    mockPullRepoFile.mockImplementation(
       async (_config, path: string): Promise<RemoteFile> => ({
         path,
-        text: `# ${path}`,
+        content: `# ${path}`,
         sha: `sha-${path}`,
+        kind: 'markdown',
+        mime: 'text/markdown',
       })
     );
 
@@ -821,17 +862,17 @@ describe('useRepoData', () => {
     });
 
     await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
-    await waitFor(() => expect(result.current.state.notes.length).not.toBe(0));
+    await waitFor(() => expect(result.current.state.files.length).not.toBe(0));
     expect(result.current.state.activePath).toBeUndefined();
     act(() => {
-      result.current.actions.selectNote('docs/alpha.md');
+      result.current.actions.selectFile('docs/alpha.md');
     });
-    await waitFor(() => expect(result.current.state.doc?.path).toBe('docs/alpha.md'));
+    await waitFor(() => expect(result.current.state.activeFile?.path).toBe('docs/alpha.md'));
     act(() => {
-      result.current.actions.selectNote('docs/beta.md');
+      result.current.actions.selectFile('docs/beta.md');
     });
 
-    await waitFor(() => expect(result.current.state.doc?.path).toBe('docs/beta.md'));
+    await waitFor(() => expect(result.current.state.activeFile?.path).toBe('docs/beta.md'));
     expect(result.current.state.needsInstall).toBe(false);
     expect(seenNeedsInstall.every((flag) => flag === false)).toBe(true);
   });
@@ -842,8 +883,8 @@ describe('useRepoData', () => {
     const recordRecent = vi.fn<RecordRecentFn>();
 
     const store = new LocalStore(slug);
-    const noteId = store.createNote('Seed', 'content');
-    const notePath = store.loadNote(noteId)?.path;
+    const noteId = store.createFile('Seed.md', 'content');
+    const notePath = store.loadFileById(noteId)?.path;
     if (!notePath) throw new Error('Missing path for sign-out test');
     markRepoLinked(slug);
 
@@ -865,10 +906,10 @@ describe('useRepoData', () => {
     await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
 
     act(() => {
-      result.current.actions.selectNote(notePath);
+      result.current.actions.selectFile(notePath);
     });
 
-    await waitFor(() => expect(result.current.state.doc?.id).toBe(noteId));
+    await waitFor(() => expect(result.current.state.activeFile?.id).toBe(noteId));
 
     await act(async () => {
       await result.current.actions.signOut();
@@ -877,9 +918,9 @@ describe('useRepoData', () => {
     expect(mockSignOutFromGitHubApp).toHaveBeenCalledTimes(1);
     expect(result.current.state.hasSession).toBe(false);
     expect(result.current.state.user).toBeUndefined();
-    expect(result.current.state.doc).toBeUndefined();
+    expect(result.current.state.activeFile).toBeUndefined();
     expect(result.current.state.canSync).toBe(false);
     expect(result.current.state.needsInstall).toBe(false);
-    expect(new LocalStore(slug).listNotes()).toHaveLength(0);
+    expect(new LocalStore(slug).listFiles()).toHaveLength(0);
   });
 });

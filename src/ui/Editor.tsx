@@ -4,10 +4,10 @@ import type { TokenizerAndRendererExtension } from 'marked';
 import DOMPurify from 'dompurify';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
-import type { NoteDoc } from '../storage/local';
+import type { MarkdownFile } from '../storage/local';
 
 type Props = {
-  doc: NoteDoc;
+  doc: MarkdownFile;
   // Pass path explicitly to eliminate any chance of routing a change
   // to the wrong note due to stale closures higher up the tree.
   onChange: (path: string, text: string) => void;
@@ -15,17 +15,17 @@ type Props = {
 };
 
 export function Editor({ doc, onChange, readOnly = false }: Props) {
-  const [text, setText] = useState(doc.text);
+  const [text, setText] = useState(doc.content);
 
   // Reset editor when switching to a different note
   useEffect(() => {
-    setText(doc.text);
+    setText(doc.content);
   }, [doc.id]);
 
   // Reflect external updates to the same note (e.g., after sync/merge)
   useEffect(() => {
-    if (text !== doc.text) setText(doc.text);
-  }, [doc.text]);
+    if (text !== doc.content) setText(doc.content);
+  }, [doc.content]);
 
   const onInput = (val: string) => {
     if (readOnly) return;

@@ -13,7 +13,7 @@ const treeCache = new Map<
 >();
 const fileCache = new Map<
   string,
-  { file: { contentBase64: string; sha: string } | null; expiresAt: number }
+  { file: { contentBase64: string; sha: string; downloadUrl?: string | null } | null; expiresAt: number }
 >();
 
 export type PublicRepoInfo = {
@@ -131,7 +131,7 @@ export async function fetchPublicFile(
   repo: string,
   path: string,
   ref?: string
-): Promise<{ contentBase64: string; sha: string }> {
+): Promise<{ contentBase64: string; sha: string; downloadUrl?: string | null }> {
   const key = `file:${cacheKey(owner, repo)}:${path}@${ref ?? ''}`;
   const now = Date.now();
   const cached = fileCache.get(key);
@@ -148,10 +148,29 @@ export async function fetchPublicFile(
     throw new PublicFetchError('file', res.status);
   }
   const json: any = await res.json();
-  if (!json || typeof json.content !== 'string' || typeof json.sha !== 'string') {
+  if (!json || typeof json.sha !== 'string') {
     throw new Error('invalid public file response');
   }
-  const file = { contentBase64: String(json.content), sha: String(json.sha) };
+  const sha = String(json.sha);
+  let contentBase64 = normalizeBase64(typeof json.content === 'string' ? json.content : '');
+  if (!contentBase64) {
+    const blobUrl =
+      typeof json.git_url === 'string'
+        ? json.git_url
+        : `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+            repo
+          )}/git/blobs/${encodeURIComponent(sha)}`;
+    const blobRes = await fetch(blobUrl, { headers: { Accept: 'application/vnd.github+json' } });
+    if (blobRes.ok) {
+      const blobJson: any = await blobRes.json();
+      contentBase64 = normalizeBase64(typeof blobJson?.content === 'string' ? blobJson.content : '');
+    }
+    if (!contentBase64) {
+      throw new Error('invalid public file response');
+    }
+  }
+  const downloadUrl = typeof json.download_url === 'string' ? json.download_url : undefined;
+  const file = { contentBase64, sha, downloadUrl };
   fileCache.set(key, { file, expiresAt: now + CACHE_TTL_OK });
   return file;
 }
@@ -164,4 +183,8 @@ export class PublicFetchError extends Error {
     this.kind = kind;
     this.status = status;
   }
+}
+
+function normalizeBase64(content: string): string {
+  return content.replace(/\s+/g, '');
 }
