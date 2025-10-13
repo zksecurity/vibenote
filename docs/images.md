@@ -15,6 +15,8 @@
   - Ensure read-only mode and tests behave with mixed file types.
 - **Step 3 – Markdown Preview Rendering**
   - ~~Resolve relative image links inside Markdown previews via cached blobs/object URLs.~~
+- **Final Step - Cleanup**
+  - Remove the `mime` property everywhere and push it down into the only place that needs it (`buildPreviewUrl`)
 
 ## Completed Work
 
@@ -25,7 +27,6 @@
 - Sync now prefers lightweight blob placeholders for private assets and rehydrates content on demand (no more tokenised URLs or redundant storage); multi-device tests cover rename/merge scenarios.
 - Asset Viewer fetches private images via blob placeholders and presents download-ready previews without caching large payloads locally.
 - Markdown previews now resolve repo-relative image links through a shared blob/data URL cache, covering URL-encoded filenames and GitHub blob placeholders while avoiding broken SPA fetches; regression tests exercise binary, pointer, and malformed link scenarios.
-
 
 ## Decisions
 
