@@ -86,6 +86,30 @@ describe('Editor markdown image resolution', () => {
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:resolved');
   });
 
+  test('resolves URL-encoded asset paths', async () => {
+    let loadAsset = vi.fn(async () => {
+      let asset: BinaryFile = {
+        id: 'asset-encoded',
+        path: 'docs/assets/some image.png',
+        title: 'some image',
+        dir: 'docs/assets',
+        updatedAt: 0,
+        kind: 'binary',
+        mime: 'image/png',
+        content: btoa('encoded-payload'),
+      };
+      return asset;
+    });
+    let doc: MarkdownFile = {
+      ...BASE_DOC,
+      content: '![Image](../assets/some%20image.png)',
+    };
+    render(<Editor doc={doc} onChange={(_path, _text) => {}} loadAsset={loadAsset} slug="user/repo" />);
+    let image = await screen.findByRole('img', { name: 'Image' });
+    expect(loadAsset).toHaveBeenCalledWith('docs/assets/some image.png');
+    expect(image.getAttribute('src')).toBe('blob:resolved');
+  });
+
   test('fetches blob placeholders when assets use GitHub blob pointers', async () => {
     fetchBlobMock.mockResolvedValueOnce(btoa('pointer-payload'));
     createObjectURL.mockReturnValueOnce('blob:pointer');
@@ -113,6 +137,18 @@ describe('Editor markdown image resolution', () => {
     let image = await screen.findByRole('img', { name: 'Cover' });
     expect(fetchBlobMock).toHaveBeenCalledWith({ owner: 'user', repo: 'repo', branch: 'main' }, 'sha123');
     expect(image.getAttribute('src')).toBe('blob:pointer');
+  });
+
+  test('leaves unresolved malformed paths empty without triggering loader', async () => {
+    let loadAsset = vi.fn();
+    let doc: MarkdownFile = {
+      ...BASE_DOC,
+      content: '![Bad](../assets/%2)',
+    };
+    render(<Editor doc={doc} onChange={(_path, _text) => {}} loadAsset={loadAsset} slug="user/repo" />);
+    let image = await screen.findByRole('img', { name: 'Bad' });
+    expect(loadAsset).not.toHaveBeenCalled();
+    expect(image.getAttribute('src')).toBe('');
   });
 
   test('does not resolve external image sources', async () => {

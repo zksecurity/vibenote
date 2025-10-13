@@ -118,8 +118,10 @@ function configureDomPurifyOnce() {
   });
   // Add safe attributes for external links
   DOMPurify.addHook('afterSanitizeAttributes', (node) => {
-    if ((node as Element).tagName === 'A') {
-      const a = node as HTMLAnchorElement;
+    let element = node as Element;
+    let tag = element.tagName;
+    if (tag === 'A') {
+      const a = element as HTMLAnchorElement;
       const href = a.getAttribute('href') || '';
       try {
         const url = new URL(href, window.location.href);
@@ -131,6 +133,14 @@ function configureDomPurifyOnce() {
       } catch {
         // ignore
       }
+      return;
+    }
+    if (tag === 'IMG') {
+      const img = element as HTMLImageElement;
+      const src = img.getAttribute('src') || '';
+      if (!isRelativeAssetSrc(src)) return;
+      img.setAttribute('data-vibenote-src', src);
+      img.setAttribute('src', '');
     }
   });
   domPurifyConfigured = true;
@@ -223,11 +233,13 @@ function resolveAssetPath(docPath: string, src: string): string | undefined {
   if (!isRelativeAssetSrc(src)) return undefined;
   let withoutQuery = stripQueryAndHash(src);
   if (withoutQuery === '') return undefined;
-  if (withoutQuery.startsWith('/')) {
-    return simplifyPath(withoutQuery.slice(1));
+  let decoded = decodePathComponent(withoutQuery);
+  if (decoded === undefined) return undefined;
+  if (decoded.startsWith('/')) {
+    return simplifyPath(decoded.slice(1));
   }
   let baseDir = extractDir(docPath);
-  let combined = baseDir ? `${baseDir}/${withoutQuery}` : withoutQuery;
+  let combined = baseDir ? `${baseDir}/${decoded}` : decoded;
   return simplifyPath(combined);
 }
 
@@ -265,4 +277,12 @@ function simplifyPath(path: string): string {
     stack.push(part);
   }
   return stack.join('/');
+}
+
+function decodePathComponent(path: string): string | undefined {
+  try {
+    return decodeURI(path);
+  } catch {
+    return undefined;
+  }
 }
