@@ -15,7 +15,6 @@
   - Ensure read-only mode and tests behave with mixed file types.
 - **Step 3 – Markdown Preview Rendering**
   - ~~Resolve relative image links inside Markdown previews via cached blobs/object URLs.~~
-  - Allow safe image sources through DOMPurify and add regression coverage.
 
 ## Completed Work
 
