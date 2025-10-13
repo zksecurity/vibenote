@@ -14,7 +14,7 @@
   - Render images in the file tree and repo view while preserving existing keyboard + context flows.
   - Ensure read-only mode and tests behave with mixed file types.
 - **Step 3 – Markdown Preview Rendering**
-  - Resolve relative image links inside Markdown previews via cached blobs/object URLs.
+  - ~~Resolve relative image links inside Markdown previews via cached blobs/object URLs.~~
   - Allow safe image sources through DOMPurify and add regression coverage.
 
 ## Completed Work
@@ -25,6 +25,7 @@
 - Repo sidebar now derives entries from the combined file list (showing extensions) while binary selections open an interim asset viewer placeholder; added regression coverage for mixed file state.
 - Sync now prefers lightweight blob placeholders for private assets and rehydrates content on demand (no more tokenised URLs or redundant storage); multi-device tests cover rename/merge scenarios.
 - Asset Viewer fetches private images via blob placeholders and presents download-ready previews without caching large payloads locally.
+- Markdown previews now resolve repo-relative image links through a shared blob/data URL cache, covering URL-encoded filenames and GitHub blob placeholders while avoiding broken SPA fetches; regression tests exercise binary, pointer, and malformed link scenarios.
 
 
 ## Decisions
@@ -48,3 +49,4 @@
 - 2025-10-09 – Consolidated local storage rename/update flows and taught sync rename detection to treat binary assets the same as markdown notes.
 - 2025-10-09 – Data layer now consumes the unified file APIs so UI actions no longer branch between note and asset helpers.
 - 2025-10-10 – Removed all remaining inconsistencies between the handling of assets and markdown files.
+- 2025-10-10 – Markdown previews reuse shared asset blobs, sanitise relative `<img>` tags, and ship regression coverage for encoded filenames and malformed paths.
