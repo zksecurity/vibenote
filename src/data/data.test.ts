@@ -746,6 +746,7 @@ describe('useRepoData', () => {
     });
 
     const seenNeedsInstall: boolean[] = [];
+    const seenRepoLinked: boolean[] = [];
 
     const { result } = renderHook(() => {
       const [route, setRoute] = useState<RepoRoute>({ kind: 'repo', owner: 'acme', repo: 'private' });
@@ -758,6 +759,7 @@ describe('useRepoData', () => {
         },
       });
       seenNeedsInstall.push(value.state.needsInstall);
+      seenRepoLinked.push(value.state.repoLinked);
       return value;
     });
 
@@ -766,6 +768,7 @@ describe('useRepoData', () => {
     });
 
     await waitFor(() => expect(result.current.state.needsInstall).toBe(true));
+    expect(result.current.state.repoLinked).toBe(true);
 
     mockGetRepoMetadata.mockResolvedValue({ ...writableMeta });
 
@@ -781,6 +784,7 @@ describe('useRepoData', () => {
 
     await waitFor(() => expect(result.current.state.doc?.id).toBe(noteId));
     expect(seenNeedsInstall.includes(true)).toBe(true);
+    expect(seenRepoLinked.every((flag) => flag === true)).toBe(true);
   });
 
   // Switching notes in read-only mode should respect loading states without toggling install banners.
@@ -805,6 +809,7 @@ describe('useRepoData', () => {
     );
 
     const seenNeedsInstall: boolean[] = [];
+    const seenRepoLinked: boolean[] = [];
 
     const { result } = renderHook(() => {
       const [route, setRoute] = useState<RepoRoute>({ kind: 'repo', owner: 'octo', repo: 'wiki' });
@@ -817,6 +822,7 @@ describe('useRepoData', () => {
         },
       });
       seenNeedsInstall.push(value.state.needsInstall);
+      seenRepoLinked.push(value.state.repoLinked);
       return value;
     });
 
@@ -834,6 +840,7 @@ describe('useRepoData', () => {
     await waitFor(() => expect(result.current.state.doc?.path).toBe('docs/beta.md'));
     expect(result.current.state.needsInstall).toBe(false);
     expect(seenNeedsInstall.every((flag) => flag === false)).toBe(true);
+    expect(seenRepoLinked.every((flag) => flag === false)).toBe(true);
   });
 
   // Signing out should clear local data and disable syncing.
@@ -879,6 +886,7 @@ describe('useRepoData', () => {
     expect(result.current.state.user).toBeUndefined();
     expect(result.current.state.doc).toBeUndefined();
     expect(result.current.state.canSync).toBe(false);
+    expect(result.current.state.repoLinked).toBe(false);
     expect(result.current.state.needsInstall).toBe(false);
     expect(new LocalStore(slug).listNotes()).toHaveLength(0);
   });

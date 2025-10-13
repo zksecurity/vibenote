@@ -66,6 +66,7 @@ type RepoDataState = {
   canEdit: boolean;
   canRead: boolean;
   canSync: boolean;
+  repoLinked: boolean;
   needsInstall: boolean;
   repoQueryStatus: RepoQueryStatus;
   manageUrl: string | undefined;
@@ -474,6 +475,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     canRead: canEdit || isReadOnly,
     canEdit,
     canSync,
+    repoLinked: linked,
     repoQueryStatus: repoAccess.status,
     needsInstall: repoAccess.needsInstall,
     manageUrl,
