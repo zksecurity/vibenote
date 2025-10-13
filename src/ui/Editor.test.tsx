@@ -23,7 +23,6 @@ const BASE_DOC: MarkdownFile = {
   dir: 'docs/nested',
   updatedAt: 0,
   kind: 'markdown',
-  mime: 'text/markdown',
   content: '',
 };
 
@@ -65,7 +64,6 @@ describe('Editor markdown image resolution', () => {
         dir: 'docs/assets',
         updatedAt: 0,
         kind: 'binary',
-        mime: 'image/png',
         content: btoa('image-payload'),
       };
       return asset;
@@ -95,7 +93,6 @@ describe('Editor markdown image resolution', () => {
         dir: 'docs/assets',
         updatedAt: 0,
         kind: 'binary',
-        mime: 'image/png',
         content: btoa('encoded-payload'),
       };
       return asset;
@@ -121,7 +118,6 @@ describe('Editor markdown image resolution', () => {
         dir: 'docs',
         updatedAt: 0,
         kind: 'asset-url',
-        mime: 'image/png',
         content: 'gh-blob:user/repo#sha123',
         lastRemoteSha: 'sha123',
       };

@@ -91,7 +91,6 @@ function useReadOnlyFiles(params: {
         lastRemoteSha: remote.sha,
         lastSyncedHash: hashText(remote.content),
         kind: remote.kind,
-        mime: remote.mime,
       });
     } catch (error) {
       logError(error);
@@ -127,8 +126,8 @@ function useReadOnlyFiles(params: {
   };
 }
 
-function toFile({ path, kind, mime }: { path: string; kind: FileKind; mime: string }): FileMeta {
+function toFile({ path, kind }: { path: string; kind: FileKind }): FileMeta {
   let title = stripExtension(basename(path));
   let dir = extractDir(path);
-  return { id: path, path, title, dir, updatedAt: 0, kind, mime };
+  return { id: path, path, title, dir, updatedAt: 0, kind };
 }

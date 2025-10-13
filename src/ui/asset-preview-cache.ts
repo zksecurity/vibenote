@@ -78,7 +78,7 @@ function buildCacheKey(slug: string, asset: BinaryFile | AssetUrlFile): string {
 
 async function buildPreviewEntry(asset: BinaryFile | AssetUrlFile): Promise<PreviewCacheEntry | null> {
   if (asset.kind === 'binary') {
-    let preview = buildPreviewUrl(sanitizeBase64(asset.content), asset.mime);
+    let preview = buildPreviewUrl(sanitizeBase64(asset.content), asset.path);
     return preview ? toCacheEntry(preview) : null;
   }
   let pointer = parseBlobPointer(asset.content);
@@ -87,13 +87,13 @@ async function buildPreviewEntry(asset: BinaryFile | AssetUrlFile): Promise<Prev
     if (url === '') return null;
     return toCacheEntry({ kind: 'remote', url });
   }
-  let preview = await fetchPointerPreview(pointer, asset.mime, asset.lastRemoteSha);
+  let preview = await fetchPointerPreview(pointer, asset.path, asset.lastRemoteSha);
   return preview ? toCacheEntry(preview) : null;
 }
 
 async function fetchPointerPreview(
   pointer: BlobPointer,
-  mime: string | undefined,
+  path: string | undefined,
   shaHint: string | undefined
 ): Promise<PreviewUrl | null> {
   try {
@@ -101,7 +101,7 @@ async function fetchPointerPreview(
     let config = buildRemoteConfig(slug);
     let blob = await fetchBlob(config, shaHint ?? pointer.sha);
     if (!blob) return null;
-    return buildPreviewUrl(normalizeBase64(blob), mime);
+    return buildPreviewUrl(normalizeBase64(blob), path);
   } catch {
     return null;
   }

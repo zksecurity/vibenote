@@ -31,19 +31,9 @@ type RemoteConfig = { owner: string; repo: string; branch: string };
 type CommitResponse = { commitSha: string; blobShas: Record<string, string> };
 
 const GITHUB_API_BASE = 'https://api.github.com';
-const MARKDOWN_MIME = 'text/markdown';
-const IMAGE_MIME_BY_EXT: Record<string, string> = {
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  webp: 'image/webp',
-  svg: 'image/svg+xml',
-  avif: 'image/avif',
-};
 const BINARY_EXTENSIONS = new Set<string>(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif']);
 
-type RepoFileEntry = { path: string; sha: string; kind: FileKind; mime: string };
+type RepoFileEntry = { path: string; sha: string; kind: FileKind };
 
 type RemoteFile = RepoFileEntry & { content: string };
 
@@ -221,7 +211,7 @@ export async function listRepoFiles(config: RemoteConfig): Promise<RepoFileEntry
       const kind = fileKindFromPath(path);
       // file is filtered out, because it is not a supported file type
       if (!kind) continue;
-      results.push({ path, sha, kind, mime: inferMimeFromPath(path) });
+      results.push({ path, sha, kind });
     }
     return results;
   };
@@ -530,17 +520,16 @@ async function materializeRemoteFile(input: {
       const blob = await fetchBlob(config, sha);
       if (blob !== null) payload = blob;
     }
-    return { path, sha, kind: 'markdown', mime: MARKDOWN_MIME, content: fromBase64(payload) };
+    return { path, sha, kind: 'markdown', content: fromBase64(payload) };
   }
   if (kind === 'binary') {
     if (downloadUrl && isReusableDownloadUrl(downloadUrl)) {
-      return { path, sha, kind: 'asset-url', mime: inferMimeFromPath(path), content: downloadUrl };
+      return { path, sha, kind: 'asset-url', content: downloadUrl };
     }
     return {
       path,
       sha,
       kind: 'asset-url',
-      mime: inferMimeFromPath(path),
       content: buildBlobPlaceholder(config, sha),
     };
   }
@@ -608,18 +597,6 @@ function fileKindFromPath(path: string): 'markdown' | 'binary' | null {
   if (ext === 'md') return 'markdown';
   if (BINARY_EXTENSIONS.has(ext)) return 'binary';
   return null;
-}
-
-function inferMimeFromPath(path: string): string {
-  const kind = fileKindFromPath(path);
-  if (kind === 'markdown') return MARKDOWN_MIME;
-  const idx = path.lastIndexOf('.');
-  if (idx < 0 || idx === path.length - 1) return 'application/octet-stream';
-  const ext = path
-    .slice(idx + 1)
-    .toLowerCase()
-    .trim();
-  return IMAGE_MIME_BY_EXT[ext] ?? 'application/octet-stream';
 }
 
 function hashText(text: string): string {
@@ -695,7 +672,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         remoteFile = rf;
         remoteContentHash = remoteContentHash ?? computeRemoteHash(rf);
         // Create local note using the store so index stays consistent
-        const id = store.createFile(e.path, rf.content, { kind: rf.kind, mime: rf.mime });
+        const id = store.createFile(e.path, rf.content, { kind: rf.kind });
         // Mark sync metadata
         markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: remoteContentHash });
         remoteMap.set(e.path, rf.sha);
@@ -765,7 +742,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
           // custom merge strategy for markdown files
           const mergedText = mergeMarkdown(baseContent, doc.content, rf.content);
           if (mergedText !== doc.content) {
-            updateFile(storeSlug, id, mergedText, rf.mime, 'markdown');
+            updateFile(storeSlug, id, mergedText, 'markdown');
           }
           const newSha = await putFile(
             config,
@@ -780,7 +757,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         } else if (doc.kind === 'binary' || doc.kind === 'asset-url') {
           // TODO how to resolve conflicts for binary files?
           // currently we just use the remote version (seems fairer to pick the version that made it to github first)
-          updateFile(storeSlug, id, rf.content, rf.mime, rf.kind);
+          updateFile(storeSlug, id, rf.content, rf.kind);
           markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: remoteHash });
           remoteMap.set(e.path, rf.sha);
           pulled++;
@@ -788,7 +765,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         }
       } else {
         // only remote changed → pull
-        updateFile(storeSlug, id, rf.content, rf.mime, rf.kind);
+        updateFile(storeSlug, id, rf.content, rf.kind);
         markSynced(storeSlug, id, { remoteSha: rf.sha, syncedHash: remoteHash });
         remoteMap.set(e.path, rf.sha);
         pulled++;
@@ -920,17 +897,14 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       const remoteFile = await pullRepoFile(config, t.from);
       if (remoteFile) {
         if (existing) {
-          updateFile(storeSlug, existing.id, remoteFile.content, remoteFile.mime, remoteFile.kind);
+          updateFile(storeSlug, existing.id, remoteFile.content, remoteFile.kind);
           markSynced(storeSlug, existing.id, {
             remoteSha: remoteFile.sha,
             syncedHash: computeRemoteHash(remoteFile),
           });
           remoteMap.set(remoteFile.path, remoteFile.sha);
         } else {
-          const newId = store.createFile(remoteFile.path, remoteFile.content, {
-            kind: remoteFile.kind,
-            mime: remoteFile.mime,
-          });
+          const newId = store.createFile(remoteFile.path, remoteFile.content, { kind: remoteFile.kind });
           moveFilePath(storeSlug, newId, t.from);
           markSynced(storeSlug, newId, {
             remoteSha: remoteFile.sha,

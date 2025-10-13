@@ -22,7 +22,6 @@ const BASE_FILE: BinaryFile = {
   dir: 'assets',
   updatedAt: 0,
   kind: 'binary',
-  mime: 'image/png',
   content: '',
 };
 

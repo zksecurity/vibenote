@@ -26,7 +26,7 @@ export function AssetViewer({ file }: AssetViewerProps) {
   );
   const directPreview = useMemo(() => {
     if (file.kind === 'binary') {
-      return buildPreviewUrl(cleanedBase64, file.mime);
+      return buildPreviewUrl(cleanedBase64, file.path);
     }
     if (file.kind === 'asset-url') {
       if (blobPointer) return null;
@@ -34,7 +34,7 @@ export function AssetViewer({ file }: AssetViewerProps) {
       return url ? ({ kind: 'remote', url } as PreviewUrl) : null;
     }
     return null;
-  }, [file.kind, file.content, cleanedBase64, file.mime, blobPointer]);
+  }, [file.kind, file.content, cleanedBase64, file.path, blobPointer]);
   const [resolvedPreview, setResolvedPreview] = useState<PreviewUrl | null>(directPreview);
   const objectUrlRef = useRef<string | null>(resolvedPreview?.kind === 'blob' ? resolvedPreview.url : null);
 
@@ -54,7 +54,7 @@ export function AssetViewer({ file }: AssetViewerProps) {
           setResolvedPreview(null);
           return;
         }
-        const next = buildPreviewUrl(normalizeBase64(blob), file.mime);
+        const next = buildPreviewUrl(normalizeBase64(blob), file.path);
         setResolvedPreview(next);
       } catch {
         if (!cancelled) setResolvedPreview(null);
@@ -63,7 +63,7 @@ export function AssetViewer({ file }: AssetViewerProps) {
     return () => {
       cancelled = true;
     };
-  }, [blobPointer, directPreview, file.mime]);
+  }, [blobPointer, directPreview, file.path]);
 
   useEffect(() => {
     const current = resolvedPreview?.kind === 'blob' ? resolvedPreview.url : null;

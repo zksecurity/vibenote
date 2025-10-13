@@ -291,15 +291,12 @@ describe('useRepoData', () => {
   test('loads a read-only note that matches the route note path', async () => {
     const slug = 'acme/docs';
     setRepoMetadata(readOnlyMeta);
-    mockListRepoFiles.mockResolvedValue([
-      { path: 'guides/Intro.md', sha: 'sha-intro', kind: 'markdown', mime: 'text/markdown' },
-    ]);
+    mockListRepoFiles.mockResolvedValue([{ path: 'guides/Intro.md', sha: 'sha-intro', kind: 'markdown' }]);
     mockPullRepoFile.mockResolvedValue({
       path: 'guides/Intro.md',
       content: '# Intro',
       sha: 'sha-intro',
       kind: 'markdown',
-      mime: 'text/markdown',
     });
 
     const recordRecent = vi.fn<RecordRecentFn>();
@@ -399,16 +396,13 @@ describe('useRepoData', () => {
 
     mockGetSessionToken.mockReturnValue(null);
     setRepoMetadata(readOnlyMeta);
-    mockListRepoFiles.mockResolvedValue([
-      { path: 'docs/alpha.md', sha: 'sha-alpha', kind: 'markdown', mime: 'text/markdown' },
-    ]);
+    mockListRepoFiles.mockResolvedValue([{ path: 'docs/alpha.md', sha: 'sha-alpha', kind: 'markdown' }]);
     mockPullRepoFile.mockImplementation(
       async (_config, path: string): Promise<RemoteFile> => ({
         path,
         content: `# ${path}`,
         sha: `sha-${path}`,
         kind: 'markdown',
-        mime: 'text/markdown',
       })
     );
 
@@ -446,7 +440,6 @@ describe('useRepoData', () => {
       content: '# updated remote',
       sha: 'sha-updated',
       kind: 'markdown',
-      mime: 'text/markdown',
     });
 
     act(() => {
@@ -464,8 +457,8 @@ describe('useRepoData', () => {
     mockGetSessionToken.mockReturnValue(null);
     setRepoMetadata(readOnlyMeta);
     mockListRepoFiles.mockResolvedValue([
-      { path: 'docs/alpha.md', sha: 'sha-alpha', kind: 'markdown', mime: 'text/markdown' },
-      { path: 'README.md', sha: 'sha-readme', kind: 'markdown', mime: 'text/markdown' },
+      { path: 'docs/alpha.md', sha: 'sha-alpha', kind: 'markdown' },
+      { path: 'README.md', sha: 'sha-readme', kind: 'markdown' },
     ]);
     mockPullRepoFile.mockImplementation(
       async (_config, path: string): Promise<RemoteFile> => ({
@@ -473,7 +466,6 @@ describe('useRepoData', () => {
         content: `# ${path}`,
         sha: `sha-${path}`,
         kind: 'markdown',
-        mime: 'text/markdown',
       })
     );
 
@@ -501,8 +493,8 @@ describe('useRepoData', () => {
     });
     setRepoMetadata(writableMeta);
     mockListRepoFiles.mockResolvedValue([
-      { path: 'notes/first.md', sha: 'sha-first', kind: 'markdown', mime: 'text/markdown' },
-      { path: 'README.md', sha: 'sha-readme', kind: 'markdown', mime: 'text/markdown' },
+      { path: 'notes/first.md', sha: 'sha-first', kind: 'markdown' },
+      { path: 'README.md', sha: 'sha-readme', kind: 'markdown' },
     ]);
     mockPullRepoFile.mockImplementation(
       async (_config, path: string): Promise<RemoteFile> => ({
@@ -510,7 +502,6 @@ describe('useRepoData', () => {
         content: `# ${path}`,
         sha: `sha-${path}`,
         kind: 'markdown',
-        mime: 'text/markdown',
       })
     );
 
@@ -831,8 +822,8 @@ describe('useRepoData', () => {
     setRepoMetadata(readOnlyMeta);
 
     mockListRepoFiles.mockResolvedValue([
-      { path: 'docs/alpha.md', sha: 'sha-alpha', kind: 'markdown', mime: 'text/markdown' },
-      { path: 'docs/beta.md', sha: 'sha-beta', kind: 'markdown', mime: 'text/markdown' },
+      { path: 'docs/alpha.md', sha: 'sha-alpha', kind: 'markdown' },
+      { path: 'docs/beta.md', sha: 'sha-beta', kind: 'markdown' },
     ]);
 
     mockPullRepoFile.mockImplementation(
@@ -841,7 +832,6 @@ describe('useRepoData', () => {
         content: `# ${path}`,
         sha: `sha-${path}`,
         kind: 'markdown',
-        mime: 'text/markdown',
       })
     );
 

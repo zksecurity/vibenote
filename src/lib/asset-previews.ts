@@ -30,8 +30,9 @@ function normalizeBase64(content: string): string {
   return content.replace(/\s+/g, '');
 }
 
-function buildPreviewUrl(contentBase64: string | null, mime: string | undefined): PreviewUrl | null {
+function buildPreviewUrl(contentBase64: string | null, path: string | undefined): PreviewUrl | null {
   if (!contentBase64 || contentBase64.length === 0) return null;
+  let mime = path && inferMimeFromPath(path);
   let safeMime = mime && mime.trim().length > 0 ? mime : 'application/octet-stream';
   if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
     try {
@@ -74,4 +75,24 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   let clone = new Uint8Array(bytes.byteLength);
   clone.set(bytes);
   return clone.buffer;
+}
+
+const IMAGE_MIME_BY_EXT: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  svg: 'image/svg+xml',
+  avif: 'image/avif',
+};
+
+const DEFAULT_MARKDOWN_MIME = 'text/markdown' as const;
+
+function inferMimeFromPath(path: string): string {
+  if (/\.md$/i.test(path)) return DEFAULT_MARKDOWN_MIME;
+  let idx = path.lastIndexOf('.');
+  if (idx < 0 || idx === path.length - 1) return 'application/octet-stream';
+  let ext = path.slice(idx + 1).toLowerCase();
+  return IMAGE_MIME_BY_EXT[ext] ?? 'application/octet-stream';
 }

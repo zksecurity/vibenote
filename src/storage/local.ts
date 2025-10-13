@@ -9,8 +9,6 @@ export { basename, stripExtension, extractDir, isMarkdownFile, isBinaryFile, isA
 
 type FileKind = 'markdown' | 'binary' | 'asset-url';
 
-const DEFAULT_MARKDOWN_MIME = 'text/markdown' as const;
-
 /**
  * Backwards-compatible serialized format for file metadata
  */
@@ -21,7 +19,6 @@ type StoredFileMeta = {
   dir: string;
   updatedAt: number;
   kind?: FileKind;
-  mime?: string;
 };
 
 /**
@@ -40,7 +37,6 @@ type FileMeta = {
   dir: string;
   updatedAt: number;
   kind: FileKind;
-  mime: string;
 };
 
 type RepoFile = FileMeta & {
@@ -305,7 +301,7 @@ export class LocalStore {
     emitRepoChange(this.slug);
   }
 
-  createFile(path: string, content: string, params: { kind?: FileKind; mime?: string } = {}): string {
+  createFile(path: string, content: string, params: { kind?: FileKind } = {}): string {
     let id = crypto.randomUUID();
     path = normalizePath(path);
     let kind = params.kind ?? inferKindFromPath(path);
@@ -314,8 +310,7 @@ export class LocalStore {
     let safeName = ensureValidFileName(basename(path));
     let title = stripExtension(safeName);
     path = joinPath(dir, safeName);
-    let mime = params.mime ?? inferMimeFromPath(path);
-    let meta: FileMeta = { id, path, title, dir, updatedAt, kind, mime };
+    let meta: FileMeta = { id, path, title, dir, updatedAt, kind };
     debugLog(this.slug, 'createFile', { id, path, kind });
     let doc: RepoFile = { ...meta, content };
     let idx = this.loadIndex();
@@ -416,12 +411,12 @@ export class LocalStore {
     let now = Date.now();
     let index: FileMeta[] = [];
     let folderSet = new Set<string>();
-    for (let { path, kind, content, mime, sha } of files) {
+    for (let { path, kind, content, sha } of files) {
       let id = crypto.randomUUID();
       let dir = extractDir(path);
       if (dir !== '') folderSet.add(dir);
       let title = stripExtension(basename(path));
-      let meta: FileMeta = { id, path, title, dir, updatedAt: now, kind, mime };
+      let meta: FileMeta = { id, path, title, dir, updatedAt: now, kind };
       let doc: RepoFile = {
         ...meta,
         content,
@@ -736,11 +731,10 @@ export function markSynced(slug: string, id: string, patch: { remoteSha?: string
   emitRepoChange(slug);
 }
 
-export function updateFile(slug: string, id: string, content: string, mime?: string, kind?: FileKind) {
+export function updateFile(slug: string, id: string, content: string, kind?: FileKind) {
   mutateFile(slug, id, (doc) => {
     let updatedAt = Date.now();
-    mime ??= doc.mime;
-    let next: RepoFile = { ...doc, content, updatedAt, mime };
+    let next: RepoFile = { ...doc, content, updatedAt };
     if (kind !== undefined) {
       next.kind = kind;
     }
@@ -853,7 +847,7 @@ function mutateFile(slug: string, id: string, mutate: (doc: RepoFile) => DocMuta
   let next = result.doc;
   let updatedAt =
     typeof next.updatedAt === 'number' && Number.isFinite(next.updatedAt) ? next.updatedAt : Date.now();
-  let indexPatch: Partial<FileMeta> = { kind: next.kind, mime: next.mime, ...result.indexPatch };
+  let indexPatch: Partial<FileMeta> = { kind: next.kind, ...result.indexPatch };
   localStorage.setItem(key, serializeFile(next));
   touchIndexUpdatedAt(slug, id, updatedAt, indexPatch);
   debugLog(slug, 'updateFile', { id, updatedAt });
@@ -906,24 +900,6 @@ function inferKindFromPath(path: string): FileKind {
   return /\.md$/i.test(path) ? 'markdown' : 'binary';
 }
 
-const IMAGE_MIME_BY_EXT: Record<string, string> = {
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  webp: 'image/webp',
-  svg: 'image/svg+xml',
-  avif: 'image/avif',
-};
-
-function inferMimeFromPath(path: string): string {
-  if (/\.md$/i.test(path)) return DEFAULT_MARKDOWN_MIME;
-  let idx = path.lastIndexOf('.');
-  if (idx < 0 || idx === path.length - 1) return 'application/octet-stream';
-  let ext = path.slice(idx + 1).toLowerCase();
-  return IMAGE_MIME_BY_EXT[ext] ?? 'application/octet-stream';
-}
-
 function normalizeMeta(raw: unknown): FileMeta | null {
   if (!raw || typeof raw !== 'object') return null;
   let stored = raw as Partial<StoredFileMeta>;
@@ -936,8 +912,7 @@ function normalizeMeta(raw: unknown): FileMeta | null {
   let inferredKind = typeof stored.kind === 'string' ? stored.kind : 'markdown';
   let rawTitle = typeof stored.title === 'string' ? stored.title.trim() : '';
   let title = rawTitle;
-  let mime = typeof stored.mime === 'string' ? stored.mime : inferMimeFromPath(path);
-  return { id: stored.id, path, title, dir, updatedAt, kind: inferredKind, mime };
+  return { id: stored.id, path, title, dir, updatedAt, kind: inferredKind };
 }
 
 function toStoredFile(doc: RepoFile): StoredFile {
@@ -948,7 +923,6 @@ function toStoredFile(doc: RepoFile): StoredFile {
     dir: doc.dir,
     updatedAt: doc.updatedAt,
     kind: doc.kind,
-    mime: doc.mime,
     text: doc.content,
     lastRemoteSha: doc.lastRemoteSha,
     lastSyncedHash: doc.lastSyncedHash,

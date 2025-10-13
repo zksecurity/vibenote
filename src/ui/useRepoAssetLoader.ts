@@ -17,7 +17,11 @@ export { useRepoAssetLoader };
 
 type RepoAssetLoader = (path: string) => Promise<BinaryFile | AssetUrlFile | undefined>;
 
-function useRepoAssetLoader(params: { slug: string; isReadOnly: boolean; defaultBranch?: string }): RepoAssetLoader {
+function useRepoAssetLoader(params: {
+  slug: string;
+  isReadOnly: boolean;
+  defaultBranch?: string;
+}): RepoAssetLoader {
   let { slug, isReadOnly, defaultBranch } = params;
   return useCallback<RepoAssetLoader>(
     async (inputPath: string) => {
@@ -54,7 +58,6 @@ function toAssetFile(remote: RemoteFile): BinaryFile | AssetUrlFile | undefined 
     path: remote.path,
     title: stripExtension(basename(remote.path)),
     dir: extractDir(remote.path),
-    mime: remote.mime,
     updatedAt: Date.now(),
     lastRemoteSha: remote.sha,
   };
