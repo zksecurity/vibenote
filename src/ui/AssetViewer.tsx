@@ -3,8 +3,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { BinaryFile, AssetUrlFile } from '../storage/local';
 import { basename } from '../storage/local';
 import { buildRemoteConfig, fetchBlob } from '../sync/git-sync';
-
-const BLOB_PLACEHOLDER_PREFIX = 'gh-blob:';
+import {
+  buildPreviewUrl,
+  normalizeBase64,
+  parseBlobPointer,
+  sanitizeBase64,
+  type PreviewUrl,
+} from '../lib/asset-previews';
 
 type AssetViewerProps = {
   file: BinaryFile | AssetUrlFile;
@@ -15,7 +20,10 @@ export function AssetViewer({ file }: AssetViewerProps) {
     () => (file.kind === 'binary' ? sanitizeBase64(file.content) : null),
     [file.kind, file.content]
   );
-  const blobPointer = useMemo(() => (file.kind === 'asset-url' ? parseBlobPointer(file.content) : null), [file]);
+  const blobPointer = useMemo(
+    () => (file.kind === 'asset-url' ? parseBlobPointer(file.content) : null),
+    [file]
+  );
   const directPreview = useMemo(() => {
     if (file.kind === 'binary') {
       return buildPreviewUrl(cleanedBase64, file.mime);
@@ -122,66 +130,6 @@ export function AssetViewer({ file }: AssetViewerProps) {
   );
 }
 
-type PreviewUrl =
-  | { kind: 'blob'; url: string }
-  | { kind: 'data'; url: string }
-  | { kind: 'remote'; url: string };
-
-function buildPreviewUrl(contentBase64: string | null, mime: string | undefined): PreviewUrl | null {
-  if (!contentBase64 || contentBase64.length === 0) return null;
-  const safeMime = mime && mime.trim().length > 0 ? mime : 'application/octet-stream';
-  if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
-    try {
-      const bytes = base64ToBytes(contentBase64);
-      if (bytes) {
-        const buffer = toArrayBuffer(bytes);
-        const blob = new Blob([buffer], { type: safeMime });
-        const url = URL.createObjectURL(blob);
-        return { kind: 'blob', url };
-      }
-    } catch {
-      // fall through to data URL
-    }
-  }
-  return { kind: 'data', url: `data:${safeMime};base64,${contentBase64}` };
-}
-
-function base64ToBytes(b64: string): Uint8Array | null {
-  let decoded = '';
-  try {
-    decoded = atob(b64);
-  } catch {
-    return null;
-  }
-  const length = decoded.length;
-  const buffer = new Uint8Array(length);
-  for (let i = 0; i < length; i++) {
-    buffer[i] = decoded.charCodeAt(i);
-  }
-  return buffer;
-}
-
-function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-  const bufferLike = bytes.buffer;
-  const start = bytes.byteOffset;
-  const end = start + bytes.byteLength;
-  if (bufferLike instanceof ArrayBuffer && typeof bufferLike.slice === 'function') {
-    return bufferLike.slice(start, end);
-  }
-  const clone = new Uint8Array(bytes.byteLength);
-  clone.set(bytes);
-  return clone.buffer;
-}
-
-function sanitizeBase64(content: string | undefined): string | null {
-  if (!content) return null;
-  return content.replace(/\s+/g, '');
-}
-
-function normalizeBase64(content: string): string {
-  return content.replace(/\s+/g, '');
-}
-
 function estimateBytes(contentBase64: string | null): number {
   if (!contentBase64 || contentBase64.length === 0) return 0;
   const length = contentBase64.length;
@@ -200,16 +148,4 @@ function formatFileSize(bytes: number | null): string | null {
   }
   const formatted = value >= 100 || unitIndex === 0 ? Math.round(value) : Math.round(value * 10) / 10;
   return `${formatted} ${units[unitIndex]}`;
-}
-
-type BlobPointer = { owner: string; repo: string; sha: string };
-
-function parseBlobPointer(content: string): BlobPointer | null {
-  if (!content.startsWith(BLOB_PLACEHOLDER_PREFIX)) return null;
-  const remainder = content.slice(BLOB_PLACEHOLDER_PREFIX.length);
-  const [slug, sha] = remainder.split('#', 2);
-  if (!slug || !sha) return null;
-  const [owner, repo] = slug.split('/', 2);
-  if (!owner || !repo) return null;
-  return { owner, repo, sha };
 }

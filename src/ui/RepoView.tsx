@@ -18,6 +18,7 @@ import {
 } from '../storage/local';
 import type { RepoRoute, Route } from './routing';
 import { normalizePath, pathsEqual } from '../lib/util';
+import { useRepoAssetLoader } from './useRepoAssetLoader';
 
 type RepoViewProps = {
   slug: string;
@@ -78,6 +79,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
     autosync,
     syncing,
     statusMessage,
+    defaultBranch,
   } = state;
 
   const userAvatarSrc = user?.avatarDataUrl ?? user?.avatarUrl ?? undefined;
@@ -149,6 +151,8 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
     await actions.selectFile(path);
     setSidebarOpen(false);
   };
+
+  const loadAsset = useRepoAssetLoader({ slug, isReadOnly, defaultBranch });
 
   return (
     <div className="app-shell">
@@ -352,6 +356,8 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
                         key={activeFile.id}
                         doc={activeFile}
                         readOnly={!canEdit}
+                        slug={slug}
+                        loadAsset={loadAsset}
                         onChange={(path, text) => {
                           actions.saveFile(path, text);
                         }}
