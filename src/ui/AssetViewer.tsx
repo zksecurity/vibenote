@@ -106,10 +106,6 @@ export function AssetViewer({ file }: AssetViewerProps) {
       <div className="asset-viewer-header">
         <div className="asset-viewer-title">
           <h2>{assetName}</h2>
-          <p className="asset-viewer-meta">
-            <span>{file.mime || 'binary file'}</span>
-            {sizeLabel !== null && <span>• {sizeLabel}</span>}
-          </p>
           <p className="asset-viewer-path">
             <span>Path:</span> <code>{file.path}</code>
           </p>
