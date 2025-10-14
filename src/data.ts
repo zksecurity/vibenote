@@ -324,7 +324,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   }, [route, repoAccess.level, linked, slug, canEdit, defaultBranch, desiredPath]);
 
   useEffect(() => {
-    if (!repoOwner || !repoName || !hasSession) {
+    if (!repoOwner || !repoName || !hasSession || !canEdit) {
       shareRequestRef.current = null;
       setShareState((prev) => (prev.status === 'idle' ? prev : { status: 'idle' }));
       return;
@@ -346,7 +346,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       return;
     }
     void loadShareForTarget(target);
-  }, [repoOwner, repoName, activePath, hasSession, shareState, loadShareForTarget]);
+  }, [repoOwner, repoName, activePath, hasSession, canEdit, shareState, loadShareForTarget]);
 
   // CLICK HANDLERS
 
@@ -522,7 +522,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   };
 
   const createShare = async () => {
-    if (!repoOwner || !repoName) return;
+    if (!repoOwner || !repoName || !canEdit) return;
     if (!hasSession) {
       setShareState({ status: 'error', error: 'Sign in with GitHub to share notes.' });
       return;

@@ -223,7 +223,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
   const isReadOnly = !canEdit && canRead;
   const layoutClass = showSidebar ? '' : 'single';
   const needsSessionRefresh = needsInstall && repoLinked;
-  const canShare = hasSession && route.kind === 'repo' && activePath !== undefined && canRead;
+  const canShare = hasSession && route.kind === 'repo' && activePath !== undefined && canEdit;
   const shareDisabled = share.status === 'idle' || share.status === 'loading';
 
   // Pure UI state: sidebar visibility and account menu.
