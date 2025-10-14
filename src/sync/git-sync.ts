@@ -23,6 +23,7 @@ import {
   computeSyncedHash,
 } from '../storage/local';
 import { mergeMarkdown } from '../merge/merge';
+import { readCachedBlob, writeCachedBlob } from '../storage/blob-cache';
 
 export type { RemoteConfig, RemoteFile };
 
@@ -38,6 +39,7 @@ type RepoFileEntry = { path: string; sha: string; kind: FileKind };
 type RemoteFile = RepoFileEntry & { content: string };
 
 const BLOB_PLACEHOLDER_PREFIX = 'gh-blob:';
+const pendingBlobFetches = new Map<string, Promise<string | null>>();
 
 export function buildRemoteConfig(slug: string, branch?: string): RemoteConfig {
   let [owner, repo] = slug.split('/', 2);
@@ -270,17 +272,41 @@ function fromBase64(b64: string): string {
 
 // Fetch raw blob content (base64) by SHA using backend (requires installation for the repo)
 export async function fetchBlob(config: RemoteConfig, sha: string): Promise<string | null> {
-  let token = await ensureFreshAccessToken();
-  if (!token) return '';
-  let blobPath = `/repos/${encodeURIComponent(config.owner)}/${encodeURIComponent(
-    config.repo
-  )}/git/blobs/${encodeURIComponent(sha)}`;
-  let res = await githubRequest(token, 'GET', blobPath);
-  if (!res.ok) {
-    return '';
+  let cacheKey = { owner: config.owner, repo: config.repo, sha };
+  let cached = await readCachedBlob(cacheKey);
+  if (cached !== null) return cached;
+  let pendingKey = buildPendingBlobKey(config, sha);
+  let inFlight = pendingBlobFetches.get(pendingKey);
+  if (inFlight) {
+    return await inFlight;
   }
-  let json = await res.json();
-  return normalizeBase64(String(json.content || ''));
+  let fetchTask = (async () => {
+    let token = await ensureFreshAccessToken();
+    if (!token) return '';
+    let blobPath = `/repos/${encodeURIComponent(config.owner)}/${encodeURIComponent(
+      config.repo
+    )}/git/blobs/${encodeURIComponent(sha)}`;
+    let res = await githubRequest(token, 'GET', blobPath);
+    if (!res.ok) {
+      return '';
+    }
+    let json = await res.json();
+    let normalized = normalizeBase64(String(json.content || ''));
+    if (normalized !== '') {
+      await writeCachedBlob(cacheKey, normalized);
+    }
+    return normalized;
+  })();
+  pendingBlobFetches.set(pendingKey, fetchTask);
+  try {
+    return await fetchTask;
+  } finally {
+    pendingBlobFetches.delete(pendingKey);
+  }
+}
+
+function buildPendingBlobKey(config: RemoteConfig, sha: string): string {
+  return `${config.owner}/${config.repo}#${sha}`;
 }
 
 function extractBlobSha(res: CommitResponse, path: string): string | undefined {
