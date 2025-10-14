@@ -1,6 +1,7 @@
 // Environment loader for the backend server
 // Load .env from project root when running locally
 import 'dotenv/config';
+import crypto from 'node:crypto';
 
 type Env = {
   PORT: number;
@@ -63,18 +64,50 @@ function normalizePrivateKey(raw: string): string {
   if (trimmed.length === 0) {
     throw new Error('GITHUB_APP_PRIVATE_KEY must not be empty');
   }
-  if (trimmed.includes('-----BEGIN') && trimmed.includes('PRIVATE KEY-----')) {
-    return trimmed;
+
+  let candidate = trimmed;
+  if (!candidate.includes('-----BEGIN')) {
+    candidate = decodeBase64Pem(candidate);
   }
+
+  if (!candidate.includes('-----BEGIN')) {
+    throw new Error('GITHUB_APP_PRIVATE_KEY must be a PEM string or base64-encoded PEM');
+  }
+
+  candidate = ensurePkcs8(candidate);
+  return candidate.endsWith('\n') ? candidate : `${candidate}\n`;
+}
+
+function decodeBase64Pem(value: string): string {
   try {
-    let decoded = Buffer.from(trimmed, 'base64').toString('utf8').trim();
-    if (decoded.includes('-----BEGIN') && decoded.includes('PRIVATE KEY-----')) {
-      return decoded;
-    }
+    const buf = Buffer.from(value, 'base64');
+    if (buf.length === 0) return value;
+    return buf.toString('utf8').trim();
   } catch {
-    // fall through to error below
+    return value;
   }
-  throw new Error('GITHUB_APP_PRIVATE_KEY must be a PEM string or base64-encoded PEM');
+}
+
+function ensurePkcs8(pem: string): string {
+  const header = detectPemHeader(pem);
+  if (header === 'PRIVATE KEY') {
+    return pem.trim();
+  }
+  if (header === 'RSA PRIVATE KEY') {
+    try {
+      const keyObject = crypto.createPrivateKey({ key: pem, format: 'pem' });
+      const exported = keyObject.export({ format: 'pem', type: 'pkcs8' });
+      return typeof exported === 'string' ? exported.trim() : exported.toString('utf8').trim();
+    } catch (error) {
+      throw new Error(`Failed to convert RSA private key to PKCS#8: ${(error as Error).message}`);
+    }
+  }
+  throw new Error('GITHUB_APP_PRIVATE_KEY must be PKCS#8 (-----BEGIN PRIVATE KEY-----) or an RSA key convertible to PKCS#8');
+}
+
+function detectPemHeader(pem: string): string | null {
+  const match = pem.match(/-----BEGIN ([A-Z ]+)-----/);
+  return match ? match[1] ?? null : null;
 }
 
 export type { Env };
