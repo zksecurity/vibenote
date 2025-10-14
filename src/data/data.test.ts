@@ -822,8 +822,8 @@ describe('useRepoData', () => {
     const recordRecent = vi.fn<RecordRecentFn>();
 
     const store = new LocalStore(slug);
-    const noteId = store.createNote('Draft', 'pending changes');
-    const notePath = store.loadNote(noteId)?.path;
+    const noteId = store.createFile('Draft.md', 'pending changes');
+    const notePath = store.loadFileById(noteId)?.path;
     if (!notePath) throw new Error('Missing path for lost-auth note');
     markRepoLinked(slug);
 
@@ -870,8 +870,8 @@ describe('useRepoData', () => {
     expect(result.current.state.needsInstall).toBe(true);
     expect(result.current.state.repoLinked).toBe(true);
 
-    expect(result.current.state.doc).toBeUndefined();
-    expect(result.current.state.notes.some((meta) => meta.id === noteId)).toBe(true);
+    expect(result.current.state.activeFile).toBeUndefined();
+    expect(result.current.state.files.some((meta) => meta.id === noteId)).toBe(true);
 
     mockGetRepoMetadata.mockResolvedValue({ ...writableMeta });
 
@@ -882,9 +882,9 @@ describe('useRepoData', () => {
     await waitFor(() => expect(result.current.state.needsInstall).toBe(false));
     expect(result.current.state.repoLinked).toBe(true);
     act(() => {
-      result.current.actions.selectNote(notePath);
+      result.current.actions.selectFile(notePath);
     });
-    await waitFor(() => expect(result.current.state.doc?.id).toBe(noteId));
+    await waitFor(() => expect(result.current.state.activeFile?.id).toBe(noteId));
   });
 
   // Switching notes in read-only mode should respect loading states without toggling install banners.
