@@ -310,7 +310,6 @@ app.get('/v1/share-links/:id/assets/*', async (req, res) => {
       return res.status(404).json({ error: 'share not found' });
     }
     const record = shareStore.get(id);
-    console.log(id, record);
     if (!record) {
       return res.status(404).json({ error: 'share not found' });
     }
@@ -319,7 +318,6 @@ app.get('/v1/share-links/:id/assets/*', async (req, res) => {
     }
     const assetParam = getPathParam(req, '0') ?? '';
     const pathCandidate = resolveAssetPath(record.path, decodeAssetParam(assetParam));
-    console.log('asset request', assetParam, pathCandidate);
     if (!pathCandidate) {
       return res.status(400).json({ error: 'invalid asset path' });
     }
