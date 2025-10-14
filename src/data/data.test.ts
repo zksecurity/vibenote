@@ -776,6 +776,7 @@ describe('useRepoData', () => {
     });
 
     const seenNeedsInstall: boolean[] = [];
+    const seenRepoLinked: boolean[] = [];
 
     const { result } = renderHook(() => {
       const [route, setRoute] = useState<RepoRoute>({ kind: 'repo', owner: 'acme', repo: 'private' });
@@ -788,6 +789,7 @@ describe('useRepoData', () => {
         },
       });
       seenNeedsInstall.push(value.state.needsInstall);
+      seenRepoLinked.push(value.state.repoLinked);
       return value;
     });
 
@@ -796,6 +798,7 @@ describe('useRepoData', () => {
     });
 
     await waitFor(() => expect(result.current.state.needsInstall).toBe(true));
+    expect(result.current.state.repoLinked).toBe(true);
 
     mockGetRepoMetadata.mockResolvedValue({ ...writableMeta });
 
@@ -811,6 +814,77 @@ describe('useRepoData', () => {
 
     await waitFor(() => expect(result.current.state.activeFile?.id).toBe(noteId));
     expect(seenNeedsInstall.includes(true)).toBe(true);
+    expect(seenRepoLinked.every((flag) => flag === true)).toBe(true);
+  });
+
+  test('auth refresh failure surfaces re-login prompt without clearing notes', async () => {
+    const slug = 'acme/lost-auth';
+    const recordRecent = vi.fn<RecordRecentFn>();
+
+    const store = new LocalStore(slug);
+    const noteId = store.createNote('Draft', 'pending changes');
+    const notePath = store.loadNote(noteId)?.path;
+    if (!notePath) throw new Error('Missing path for lost-auth note');
+    markRepoLinked(slug);
+
+    mockGetSessionToken.mockReturnValue('session-token');
+    mockGetSessionUser.mockReturnValue({
+      login: 'mona',
+      name: 'Mona',
+      avatarUrl: 'https://example.com/mona.png',
+    });
+
+    const lostAuthMeta: RepoMetadata = {
+      isPrivate: true,
+      installed: false,
+      repoSelected: false,
+      defaultBranch: null,
+      manageUrl: null,
+      rateLimited: false,
+    };
+
+    const firstMeta = createDeferred<RepoMetadata>();
+    mockGetRepoMetadata.mockImplementation(() => firstMeta.promise);
+    mockSignInWithGitHubApp.mockResolvedValue({
+      token: 'fresh-token',
+      user: { login: 'mona', name: 'Mona', avatarUrl: '' },
+    });
+
+    const { result } = renderHook(() => {
+      const [route, setRoute] = useState<RepoRoute>({ kind: 'repo', owner: 'acme', repo: 'lost-auth' });
+      return useRepoData({
+        slug,
+        route,
+        recordRecent,
+        setActivePath: (nextPath) => {
+          setRoute((prev) => (prev.kind === 'repo' ? { ...prev, notePath: nextPath } : prev));
+        },
+      });
+    });
+
+    act(() => {
+      firstMeta.resolve(lostAuthMeta);
+    });
+
+    await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
+    expect(result.current.state.needsInstall).toBe(true);
+    expect(result.current.state.repoLinked).toBe(true);
+
+    expect(result.current.state.doc).toBeUndefined();
+    expect(result.current.state.notes.some((meta) => meta.id === noteId)).toBe(true);
+
+    mockGetRepoMetadata.mockResolvedValue({ ...writableMeta });
+
+    await act(async () => {
+      await result.current.actions.signIn();
+    });
+
+    await waitFor(() => expect(result.current.state.needsInstall).toBe(false));
+    expect(result.current.state.repoLinked).toBe(true);
+    act(() => {
+      result.current.actions.selectNote(notePath);
+    });
+    await waitFor(() => expect(result.current.state.doc?.id).toBe(noteId));
   });
 
   // Switching notes in read-only mode should respect loading states without toggling install banners.
@@ -836,6 +910,7 @@ describe('useRepoData', () => {
     );
 
     const seenNeedsInstall: boolean[] = [];
+    const seenRepoLinked: boolean[] = [];
 
     const { result } = renderHook(() => {
       const [route, setRoute] = useState<RepoRoute>({ kind: 'repo', owner: 'octo', repo: 'wiki' });
@@ -848,6 +923,7 @@ describe('useRepoData', () => {
         },
       });
       seenNeedsInstall.push(value.state.needsInstall);
+      seenRepoLinked.push(value.state.repoLinked);
       return value;
     });
 
@@ -865,6 +941,7 @@ describe('useRepoData', () => {
     await waitFor(() => expect(result.current.state.activeFile?.path).toBe('docs/beta.md'));
     expect(result.current.state.needsInstall).toBe(false);
     expect(seenNeedsInstall.every((flag) => flag === false)).toBe(true);
+    expect(seenRepoLinked.every((flag) => flag === false)).toBe(true);
   });
 
   // Signing out should clear local data and disable syncing.
@@ -910,6 +987,7 @@ describe('useRepoData', () => {
     expect(result.current.state.user).toBeUndefined();
     expect(result.current.state.activeFile).toBeUndefined();
     expect(result.current.state.canSync).toBe(false);
+    expect(result.current.state.repoLinked).toBe(false);
     expect(result.current.state.needsInstall).toBe(false);
     expect(new LocalStore(slug).listFiles()).toHaveLength(0);
   });

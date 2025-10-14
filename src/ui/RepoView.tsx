@@ -69,6 +69,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
     canSync,
     repoQueryStatus,
     needsInstall,
+    repoLinked,
     manageUrl,
 
     activeFile,
@@ -87,6 +88,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
   const showSidebar = canRead;
   const isReadOnly = !canEdit && canRead;
   const layoutClass = showSidebar ? '' : 'single';
+  const needsSessionRefresh = needsInstall && repoLinked;
 
   // Pure UI state: sidebar visibility and account menu.
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -302,22 +304,34 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
           <div className="workspace-body">
             {route.kind === 'repo' && needsInstall ? (
               <div className="empty-state">
-                <h2>Can't access this repository</h2>
-                <p>This repository is private or not yet enabled for the VibeNote GitHub App.</p>
-                <p>
-                  Continue to GitHub and either select <strong>Only select repositories</strong> and pick
-                  <code>
-                    {' '}
-                    {route.owner}/{route.repo}
-                  </code>
-                  , or grant access to all repositories (not recommended).
-                </p>
-                {hasSession ? (
-                  <button className="btn primary" onClick={actions.openRepoAccess}>
-                    Get Read/Write Access
-                  </button>
+                <h2>{needsSessionRefresh ? 'Refresh GitHub access' : "Can't access this repository"}</h2>
+                {needsSessionRefresh ? (
+                  <>
+                    <p>VibeNote lost permission to talk to GitHub for this repository.</p>
+                    <p>Sign in again to refresh your session without clearing any local notes.</p>
+                    <button className="btn primary" onClick={actions.signIn}>
+                      Sign in again
+                    </button>
+                  </>
                 ) : (
-                  <p>Please sign in with GitHub to request access.</p>
+                  <>
+                    <p>This repository is private or not yet enabled for the VibeNote GitHub App.</p>
+                    <p>
+                      Continue to GitHub and either select <strong>Only select repositories</strong> and pick
+                      <code>
+                        {' '}
+                        {route.owner}/{route.repo}
+                      </code>
+                      , or grant access to all repositories (not recommended).
+                    </p>
+                    {hasSession ? (
+                      <button className="btn primary" onClick={actions.openRepoAccess}>
+                        Get Read/Write Access
+                      </button>
+                    ) : (
+                      <p>Please sign in with GitHub to request access.</p>
+                    )}
+                  </>
                 )}
               </div>
             ) : (
