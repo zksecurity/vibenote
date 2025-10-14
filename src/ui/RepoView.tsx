@@ -2,13 +2,23 @@
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import { FileTree, type FileEntry } from './FileTree';
 import { Editor } from './Editor';
+import { AssetViewer } from './AssetViewer';
 import { RepoSwitcher } from './RepoSwitcher';
 import { Toggle } from './Toggle';
 import { GitHubIcon, ExternalLinkIcon, NotesIcon, CloseIcon, SyncIcon } from './RepoIcons';
-import { useRepoData, type RepoNoteListItem } from '../data';
-import { getExpandedFolders, setExpandedFolders } from '../storage/local';
+import { useRepoData } from '../data';
+import type { FileMeta } from '../storage/local';
+import {
+  getExpandedFolders,
+  setExpandedFolders,
+  isMarkdownFile,
+  isBinaryFile,
+  isAssetUrlFile,
+  basename,
+} from '../storage/local';
 import type { RepoRoute, Route } from './routing';
 import { normalizePath, pathsEqual } from '../lib/util';
+import { useRepoAssetLoader } from './useRepoAssetLoader';
 
 type RepoViewProps = {
   slug: string;
@@ -62,14 +72,15 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
     repoLinked,
     manageUrl,
 
-    doc,
+    activeFile,
     activePath,
-    notes,
+    files,
     folders,
 
     autosync,
     syncing,
     statusMessage,
+    defaultBranch,
   } = state;
 
   const userAvatarSrc = user?.avatarDataUrl ?? user?.avatarUrl ?? undefined;
@@ -139,9 +150,11 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
   }, []);
 
   const onSelect = async (path: string | undefined) => {
-    await actions.selectNote(path);
+    await actions.selectFile(path);
     setSidebarOpen(false);
   };
+
+  const loadAsset = useRepoAssetLoader({ slug, isReadOnly, defaultBranch });
 
   return (
     <div className="app-shell">
@@ -249,8 +262,8 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
             <div className="sidebar-header">
               <div className="sidebar-title">
                 <div className="sidebar-title-main">
-                  <span>Notes</span>
-                  <span className="note-count">{notes.length}</span>
+                  <span>Files</span>
+                  <span className="note-count">{files.length}</span>
                 </div>
                 <button
                   className="btn icon only-mobile"
@@ -262,7 +275,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
               </div>
             </div>
             <FileSidebar
-              notes={notes}
+              files={files}
               folders={folders}
               canEdit={canEdit}
               slug={slug}
@@ -270,8 +283,8 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
               onSelect={onSelect}
               onCreateNote={actions.createNote}
               onCreateFolder={actions.createFolder}
-              onRenameNote={actions.renameNote}
-              onDeleteNote={actions.deleteNote}
+              onRenameFile={actions.renameFile}
+              onDeleteFile={actions.deleteFile}
               onRenameFolder={actions.renameFolder}
               onDeleteFolder={actions.deleteFolder}
             />
@@ -350,16 +363,22 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
                     )}
                   </div>
                 )}
-                {doc !== undefined ? (
+                {activeFile !== undefined ? (
                   <div className="workspace-panels">
-                    <Editor
-                      key={doc.id}
-                      doc={doc}
-                      readOnly={!canEdit}
-                      onChange={(path, text) => {
-                        actions.updateNoteText(path, text);
-                      }}
-                    />
+                    {isMarkdownFile(activeFile) ? (
+                      <Editor
+                        key={activeFile.id}
+                        doc={activeFile}
+                        readOnly={!canEdit}
+                        slug={slug}
+                        loadAsset={loadAsset}
+                        onChange={(path, text) => {
+                          actions.saveFile(path, text);
+                        }}
+                      />
+                    ) : isBinaryFile(activeFile) || isAssetUrlFile(activeFile) ? (
+                      <AssetViewer key={activeFile.id} file={activeFile} />
+                    ) : null}
                   </div>
                 ) : (
                   <div className="empty-state">
@@ -429,7 +448,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
 }
 
 type FileSidebarProps = {
-  notes: RepoNoteListItem[];
+  files: FileMeta[];
   folders: string[];
   canEdit: boolean;
   slug: string;
@@ -437,8 +456,8 @@ type FileSidebarProps = {
   onSelect: (path: string | undefined) => void;
   onCreateNote: (dir: string, name: string) => string | undefined;
   onCreateFolder: (parentDir: string, name: string) => void;
-  onRenameNote: (path: string, title: string) => void;
-  onDeleteNote: (path: string) => void;
+  onRenameFile: (path: string, name: string) => void;
+  onDeleteFile: (path: string) => void;
   onRenameFolder: (dir: string, newName: string) => void;
   onDeleteFolder: (dir: string) => void;
 };
@@ -446,23 +465,30 @@ type FileSidebarProps = {
 function FileSidebar(props: FileSidebarProps) {
   let {
     canEdit,
-    notes,
+    files,
     slug,
     folders,
     activePath,
     onSelect,
     onCreateNote,
     onCreateFolder,
-    onRenameNote,
-    onDeleteNote,
+    onRenameFile,
+    onDeleteFile,
     onRenameFolder,
     onDeleteFolder,
   } = props;
 
   // Derive file entries for the tree component from the provided notes list.
-  let files = useMemo<FileEntry[]>(
-    () => notes.map((note) => ({ name: note.title, path: note.path, dir: note.dir })),
-    [notes]
+  let treeFiles = useMemo<FileEntry[]>(
+    () =>
+      files.map((file) => ({
+        name: basename(file.path),
+        path: file.path,
+        dir: file.dir,
+        title: file.title,
+        kind: file.kind,
+      })),
+    [files]
   );
 
   // make sure that for every folder, its parent folders is also included (otherwise expanding doesn't work)
@@ -504,7 +530,8 @@ function FileSidebar(props: FileSidebarProps) {
   function selectedDir() {
     if (selection?.kind === 'folder') return selection.path;
     if (selection?.kind === 'file') {
-      return files.find((f) => normalizePath(f.path) === normalizePath(selection.path))?.dir ?? '';
+      let normalized = normalizePath(selection.path);
+      return files.find((f) => normalizePath(f.path) === normalized)?.dir ?? '';
     }
     return '';
   }
@@ -533,15 +560,15 @@ function FileSidebar(props: FileSidebarProps) {
       )}
       <div className="sidebar-body">
         <FileTree
-          files={files}
+          files={treeFiles}
           folders={folders}
           activePath={activePath}
           collapsed={collapsed}
           onCollapsedChange={setCollapsedMap}
           onSelectionChange={setSelection}
           onSelectFile={onSelect}
-          onRenameFile={onRenameNote}
-          onDeleteFile={onDeleteNote}
+          onRenameFile={onRenameFile}
+          onDeleteFile={onDeleteFile}
           onCreateFile={(dir, name) => {
             const createdPath = onCreateNote(dir, name);
             if (createdPath !== undefined) onSelect(createdPath);
