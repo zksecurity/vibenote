@@ -334,8 +334,19 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       setShareState((prev) => (prev.status === 'idle' ? prev : { status: 'idle' }));
       return;
     }
-    void loadShareForTarget({ owner: repoOwner, repo: repoName, path: activePath });
-  }, [repoOwner, repoName, activePath, hasSession, loadShareForTarget]);
+    const target = { owner: repoOwner, repo: repoName, path: activePath };
+    const current = shareRequestRef.current;
+    const sameTarget = current !== null && current !== undefined && shareTargetEquals(current, target);
+    if (!sameTarget && shareState.status !== 'idle') {
+      shareRequestRef.current = null;
+      setShareState((prev) => (prev.status === 'idle' ? prev : { status: 'idle' }));
+      return;
+    }
+    if (shareState.status !== 'idle') {
+      return;
+    }
+    void loadShareForTarget(target);
+  }, [repoOwner, repoName, activePath, hasSession, shareState, loadShareForTarget]);
 
   // CLICK HANDLERS
 

@@ -244,8 +244,9 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
 
   useEffect(() => {
     if (!shareOpen) return;
+    if (share.status === 'ready' || share.status === 'loading') return;
     void refreshShareLink();
-  }, [shareOpen, refreshShareLink]);
+  }, [shareOpen, share.status, refreshShareLink]);
 
   const [showSwitcher, setShowSwitcher] = useState(false);
 
