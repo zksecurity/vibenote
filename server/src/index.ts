@@ -287,9 +287,9 @@ app.get('/v1/share-links/:id/content', async (req, res) => {
     const ghRes = await installationRequest(
       env,
       record.installationId,
-      `/repos/${encodeURIComponent(record.owner)}/${encodeURIComponent(record.repo)}/contents/${encodeURIComponent(
-        record.path
-      )}?ref=${encodeURIComponent(record.branch)}`,
+      `/repos/${encodeURIComponent(record.owner)}/${encodeURIComponent(
+        record.repo
+      )}/contents/${encodeURIComponent(record.path)}?ref=${encodeURIComponent(record.branch)}`,
       {
         headers: { Accept: 'application/vnd.github.raw' },
       }
@@ -325,17 +325,26 @@ app.get('/v1/share-links/:id/assets/*', async (req, res) => {
     if (record.status !== 'active') {
       return res.status(404).json({ error: 'share not found' });
     }
-    const assetParam = (getPathParam(req, '0') ?? '').toString();
-    const pathCandidate = resolveAssetPath(record.path, assetParam);
+    const assetParam = getPathParam(req, '0') ?? '';
+    const pathCandidate = resolveAssetPath(record.path, decodeAssetParam(assetParam));
     if (!pathCandidate) {
       return res.status(400).json({ error: 'invalid asset path' });
+    }
+    let encodedAssetPath = encodeAssetPath(pathCandidate);
+    const encodedFromUrl = extractEncodedAssetPath(req);
+    if (encodedFromUrl) {
+      const decodedFromUrl = decodeAssetParam(encodedFromUrl);
+      const normalizedFromUrl = resolveAssetPath(record.path, decodedFromUrl);
+      if (normalizedFromUrl === pathCandidate) {
+        encodedAssetPath = encodedFromUrl;
+      }
     }
     const ghRes = await installationRequest(
       env,
       record.installationId,
-      `/repos/${encodeURIComponent(record.owner)}/${encodeURIComponent(record.repo)}/contents/${encodeURIComponent(
-        pathCandidate
-      )}?ref=${encodeURIComponent(record.branch)}`,
+      `/repos/${encodeURIComponent(record.owner)}/${encodeURIComponent(
+        record.repo
+      )}/contents/${encodedAssetPath}?ref=${encodeURIComponent(record.branch)}`,
       {
         headers: { Accept: 'application/vnd.github.raw' },
       }
@@ -349,11 +358,16 @@ app.get('/v1/share-links/:id/assets/*', async (req, res) => {
     }
     const buffer = Buffer.from(await ghRes.arrayBuffer());
     const contentType = ghRes.headers.get('Content-Type') ?? 'application/octet-stream';
-    res
-      .status(200)
-      .setHeader('Content-Type', contentType)
-      .setHeader('Cache-Control', 'public, max-age=300')
-      .send(buffer);
+    const headers: Record<string, string> = {
+      'Content-Type': contentType,
+      'Cache-Control': 'public, max-age=300',
+      Vary: 'Accept-Encoding',
+    };
+    const etag = ghRes.headers.get('ETag');
+    if (etag) headers.ETag = etag;
+    const lastModified = ghRes.headers.get('Last-Modified');
+    if (lastModified) headers['Last-Modified'] = lastModified;
+    res.status(200).set(headers).send(buffer);
   } catch (error) {
     res.status(400).json({ error: getErrorMessage(error) });
   }
@@ -499,12 +513,15 @@ async function ensureRepoReadableByUser(
   repo: string
 ): Promise<void> {
   const tokens = await refreshAccessToken(env, store, sessionId);
-  const res = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, {
-    headers: {
-      Authorization: `Bearer ${tokens.accessToken}`,
-      Accept: 'application/vnd.github+json',
-    },
-  });
+  const res = await fetch(
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
+    {
+      headers: {
+        Authorization: `Bearer ${tokens.accessToken}`,
+        Accept: 'application/vnd.github+json',
+      },
+    }
+  );
   if (res.status === 404) {
     throw new Error('repository not found or not accessible');
   }
@@ -514,7 +531,11 @@ async function ensureRepoReadableByUser(
   }
 }
 
-async function canUserRevokeShare(env: Env, store: SessionStoreInstance, session: SessionClaims, record: ShareRecord
+async function canUserRevokeShare(
+  env: Env,
+  store: SessionStoreInstance,
+  session: SessionClaims,
+  record: ShareRecord
 ): Promise<boolean> {
   if (session.sub === record.createdByUserId) return true;
   try {
@@ -603,4 +624,39 @@ function resolveAssetPath(notePath: string, requestPath: string): string | null 
     return null;
   }
   return normalized;
+}
+
+function decodeAssetParam(raw: string | undefined): string {
+  if (typeof raw !== 'string') return '';
+  return decodeURIComponentSafe(raw);
+}
+
+function decodeURIComponentSafe(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function encodeAssetPath(pathValue: string): string {
+  return pathValue
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+}
+
+function extractEncodedAssetPath(req: express.Request): string | undefined {
+  const originalUrl = req.originalUrl || '';
+  const marker = '/assets/';
+  const index = originalUrl.indexOf(marker);
+  if (index === -1) return undefined;
+  let encoded = originalUrl.slice(index + marker.length);
+  const queryIndex = encoded.indexOf('?');
+  if (queryIndex !== -1) {
+    encoded = encoded.slice(0, queryIndex);
+  }
+  encoded = encoded.replace(/^\/+/, '');
+  if (encoded.length === 0) return undefined;
+  return encoded;
 }

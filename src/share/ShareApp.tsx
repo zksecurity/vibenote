@@ -188,10 +188,7 @@ function renderMarkdown(markdown: string, options: { shareId: string; notePath: 
   }
 }
 
-function rewriteAssetUrls(
-  html: string,
-  options: { shareId: string; notePath: string }
-): string {
+function rewriteAssetUrls(html: string, options: { shareId: string; notePath: string }): string {
   if (typeof window === 'undefined') return html;
   const container = document.createElement('div');
   container.innerHTML = html;
@@ -216,7 +213,8 @@ function isRelativeAssetUrl(value: string): boolean {
   if (trimmed.startsWith('#')) return false;
   const lowered = trimmed.toLowerCase();
   if (lowered.startsWith('http://') || lowered.startsWith('https://')) return false;
-  if (lowered.startsWith('data:') || lowered.startsWith('mailto:') || lowered.startsWith('tel:')) return false;
+  if (lowered.startsWith('data:') || lowered.startsWith('mailto:') || lowered.startsWith('tel:'))
+    return false;
   if (lowered.startsWith('//')) return false;
   return true;
 }
@@ -247,9 +245,17 @@ function resolveAssetPath(notePath: string, target: string): string | null {
 function buildAssetUrl(shareId: string, assetPath: string): string {
   const encoded = assetPath
     .split('/')
-    .map((segment) => encodeURIComponent(segment))
+    .map((segment) => encodeURIComponent(decodeSegment(segment)))
     .join('/');
   return `${getApiBase()}/v1/share-links/${encodeURIComponent(shareId)}/assets/${encoded}`;
+}
+
+function decodeSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
 }
 
 let domPurifyConfigured = false;
