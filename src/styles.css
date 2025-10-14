@@ -205,13 +205,18 @@ textarea {
 }
 
 .topbar-actions .share-btn {
-  min-width: 96px;
+  color: var(--accent);
 }
 
 .topbar-actions .share-btn.share-btn-active {
-  background: var(--accent-soft);
-  border-color: var(--accent-border);
+  background: rgba(9, 105, 218, 0.12);
+  border-color: rgba(9, 105, 218, 0.45);
   color: var(--accent);
+}
+
+.topbar-actions .share-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .home-main {
@@ -337,6 +342,13 @@ textarea {
     box-shadow 0.18s ease,
     color 0.18s ease;
   text-decoration: none;
+}
+
+.btn.icon {
+  padding: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
 }
 
 .btn:hover {

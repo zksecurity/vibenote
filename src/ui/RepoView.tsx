@@ -5,7 +5,7 @@ import { Editor } from './Editor';
 import { AssetViewer } from './AssetViewer';
 import { RepoSwitcher } from './RepoSwitcher';
 import { Toggle } from './Toggle';
-import { GitHubIcon, ExternalLinkIcon, NotesIcon, CloseIcon, SyncIcon } from './RepoIcons';
+import { GitHubIcon, ExternalLinkIcon, NotesIcon, CloseIcon, SyncIcon, ShareIcon } from './RepoIcons';
 import { useRepoData, type ShareState } from '../data';
 import type { FileMeta } from '../storage/local';
 import {
@@ -224,6 +224,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
   const layoutClass = showSidebar ? '' : 'single';
   const needsSessionRefresh = needsInstall && repoLinked;
   const canShare = hasSession && route.kind === 'repo' && activePath !== undefined && canRead;
+  const shareDisabled = share.status === 'idle' || share.status === 'loading';
 
   // Pure UI state: sidebar visibility and account menu.
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -370,11 +371,14 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
             <>
               {canShare && (
                 <button
-                  className={`btn secondary share-btn${share.link ? ' share-btn-active' : ''}`}
+                  className={`btn icon sync-btn share-btn${share.link ? ' share-btn-active' : ''}`}
                   onClick={() => setShareOpen(true)}
-                  title={share.link ? 'View share link' : 'Create a share link'}
+                  title={share.link ? 'Manage share link' : shareDisabled ? 'Checking share status' : 'Create share link'}
+                  aria-label={share.link ? 'Manage share link' : 'Create share link'}
+                  disabled={shareDisabled}
+                  aria-disabled={shareDisabled}
                 >
-                  {share.status === 'loading' ? 'Sharing...' : share.link ? 'Shared' : 'Share'}
+                  <ShareIcon />
                 </button>
               )}
               {canSync && (
