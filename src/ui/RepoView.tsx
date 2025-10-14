@@ -97,7 +97,7 @@ function ShareDialog({ share, notePath, onClose, onCreate, onRevoke, onRefresh }
           <button
             className="btn secondary"
             onClick={() => {
-              void onRefresh().catch(() => undefined);
+              onRefresh();
             }}
           >
             Try again
@@ -120,7 +120,7 @@ function ShareDialog({ share, notePath, onClose, onCreate, onRevoke, onRefresh }
           <button
             className="btn subtle share-revoke"
             onClick={() => {
-              void onRevoke().catch(() => undefined);
+              onRevoke();
             }}
           >
             Revoke link
@@ -133,7 +133,7 @@ function ShareDialog({ share, notePath, onClose, onCreate, onRevoke, onRefresh }
         <button
           className="btn primary"
           onClick={() => {
-            void onCreate().catch(() => undefined);
+            onCreate();
           }}
         >
           Create share link
