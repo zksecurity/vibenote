@@ -183,7 +183,7 @@ The system design should leave room for these extensions — especially snapshot
   - New route for shared links.
   - Fetch + render flow using existing components.
   - Tombstone state for invalid shares.
-  - Relative assets resolve via `/v1/share-links/:id/assets/*`, so inline images and attachments load through the backend without exposing GitHub tokens.
+  - Relative assets resolve via `/v1/share-links/:id/assets/*`, so inline images and attachments load through the backend without exposing GitHub tokens. Only assets referenced from the note are served.
   - The standalone build (`share.html`) reads `VIBENOTE_API_BASE`/`VITE_VIBENOTE_API_BASE` to contact the API.
   - The viewer rewrites relative asset links through `/v1/share-links/:id/assets/*` and renders Markdown with the same sanitisation rules as the main app.
 

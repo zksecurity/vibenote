@@ -49,6 +49,9 @@ app.use(
 
 app.get('/v1/healthz', (_req, res) => res.json({ ok: true }));
 
+const shareAssetCache = new Map<string, { paths: Set<string>; cachedAt: number }>();
+const SHARE_ASSET_CACHE_TTL_MS = 5 * 60 * 1000;
+
 app.get('/v1/auth/github/start', async (req, res) => {
   let returnTo = String(req.query.returnTo ?? '');
   let sanitizedReturnTo = normalizeReturnTo(returnTo, env.ALLOWED_ORIGINS);
@@ -240,6 +243,7 @@ app.delete('/v1/shares/:id', requireSession, async (req, res) => {
       return res.status(404).json({ error: 'share not found' });
     }
     console.log(`[vibenote] share revoked ${record.owner}/${record.repo}`);
+    shareAssetCache.delete(id);
     res.status(204).end();
   } catch (error) {
     res.status(400).json({ error: getErrorMessage(error) });
@@ -284,30 +288,17 @@ app.get('/v1/share-links/:id/content', async (req, res) => {
     if (record.status !== 'active') {
       return res.status(404).json({ error: 'share not found' });
     }
-    const ghRes = await installationRequest(
-      env,
-      record.installationId,
-      `/repos/${encodeURIComponent(record.owner)}/${encodeURIComponent(
-        record.repo
-      )}/contents/${encodeURIComponent(record.path)}?ref=${encodeURIComponent(record.branch)}`,
-      {
-        headers: { Accept: 'application/vnd.github.raw' },
-      }
-    );
-    if (ghRes.status === 404) {
-      return res.status(404).json({ error: 'note not found' });
-    }
-    if (!ghRes.ok) {
-      const text = await ghRes.text();
-      return res.status(502).json({ error: `github error ${ghRes.status}: ${text}` });
-    }
-    const text = await ghRes.text();
+    const text = await fetchShareMarkdown(record, env);
+    cacheShareAssets(record.id, record.path, text);
     res
       .status(200)
       .setHeader('Content-Type', 'text/markdown; charset=utf-8')
       .setHeader('Cache-Control', 'no-store')
       .send(text);
   } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     res.status(400).json({ error: getErrorMessage(error) });
   }
 });
@@ -329,6 +320,18 @@ app.get('/v1/share-links/:id/assets/*', async (req, res) => {
     const pathCandidate = resolveAssetPath(record.path, decodeAssetParam(assetParam));
     if (!pathCandidate) {
       return res.status(400).json({ error: 'invalid asset path' });
+    }
+    let allowedPaths: Set<string>;
+    try {
+      allowedPaths = await ensureShareAssetsLoaded(record, env);
+    } catch (error) {
+      if (error instanceof HttpError) {
+        return res.status(error.status).json({ error: error.message });
+      }
+      throw error;
+    }
+    if (!allowedPaths.has(pathCandidate)) {
+      return res.status(404).json({ error: 'asset not found' });
     }
     let encodedAssetPath = encodeAssetPath(pathCandidate);
     const encodedFromUrl = extractEncodedAssetPath(req);
@@ -369,6 +372,9 @@ app.get('/v1/share-links/:id/assets/*', async (req, res) => {
     if (lastModified) headers['Last-Modified'] = lastModified;
     res.status(200).set(headers).send(buffer);
   } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     res.status(400).json({ error: getErrorMessage(error) });
   }
 });
@@ -659,4 +665,102 @@ function extractEncodedAssetPath(req: express.Request): string | undefined {
   encoded = encoded.replace(/^\/+/, '');
   if (encoded.length === 0) return undefined;
   return encoded;
+}
+
+async function fetchShareMarkdown(record: ShareRecord, env: Env): Promise<string> {
+  const ghRes = await installationRequest(
+    env,
+    record.installationId,
+    `/repos/${encodeURIComponent(record.owner)}/${encodeURIComponent(
+      record.repo
+    )}/contents/${encodeAssetPath(record.path)}?ref=${encodeURIComponent(record.branch)}`,
+    {
+      headers: { Accept: 'application/vnd.github.raw' },
+    }
+  );
+  if (ghRes.status === 404) {
+    throw new HttpError(404, 'note not found');
+  }
+  if (!ghRes.ok) {
+    const text = await ghRes.text();
+    throw new HttpError(502, `github error ${ghRes.status}: ${text}`);
+  }
+  return await ghRes.text();
+}
+
+function cacheShareAssets(shareId: string, notePath: string, markdown: string): Set<string> {
+  const paths = new Set<string>();
+  for (const ref of extractRelativeAssetRefs(markdown)) {
+    const normalized = resolveAssetPath(notePath, decodeAssetParam(ref));
+    if (normalized) {
+      paths.add(normalized);
+    }
+  }
+  shareAssetCache.set(shareId, { paths, cachedAt: Date.now() });
+  return paths;
+}
+
+async function ensureShareAssetsLoaded(record: ShareRecord, env: Env): Promise<Set<string>> {
+  const cached = shareAssetCache.get(record.id);
+  if (cached && Date.now() - cached.cachedAt <= SHARE_ASSET_CACHE_TTL_MS) {
+    return cached.paths;
+  }
+  const markdown = await fetchShareMarkdown(record, env);
+  return cacheShareAssets(record.id, record.path, markdown);
+}
+
+function extractRelativeAssetRefs(markdown: string): string[] {
+  const results: string[] = [];
+  const imagePattern = /!\[[^\]]*]\(([^)]+)\)/g;
+  for (const match of markdown.matchAll(imagePattern)) {
+    const raw = match[1];
+    if (typeof raw !== 'string') continue;
+    const target = normalizeLinkTarget(raw);
+    if (target) results.push(target);
+  }
+  const htmlImgPattern = /<img[^>]*src=["']([^"']+)["'][^>]*>/gi;
+  for (const match of markdown.matchAll(htmlImgPattern)) {
+    const raw = match[1];
+    if (typeof raw !== 'string') continue;
+    const target = normalizeLinkTarget(raw);
+    if (target) results.push(target);
+  }
+  return results;
+}
+
+function normalizeLinkTarget(raw: string): string | undefined {
+  if (!raw) return undefined;
+  let trimmed = raw.trim();
+  if (trimmed.length === 0) return undefined;
+  if (trimmed.startsWith('<') && trimmed.endsWith('>')) {
+    trimmed = trimmed.slice(1, -1).trim();
+  }
+  // Markdown allows titles after the URL separated by whitespace
+  const firstSpace = trimmed.search(/\s/);
+  if (firstSpace !== -1) {
+    trimmed = trimmed.slice(0, firstSpace);
+  }
+  if (isExternalReference(trimmed)) return undefined;
+  return trimmed;
+}
+
+function isExternalReference(target: string): boolean {
+  const lower = target.toLowerCase();
+  return (
+    lower.startsWith('http://') ||
+    lower.startsWith('https://') ||
+    lower.startsWith('mailto:') ||
+    lower.startsWith('data:') ||
+    lower.startsWith('tel:') ||
+    lower.startsWith('//') ||
+    lower.startsWith('#')
+  );
+}
+
+class HttpError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
 }
