@@ -1,5 +1,4 @@
 import crypto from 'node:crypto';
-import path from 'node:path';
 import express from 'express';
 import cors from 'cors';
 import { getEnv, type Env } from './env.ts';
@@ -16,6 +15,7 @@ import {
 import { createSessionStore, type SessionStoreInstance } from './session-store.ts';
 import { createShareStore, type ShareRecord } from './share-store.ts';
 import { getRepoInstallationId, installationRequest } from './github-app.ts';
+import { resolveAssetPath, decodeAssetParam, encodeAssetPath, collectAssetPaths } from './share-assets.ts';
 
 declare module 'express-serve-static-core' {
   interface Request {
@@ -310,6 +310,7 @@ app.get('/v1/share-links/:id/assets/*', async (req, res) => {
       return res.status(404).json({ error: 'share not found' });
     }
     const record = shareStore.get(id);
+    console.log(id, record);
     if (!record) {
       return res.status(404).json({ error: 'share not found' });
     }
@@ -318,6 +319,7 @@ app.get('/v1/share-links/:id/assets/*', async (req, res) => {
     }
     const assetParam = getPathParam(req, '0') ?? '';
     const pathCandidate = resolveAssetPath(record.path, decodeAssetParam(assetParam));
+    console.log('asset request', assetParam, pathCandidate);
     if (!pathCandidate) {
       return res.status(400).json({ error: 'invalid asset path' });
     }
@@ -612,46 +614,6 @@ function getPathParam(req: express.Request, key: string): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
-function resolveAssetPath(notePath: string, requestPath: string): string | null {
-  let candidate = requestPath.trim();
-  if (candidate.length === 0) return null;
-  candidate = candidate.replace(/\\/g, '/');
-  if (candidate.startsWith('http://') || candidate.startsWith('https://')) {
-    return null;
-  }
-  if (candidate.startsWith('/')) {
-    candidate = candidate.replace(/^\/+/, '');
-  } else {
-    const noteDir = path.posix.dirname(notePath);
-    candidate = noteDir === '.' ? candidate : `${noteDir}/${candidate}`;
-  }
-  const normalized = path.posix.normalize(candidate);
-  if (normalized.startsWith('../') || normalized === '..') {
-    return null;
-  }
-  return normalized;
-}
-
-function decodeAssetParam(raw: string | undefined): string {
-  if (typeof raw !== 'string') return '';
-  return decodeURIComponentSafe(raw);
-}
-
-function decodeURIComponentSafe(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
-}
-
-function encodeAssetPath(pathValue: string): string {
-  return pathValue
-    .split('/')
-    .map((segment) => encodeURIComponent(segment))
-    .join('/');
-}
-
 function extractEncodedAssetPath(req: express.Request): string | undefined {
   const originalUrl = req.originalUrl || '';
   const marker = '/assets/';
@@ -671,9 +633,9 @@ async function fetchShareMarkdown(record: ShareRecord, env: Env): Promise<string
   const ghRes = await installationRequest(
     env,
     record.installationId,
-    `/repos/${encodeURIComponent(record.owner)}/${encodeURIComponent(
-      record.repo
-    )}/contents/${encodeAssetPath(record.path)}?ref=${encodeURIComponent(record.branch)}`,
+    `/repos/${encodeURIComponent(record.owner)}/${encodeURIComponent(record.repo)}/contents/${encodeAssetPath(
+      record.path
+    )}?ref=${encodeURIComponent(record.branch)}`,
     {
       headers: { Accept: 'application/vnd.github.raw' },
     }
@@ -689,13 +651,7 @@ async function fetchShareMarkdown(record: ShareRecord, env: Env): Promise<string
 }
 
 function cacheShareAssets(shareId: string, notePath: string, markdown: string): Set<string> {
-  const paths = new Set<string>();
-  for (const ref of extractRelativeAssetRefs(markdown)) {
-    const normalized = resolveAssetPath(notePath, decodeAssetParam(ref));
-    if (normalized) {
-      paths.add(normalized);
-    }
-  }
+  const paths = collectAssetPaths(notePath, markdown);
   shareAssetCache.set(shareId, { paths, cachedAt: Date.now() });
   return paths;
 }
@@ -707,54 +663,6 @@ async function ensureShareAssetsLoaded(record: ShareRecord, env: Env): Promise<S
   }
   const markdown = await fetchShareMarkdown(record, env);
   return cacheShareAssets(record.id, record.path, markdown);
-}
-
-function extractRelativeAssetRefs(markdown: string): string[] {
-  const results: string[] = [];
-  const imagePattern = /!\[[^\]]*]\(([^)]+)\)/g;
-  for (const match of markdown.matchAll(imagePattern)) {
-    const raw = match[1];
-    if (typeof raw !== 'string') continue;
-    const target = normalizeLinkTarget(raw);
-    if (target) results.push(target);
-  }
-  const htmlImgPattern = /<img[^>]*src=["']([^"']+)["'][^>]*>/gi;
-  for (const match of markdown.matchAll(htmlImgPattern)) {
-    const raw = match[1];
-    if (typeof raw !== 'string') continue;
-    const target = normalizeLinkTarget(raw);
-    if (target) results.push(target);
-  }
-  return results;
-}
-
-function normalizeLinkTarget(raw: string): string | undefined {
-  if (!raw) return undefined;
-  let trimmed = raw.trim();
-  if (trimmed.length === 0) return undefined;
-  if (trimmed.startsWith('<') && trimmed.endsWith('>')) {
-    trimmed = trimmed.slice(1, -1).trim();
-  }
-  // Markdown allows titles after the URL separated by whitespace
-  const firstSpace = trimmed.search(/\s/);
-  if (firstSpace !== -1) {
-    trimmed = trimmed.slice(0, firstSpace);
-  }
-  if (isExternalReference(trimmed)) return undefined;
-  return trimmed;
-}
-
-function isExternalReference(target: string): boolean {
-  const lower = target.toLowerCase();
-  return (
-    lower.startsWith('http://') ||
-    lower.startsWith('https://') ||
-    lower.startsWith('mailto:') ||
-    lower.startsWith('data:') ||
-    lower.startsWith('tel:') ||
-    lower.startsWith('//') ||
-    lower.startsWith('#')
-  );
 }
 
 class HttpError extends Error {

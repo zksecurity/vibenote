@@ -226,7 +226,11 @@ function resolveAssetPath(notePath: string, target: string): string | null {
     combined = cleaned.replace(/^\/+/, '');
   } else {
     const dir = notePath.includes('/') ? notePath.slice(0, notePath.lastIndexOf('/')) : '';
-    combined = dir ? `${dir}/${cleaned}` : cleaned;
+    if (dir && cleaned.startsWith(`${dir}/`)) {
+      combined = cleaned;
+    } else {
+      combined = dir ? `${dir}/${cleaned}` : cleaned;
+    }
   }
   const segments: string[] = [];
   for (const part of combined.split('/')) {
