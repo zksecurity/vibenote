@@ -212,7 +212,7 @@ describe('useRepoData', () => {
 
     mockGetShareLinkForNote.mockResolvedValue(null);
     mockCreateShareLink.mockResolvedValue({ ...baseShare });
-    mockRevokeShareLink.mockResolvedValue({ ...baseShare, status: 'revoked' });
+    mockRevokeShareLink.mockResolvedValue(undefined);
 
     setRepoMetadata(writableMeta);
   });

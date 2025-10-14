@@ -40,7 +40,7 @@ describe('ShareStore', () => {
 
     const reloaded = createShareStore({ filePath });
     await reloaded.init();
-    expect(reloaded.get(SAMPLE.id)?.status).toBe('revoked');
+    expect(reloaded.get(SAMPLE.id)).toBeUndefined();
     expect(reloaded.findActiveByNote(SAMPLE.owner, SAMPLE.repo, SAMPLE.path)).toBeUndefined();
   });
 });

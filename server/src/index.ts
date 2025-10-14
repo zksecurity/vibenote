@@ -187,7 +187,7 @@ app.post('/v1/shares', requireSession, async (req, res) => {
       createdByUserId: session.sub,
       installationId,
     });
-    console.log(`[vibenote] share created ${id} ${owner}/${repo}/${notePath}`);
+    console.log(`[vibenote] share created ${owner}/${repo}`);
     res.status(201).json(shareResponse(record, env));
   } catch (error) {
     res.status(400).json({ error: getErrorMessage(error) });
@@ -232,12 +232,15 @@ app.delete('/v1/shares/:id', requireSession, async (req, res) => {
     if (!canRevoke) {
       return res.status(403).json({ error: 'insufficient permissions to revoke share' });
     }
-    const updated = await shareStore.revoke(id, {
+    const removed = await shareStore.revoke(id, {
       revokedByLogin: session.login,
       revokedByUserId: session.sub,
     });
-    console.log(`[vibenote] share revoked ${id} ${record.owner}/${record.repo}/${record.path}`);
-    res.json(shareResponse(updated ?? record, env));
+    if (!removed) {
+      return res.status(404).json({ error: 'share not found' });
+    }
+    console.log(`[vibenote] share revoked ${record.owner}/${record.repo}`);
+    res.status(204).end();
   } catch (error) {
     res.status(400).json({ error: getErrorMessage(error) });
   }
@@ -253,7 +256,7 @@ app.get('/v1/share-links/:id', async (req, res) => {
     return res.status(404).json({ error: 'share not found' });
   }
   if (record.status !== 'active') {
-    return res.status(410).json({ error: 'share revoked' });
+    return res.status(404).json({ error: 'share not found' });
   }
   res.json({
     id: record.id,
@@ -279,7 +282,7 @@ app.get('/v1/share-links/:id/content', async (req, res) => {
       return res.status(404).json({ error: 'share not found' });
     }
     if (record.status !== 'active') {
-      return res.status(410).json({ error: 'share revoked' });
+      return res.status(404).json({ error: 'share not found' });
     }
     const ghRes = await installationRequest(
       env,
@@ -320,7 +323,7 @@ app.get('/v1/share-links/:id/assets/*', async (req, res) => {
       return res.status(404).json({ error: 'share not found' });
     }
     if (record.status !== 'active') {
-      return res.status(410).json({ error: 'share revoked' });
+      return res.status(404).json({ error: 'share not found' });
     }
     const assetParam = (getPathParam(req, '0') ?? '').toString();
     const pathCandidate = resolveAssetPath(record.path, assetParam);

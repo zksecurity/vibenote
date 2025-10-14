@@ -558,13 +558,8 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     if (!existing) return;
     setShareState({ status: 'loading' });
     try {
-      const target = { owner: existing.owner, repo: existing.repo, path: existing.path };
-      const updated = await apiRevokeShareLink(existing.id);
-      if (updated.status === 'active' && shareMatchesTarget(updated, target)) {
-        setShareState({ status: 'ready', link: updated });
-      } else {
-        setShareState({ status: 'ready' });
-      }
+      await apiRevokeShareLink(existing.id);
+      setShareState({ status: 'ready' });
     } catch (error) {
       logError(error);
       setShareState({ status: 'error', error: formatError(error) });

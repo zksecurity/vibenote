@@ -44,7 +44,7 @@ export interface ShareStoreInstance {
   revoke(
     id: string,
     metadata: { revokedByUserId: string; revokedByLogin: string; revokedAt?: string }
-  ): Promise<ShareRecord | undefined>;
+  ): Promise<boolean>;
 }
 
 class ShareStore implements ShareStoreInstance {
@@ -126,24 +126,14 @@ class ShareStore implements ShareStoreInstance {
 
   async revoke(
     id: string,
-    metadata: { revokedByUserId: string; revokedByLogin: string; revokedAt?: string }
-  ): Promise<ShareRecord | undefined> {
+    _metadata: { revokedByUserId: string; revokedByLogin: string; revokedAt?: string }
+  ): Promise<boolean> {
     let existing = this.#shares.get(id);
-    if (!existing) return undefined;
-    if (existing.status === 'revoked') return existing;
-    let revokedAt = metadata.revokedAt ?? new Date().toISOString();
-    let updated: ShareRecord = {
-      ...existing,
-      status: 'revoked',
-      revokedAt,
-      revokedByUserId: metadata.revokedByUserId,
-      revokedByLogin: metadata.revokedByLogin,
-    };
-    this.#shares.set(id, updated);
-    let key = noteKey(existing.owner, existing.repo, existing.path);
-    this.#noteIndex.delete(key);
+    if (!existing) return false;
+    this.#shares.delete(id);
+    this.#noteIndex.delete(noteKey(existing.owner, existing.repo, existing.path));
     await this.#persist();
-    return updated;
+    return true;
   }
 
   #hydrate(records: ShareRecord[]): void {

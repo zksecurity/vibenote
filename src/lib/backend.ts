@@ -185,7 +185,7 @@ async function createShareLink(options: {
   return parsed;
 }
 
-async function revokeShareLink(id: string): Promise<ShareLink> {
+async function revokeShareLink(id: string): Promise<void> {
   const sessionToken = getSessionToken();
   if (!sessionToken) throw new Error('missing session token');
   const base = getApiBase();
@@ -200,11 +200,6 @@ async function revokeShareLink(id: string): Promise<ShareLink> {
     const text = await res.text();
     throw new Error(`share revoke failed (${res.status}): ${text}`);
   }
-  const parsed = parseShare(await res.json());
-  if (!parsed) {
-    throw new Error('invalid share payload');
-  }
-  return parsed;
 }
 
 async function githubGet(token: string, path: string): Promise<Response> {
@@ -342,10 +337,21 @@ function parseShare(input: unknown): ShareLink | null {
   const statusRaw = asString(data.status);
   const createdAt = asString(data.createdAt);
   const url = asString(data.url);
-  const createdBy = data.createdBy && typeof data.createdBy === 'object' ? (data.createdBy as Record<string, unknown>) : null;
+  const createdBy =
+    data.createdBy && typeof data.createdBy === 'object' ? (data.createdBy as Record<string, unknown>) : null;
   const createdByLogin = createdBy ? asString(createdBy.login) : null;
   const createdByUserId = createdBy ? asString(createdBy.userId) : null;
-  if (!id || !owner || !repo || !path || !branch || !createdAt || !url || !createdByLogin || !createdByUserId) {
+  if (
+    !id ||
+    !owner ||
+    !repo ||
+    !path ||
+    !branch ||
+    !createdAt ||
+    !url ||
+    !createdByLogin ||
+    !createdByUserId
+  ) {
     return null;
   }
   const status: 'active' | 'revoked' = statusRaw === 'revoked' ? 'revoked' : 'active';
