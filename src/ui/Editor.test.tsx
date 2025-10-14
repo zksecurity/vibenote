@@ -79,6 +79,7 @@ describe('Editor markdown image resolution', () => {
     expect(loadAsset).toHaveBeenCalledWith('docs/assets/logo.png');
     expect(createObjectURL).toHaveBeenCalledTimes(1);
     expect(image.getAttribute('src')).toBe('blob:resolved');
+    expect(image.getAttribute('style')).toBe('max-width: 100%;');
     unmount();
     clearAssetPreviewCache();
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:resolved');
@@ -157,5 +158,6 @@ describe('Editor markdown image resolution', () => {
     let image = await screen.findByRole('img', { name: 'Remote' });
     expect(loadAsset).not.toHaveBeenCalled();
     expect(image.getAttribute('src')).toBe('https://example.com/image.png');
+    expect(image.getAttribute('style')).toBe('max-width: 100%;');
   });
 });

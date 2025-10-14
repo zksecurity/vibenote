@@ -137,6 +137,8 @@ function configureDomPurifyOnce() {
     }
     if (tag === 'IMG') {
       const img = element as HTMLImageElement;
+      // Prevent markdown images from overflowing their containers
+      img.style.maxWidth = '100%';
       const src = img.getAttribute('src') || '';
       if (!isRelativeAssetSrc(src)) return;
       img.setAttribute('data-vibenote-src', src);
