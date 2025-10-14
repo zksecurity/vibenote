@@ -811,6 +811,10 @@ describe('useRepoData', () => {
       defaultBranch: null,
       manageUrl: null,
       rateLimited: false,
+      authFailed: true,
+      errorStatus: 401,
+      errorMessage: 'Bad credentials',
+      errorKind: 'auth',
     };
 
     const firstMeta = createDeferred<RepoMetadata>();
@@ -836,9 +840,10 @@ describe('useRepoData', () => {
       firstMeta.resolve(lostAuthMeta);
     });
 
-    await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
+    await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('error'));
     expect(result.current.state.needsInstall).toBe(true);
     expect(result.current.state.repoLinked).toBe(true);
+    expect(result.current.state.repoErrorType).toBe('auth');
 
     expect(result.current.state.doc).toBeUndefined();
     expect(result.current.state.notes.some((meta) => meta.id === noteId)).toBe(true);
@@ -851,6 +856,7 @@ describe('useRepoData', () => {
 
     await waitFor(() => expect(result.current.state.needsInstall).toBe(false));
     expect(result.current.state.repoLinked).toBe(true);
+    await waitFor(() => expect(result.current.state.repoErrorType).toBeUndefined());
     act(() => {
       result.current.actions.selectNote(notePath);
     });

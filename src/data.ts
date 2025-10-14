@@ -49,6 +49,7 @@ export type {
   RepoDataActions,
   RepoNoteListItem,
   ReadOnlyNote,
+  RepoAccessErrorType,
 };
 
 const AUTO_SYNC_MIN_INTERVAL_MS = 60_000;
@@ -56,6 +57,8 @@ const AUTO_SYNC_DEBOUNCE_MS = 10_000;
 const AUTO_SYNC_POLL_INTERVAL_MS = 180_000;
 
 type RepoNoteListItem = NoteMeta | ReadOnlyNote;
+// Compact set of error outcomes we surface to the UI for repo access.
+type RepoAccessErrorType = 'auth' | 'not-found' | 'forbidden' | 'network' | 'rate-limited' | 'unknown';
 
 type RepoDataState = {
   // session state
@@ -70,6 +73,7 @@ type RepoDataState = {
   needsInstall: boolean;
   repoQueryStatus: RepoQueryStatus;
   manageUrl: string | undefined;
+  repoErrorType: RepoAccessErrorType | undefined;
 
   // repo content
   doc: NoteDoc | undefined;
@@ -479,6 +483,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     repoQueryStatus: repoAccess.status,
     needsInstall: repoAccess.needsInstall,
     manageUrl,
+    repoErrorType: repoAccess.errorType,
 
     doc,
     activePath,
@@ -538,6 +543,9 @@ type RepoAccessState = {
   needsInstall: boolean;
   manageUrl?: string;
   isPrivate?: boolean;
+  errorType?: RepoAccessErrorType;
+  errorStatus?: number;
+  errorMessage?: string;
 };
 
 const initialAccessState: RepoAccessState = {
@@ -548,6 +556,9 @@ const initialAccessState: RepoAccessState = {
   needsInstall: false,
   manageUrl: undefined,
   isPrivate: undefined,
+  errorType: undefined,
+  errorStatus: undefined,
+  errorMessage: undefined,
 };
 
 function useRepoAccess(params: { route: RepoRoute; sessionToken: string | undefined }): RepoAccessState {
@@ -577,6 +588,8 @@ function useRepoAccess(params: { route: RepoRoute; sessionToken: string | undefi
           level: 'none',
           status: 'error',
           error: message,
+          errorType: 'network',
+          errorMessage: message,
         };
         setState((prev) => (areAccessStatesEqual(prev, errorState) ? prev : errorState));
       }
@@ -608,9 +621,31 @@ function deriveAccessFromMetadata({
     level = 'none';
   }
 
+  // Reduce GitHub metadata down to a single error label the UI can render.
+  const resolveErrorType = (): RepoAccessErrorType | undefined => {
+    if (meta.errorKind) return meta.errorKind;
+    if (meta.authFailed) return 'auth';
+    if (meta.notFound) return 'not-found';
+    if (meta.forbidden) return 'forbidden';
+    if (meta.rateLimited) return 'rate-limited';
+    if (meta.networkError) return 'network';
+    if (meta.errorStatus !== null && meta.errorStatus !== undefined) return 'unknown';
+    if (meta.errorMessage) return 'unknown';
+    return undefined;
+  };
+
+  const errorType = resolveErrorType();
+
+  let status: RepoQueryStatus = 'ready';
+  if (meta.rateLimited) {
+    status = 'rate-limited';
+  } else if (errorType !== undefined) {
+    status = 'error';
+  }
+
   return {
     level,
-    status: meta.rateLimited ? 'rate-limited' : 'ready',
+    status,
     metadata: meta,
     defaultBranch: meta.defaultBranch ?? undefined,
     error: undefined,
@@ -618,6 +653,9 @@ function deriveAccessFromMetadata({
     needsInstall: hasSession && level === 'none',
     manageUrl: meta.manageUrl ?? undefined,
     isPrivate: meta.isPrivate ?? undefined,
+    errorType,
+    errorStatus: meta.errorStatus ?? undefined,
+    errorMessage: meta.errorMessage ?? undefined,
   };
 }
 
@@ -795,6 +833,9 @@ function areAccessStatesEqual(a: RepoAccessState, b: RepoAccessState): boolean {
     a.rateLimited === b.rateLimited &&
     a.needsInstall === b.needsInstall &&
     a.manageUrl === b.manageUrl &&
-    a.isPrivate === b.isPrivate
+    a.isPrivate === b.isPrivate &&
+    a.errorType === b.errorType &&
+    a.errorStatus === b.errorStatus &&
+    a.errorMessage === b.errorMessage
   );
 }

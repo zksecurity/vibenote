@@ -60,6 +60,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
     repoQueryStatus,
     needsInstall,
     repoLinked,
+    repoErrorType,
     manageUrl,
 
     doc,
@@ -77,7 +78,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
   const showSidebar = canRead;
   const isReadOnly = !canEdit && canRead;
   const layoutClass = showSidebar ? '' : 'single';
-  const needsSessionRefresh = needsInstall && repoLinked;
+  const needsSessionRefresh = needsInstall && repoLinked && repoErrorType === 'auth';
 
   // Pure UI state: sidebar visibility and account menu.
   const [sidebarOpen, setSidebarOpen] = useState(false);
