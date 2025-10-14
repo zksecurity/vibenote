@@ -21,7 +21,9 @@ jobs:
         run: npm ci
 
       - name: Run type check
-        run: npm run check
+        run: npx tsc --version
+          cat src/data/data.test.ts
+          npm run check
 
       - name: Run tests
         run: npm test
