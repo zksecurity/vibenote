@@ -125,21 +125,18 @@ export function ShareApp() {
 
   const { meta } = state;
   const title = noteTitle ?? deriveTitle(state.markdown, meta.path);
-  const repoLabel = `${meta.owner}/${meta.repo}`;
 
   return (
     <div className="share-layout">
-      <header className="share-header">
-        <div className="share-header-content">
-          <span className="share-pill">VibeNote Share · Live</span>
-          <h1>{title}</h1>
-          <p>
-            {repoLabel} · shared by @{meta.createdBy.login}
-          </p>
-        </div>
-      </header>
       <main className="share-main">
-        <article className="share-article" dangerouslySetInnerHTML={{ __html: renderedHtml }} />
+        <article className="share-article">
+          <header className="share-article-header">
+            <span className="share-pill">VibeNote Share · Live</span>
+            <h1>{title}</h1>
+            <p>Shared by @{meta.createdBy.login}</p>
+          </header>
+          <div className="share-content" dangerouslySetInnerHTML={{ __html: renderedHtml }} />
+        </article>
       </main>
     </div>
   );
