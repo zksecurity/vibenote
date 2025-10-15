@@ -113,7 +113,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
 
   useEffect(() => {
     if (!shareOpen) return;
-    if (share.status === 'ready' || share.status === 'loading') return;
+    if (share.status !== 'idle') return;
     void actions.refreshShareLink();
   }, [shareOpen, share.status, actions.refreshShareLink]);
 
