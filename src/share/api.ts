@@ -1,14 +1,12 @@
 // Helpers for the public share viewer to talk to the backend API.
-type ShareMetaResponse = {
-  id: string;
-  createdAt: string;
-  createdBy: { login: string };
-};
-
 export type { ShareMetaResponse };
 export { getApiBase, fetchShareMeta, fetchShareContent };
 
 let cachedBase: string | null = null;
+
+type ShareMetaResponse = {
+  createdBy: { login: string };
+};
 
 function getApiBase(): string {
   if (cachedBase) return cachedBase;

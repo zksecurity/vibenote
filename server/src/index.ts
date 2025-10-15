@@ -266,10 +266,7 @@ app.get('/v1/share-links/:id', async (req, res) => {
   }
   res.json({
     id: record.id,
-    createdAt: record.createdAt,
-    createdBy: {
-      login: record.createdByLogin,
-    },
+    createdBy: { login: record.createdByLogin },
   });
 });
 

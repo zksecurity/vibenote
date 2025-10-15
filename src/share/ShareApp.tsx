@@ -41,6 +41,7 @@ export function ShareApp() {
     (async () => {
       try {
         setState({ status: 'loading', id: shareId });
+        const contentPromise = fetchShareContent(shareId);
         const metaRes = await fetchShareMeta(shareId);
         if (cancelled) return;
         if (metaRes.status === 404) {
@@ -48,17 +49,17 @@ export function ShareApp() {
           return;
         }
         if (!metaRes.ok) {
-          throw new Error(`Request failed (${metaRes.status})`);
+          throw Error(`Request failed (${metaRes.status})`);
         }
         const meta = (await metaRes.json()) as ShareMetaResponse;
-        const contentRes = await fetchShareContent(shareId);
+        const contentRes = await contentPromise;
         if (cancelled) return;
         if (contentRes.status === 404) {
           setState({ status: 'error', message: 'Shared note could not be found in the repository.' });
           return;
         }
         if (!contentRes.ok) {
-          throw new Error(`Content request failed (${contentRes.status})`);
+          throw Error(`Content request failed (${contentRes.status})`);
         }
         const markdown = await contentRes.text();
         if (cancelled) return;
