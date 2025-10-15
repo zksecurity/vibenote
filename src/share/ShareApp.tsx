@@ -124,16 +124,18 @@ export function ShareApp() {
   }
 
   const { meta } = state;
-  const title = noteTitle ?? deriveTitle(state.markdown, meta.path);
 
   return (
     <div className="share-layout">
       <main className="share-main">
         <article className="share-article">
           <header className="share-article-header">
-            <span className="share-pill">VibeNote Share · Live</span>
-            <h1>{title}</h1>
-            <p>Shared by @{meta.createdBy.login}</p>
+            <p className="share-shared-by">
+              Shared by <span>@{meta.createdBy.login}</span> on{' '}
+              <a href="https://vibenote.dev" target="_blank" rel="noopener noreferrer">
+                VibeNote
+              </a>
+            </p>
           </header>
           <div className="share-content" dangerouslySetInnerHTML={{ __html: renderedHtml }} />
         </article>

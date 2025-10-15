@@ -20,7 +20,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   font-weight: 600;
   color: #0f172a;
   background: rgba(9, 105, 218, 0.12);
@@ -28,6 +28,13 @@ body {
   border-radius: 999px;
   padding: 6px 12px;
   width: fit-content;
+  text-decoration: none;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.share-pill:hover {
+  background: rgba(9, 105, 218, 0.2);
+  border-color: rgba(9, 105, 218, 0.35);
 }
 
 .share-main {
@@ -53,22 +60,30 @@ body {
 .share-article-header {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 12px;
-}
-
-.share-article-header h1 {
-  margin: 0;
-  font-size: clamp(1.6rem, 4vw, 2.1rem);
-  font-weight: 700;
+  gap: 4px;
+  align-items: flex-end;
 }
 
 .share-article-header p {
   margin: 0;
   color: #57606a;
-  font-size: 0.95rem;
+  font-size: 0.85rem;
 }
 
+.share-shared-by span {
+  font-weight: 500;
+  color: #0f172a;
+}
+
+.share-shared-by a {
+  color: #0969da;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.share-shared-by a:hover {
+  text-decoration: underline;
+}
 .share-content {
   display: block;
 }
