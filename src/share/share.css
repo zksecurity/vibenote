@@ -39,18 +39,19 @@ body {
 
 .share-main {
   flex: 1;
-  padding: clamp(24px, 6vw, 48px);
+  padding: clamp(16px, 5vw, 32px);
   display: flex;
   justify-content: center;
+  align-items: flex-start;
 }
 
 .share-article {
-  max-width: 720px;
+  max-width: clamp(720px, 70vw, 960px);
   width: 100%;
   background: #ffffff;
   border: 1px solid #d0d7de;
   border-radius: 20px;
-  padding: clamp(24px, 5vw, 40px);
+  padding: clamp(20px, 3.5vw, 32px);
   box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
   display: flex;
   flex-direction: column;
@@ -102,6 +103,26 @@ body {
 
 .share-article a:hover {
   text-decoration: underline;
+}
+
+@media (max-width: 600px) {
+  .share-main {
+    padding: 0;
+    justify-content: flex-start;
+    align-items: stretch;
+  }
+
+  .share-article {
+    max-width: none;
+    border-radius: 0;
+    border: none;
+    box-shadow: none;
+    min-height: 100vh;
+  }
+
+  .share-content {
+    flex: 1;
+  }
 }
 
 .share-card {
