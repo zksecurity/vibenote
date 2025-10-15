@@ -1,10 +1,6 @@
 // Public share viewer entry that resolves the share id and renders the note.
 import React, { useEffect, useMemo, useState } from 'react';
-import { marked } from 'marked';
-import type { TokenizerAndRendererExtension } from 'marked';
-import DOMPurify from 'dompurify';
-import katex from 'katex';
-import 'katex/dist/katex.min.css';
+import { renderMarkdown } from '../lib/render-markdown';
 import { fetchShareContent, fetchShareMeta, getApiBase, type ShareMetaResponse } from './api';
 
 type ViewerState =
@@ -76,7 +72,7 @@ export function ShareApp() {
 
   const renderedHtml = useMemo(() => {
     if (state.status !== 'ready') return '';
-    return renderMarkdown(state.markdown, { shareId: state.id });
+    return renderShareMarkdown(state.markdown, { shareId: state.id });
   }, [state]);
 
   if (state.status === 'loading') {
@@ -143,12 +139,8 @@ function resolveShareId(): string | null {
   return null;
 }
 
-function renderMarkdown(markdown: string, options: { shareId: string }): string {
-  configureDomPurifyOnce();
-  configureMarkedOnce();
-  const raw = marked.parse(markdown, { async: false });
-  const html = typeof raw === 'string' ? raw : '';
-  const sanitized = DOMPurify.sanitize(html, { USE_PROFILES: { html: true }, ADD_ATTR: ['target', 'rel'] });
+function renderShareMarkdown(markdown: string, options: { shareId: string }): string {
+  const sanitized = renderMarkdown(markdown, 'share');
   try {
     return rewriteAssetUrls(sanitized, options);
   } catch (error) {
@@ -198,110 +190,6 @@ function isRelativeAssetUrl(value: string): boolean {
 function buildAssetUrl(shareId: string, relativePath: string): string {
   const params = new URLSearchParams({ path: relativePath });
   return `${getApiBase()}/v1/share-links/${encodeURIComponent(shareId)}/assets?${params.toString()}`;
-}
-
-let domPurifyConfigured = false;
-let markedConfigured = false;
-
-function configureDomPurifyOnce() {
-  if (domPurifyConfigured) return;
-  DOMPurify.addHook('uponSanitizeAttribute', (_node, data) => {
-    const name = data.attrName as string;
-    if (name !== 'href' && name !== 'src') return;
-    const value = (data.attrValue as string) || '';
-    try {
-      const url = new URL(value, window.location.href);
-      const scheme = url.protocol.toLowerCase();
-      if (scheme === 'data:' || scheme === 'javascript:') {
-        data.keepAttr = false;
-        (data as any).attrValue = '';
-      }
-    } catch {
-      data.keepAttr = false;
-      (data as any).attrValue = '';
-    }
-  });
-  DOMPurify.addHook('afterSanitizeAttributes', (node) => {
-    if ((node as Element).tagName === 'A') {
-      const a = node as HTMLAnchorElement;
-      const href = a.getAttribute('href') || '';
-      try {
-        const url = new URL(href, window.location.href);
-        const isExternal = url.origin !== window.location.origin;
-        if (isExternal) {
-          a.setAttribute('target', '_blank');
-          a.setAttribute('rel', 'noopener noreferrer');
-        }
-      } catch {
-        // ignore invalid URLs
-      }
-    }
-  });
-  domPurifyConfigured = true;
-}
-
-function configureMarkedOnce() {
-  if (markedConfigured) return;
-  const blockMathExtension: TokenizerAndRendererExtension = {
-    name: 'blockMath',
-    level: 'block',
-    start(src) {
-      const match = src.match(/\\$\\$/);
-      return match ? match.index : undefined;
-    },
-    tokenizer(src) {
-      const match = /^\\$\\$([\\s\\S]+?)\\$\\$(?:\\n+|$)/.exec(src);
-      if (!match) return undefined;
-      const text = (match[1] ?? '').trim();
-      return { type: 'blockMath', raw: match[0], text, displayMode: true };
-    },
-    renderer(token) {
-      try {
-        return katex.renderToString(token.text || '', { displayMode: true, throwOnError: false });
-      } catch {
-        return token.text || '';
-      }
-    },
-  };
-  const inlineMathExtension: TokenizerAndRendererExtension = {
-    name: 'inlineMath',
-    level: 'inline',
-    start(src) {
-      const index = src.indexOf('$');
-      return index === -1 ? undefined : index;
-    },
-    tokenizer(src) {
-      if (src[0] !== '$' || src[1] === '$') return undefined;
-      let index = 1;
-      let closing = -1;
-      while (index < src.length) {
-        const char = src[index];
-        if (char === '\\\\') {
-          index += 2;
-          continue;
-        }
-        if (char === '$') {
-          closing = index;
-          break;
-        }
-        if (char === '\n') return undefined;
-        index += 1;
-      }
-      if (closing === -1) return undefined;
-      const raw = src.slice(0, closing + 1);
-      const text = raw.slice(1, -1);
-      return { type: 'inlineMath', raw, text, displayMode: false };
-    },
-    renderer(token) {
-      try {
-        return katex.renderToString(token.text || '', { displayMode: false, throwOnError: false });
-      } catch {
-        return token.text || '';
-      }
-    },
-  };
-  marked.use({ extensions: [blockMathExtension, inlineMathExtension] });
-  markedConfigured = true;
 }
 
 function formatError(error: unknown): string {
