@@ -20,6 +20,22 @@ export function ShareApp() {
   );
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleClick = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      const link = target.closest<HTMLAnchorElement>('a[data-share-disabled="true"]');
+      if (!link) return;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    window.document.addEventListener('click', handleClick);
+    return () => {
+      window.document.removeEventListener('click', handleClick);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!shareId) return;
     let cancelled = false;
     (async () => {
@@ -185,6 +201,14 @@ function rewriteAssetUrls(html: string, options: { shareId: string; notePath: st
       if (!isRelativeAssetUrl(value)) continue;
       const resolvedPath = resolveAssetPath(options.notePath, value);
       if (!resolvedPath) continue;
+      if (isBlockedAttachment(resolvedPath)) {
+        if (node instanceof HTMLAnchorElement && attr === 'href') {
+          disableShareLink(node);
+        } else {
+          node.removeAttribute(attr);
+        }
+        continue;
+      }
       node.setAttribute(attr, buildAssetUrl(options.shareId, resolvedPath));
     }
   }
@@ -353,4 +377,36 @@ function configureMarkedOnce() {
 function formatError(error: unknown): string {
   if (error instanceof Error && typeof error.message === 'string') return error.message;
   return String(error);
+}
+
+const BLOCKED_ASSET_EXTENSIONS = new Set([
+  '.md',
+  '.markdown',
+  '.mdown',
+  '.mkd',
+  '.mkdn',
+  '.mdx',
+  '.html',
+  '.htm',
+]);
+
+const DISABLED_LINK_TOOLTIP = 'This link is not available in the shared view.';
+
+function isBlockedAttachment(pathValue: string): boolean {
+  const lower = pathValue.toLowerCase();
+  const dotIndex = lower.lastIndexOf('.');
+  if (dotIndex === -1) return false;
+  const extension = lower.slice(dotIndex);
+  return BLOCKED_ASSET_EXTENSIONS.has(extension);
+}
+
+function disableShareLink(anchor: HTMLAnchorElement): void {
+  anchor.setAttribute('href', '#');
+  anchor.setAttribute('data-share-disabled', 'true');
+  anchor.setAttribute('aria-disabled', 'true');
+  anchor.removeAttribute('target');
+  anchor.removeAttribute('rel');
+  if (!anchor.getAttribute('title')) {
+    anchor.setAttribute('title', DISABLED_LINK_TOOLTIP);
+  }
 }
