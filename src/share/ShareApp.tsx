@@ -11,8 +11,7 @@ type ViewerState =
   | { status: 'loading'; id: string }
   | { status: 'ready'; id: string; meta: ShareMetaResponse; markdown: string }
   | { status: 'error'; message: string }
-  | { status: 'not-found' }
-  | { status: 'revoked' };
+  | { status: 'not-found' };
 
 export function ShareApp() {
   const shareId = useMemo(resolveShareId, []);
@@ -30,10 +29,6 @@ export function ShareApp() {
         if (cancelled) return;
         if (metaRes.status === 404) {
           setState({ status: 'not-found' });
-          return;
-        }
-        if (metaRes.status === 410) {
-          setState({ status: 'revoked' });
           return;
         }
         if (!metaRes.ok) {
@@ -96,17 +91,6 @@ export function ShareApp() {
         <div className="share-card">
           <h1>This share link doesn&apos;t exist.</h1>
           <p>The link may be mistyped or revoked.</p>
-        </div>
-      </main>
-    );
-  }
-
-  if (state.status === 'revoked') {
-    return (
-      <main className="share-app">
-        <div className="share-card">
-          <h1>This shared note is no longer available.</h1>
-          <p>The author revoked access to this link.</p>
         </div>
       </main>
     );
