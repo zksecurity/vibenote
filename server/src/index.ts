@@ -148,26 +148,21 @@ app.post('/v1/webhooks/github', (_req, res) => {
 
 app.post('/v1/shares', requireSession, async (req, res) => {
   try {
-    const body = req.body ?? {};
-    const owner = parseOwnerRepo(body.owner);
-    const repo = parseOwnerRepo(body.repo);
-    const notePath = parseNotePath(body.path);
-    const branch = parseBranch(body.branch);
-    if (!owner || !repo || !notePath) {
-      return res.status(400).json({ error: 'missing or invalid owner/repo/path' });
-    }
-    if (!branch) {
-      return res.status(400).json({ error: 'missing or invalid branch' });
-    }
-    const existing = shareStore.findActiveByNote(owner, repo, notePath);
-    if (existing) {
-      return res.status(200).json(shareResponse(existing, env));
-    }
     const session = req.sessionUser;
     if (!session) {
       return res.status(401).json({ error: 'missing session' });
     }
     const repoAccessToken = await refreshAccessToken(env, sessionStore, session.sessionId);
+
+    let body: Record<string, unknown> | null = req.body ?? null;
+    if (typeof body !== 'object') body = null;
+    const owner = parseOwnerRepo(body?.owner) ?? '';
+    const repo = parseOwnerRepo(body?.repo) ?? '';
+    const notePath = parseNotePath(body?.path) ?? ''; // we only allow sharing .md files
+    const branch = parseBranch(body?.branch) ?? 'main';
+    // verify user has read access to the repo, otherwise they are not allowed to create a share.
+    // they could guess a repo/owner/path and get access to private notes otherwise!
+    // note that we even make this request if owner/repo/path is invalid, to avoid leaking info about existing paths to a timing attack.
     const noteExists = await verifyNoteExistsWithUserToken({
       owner,
       repo,
@@ -175,8 +170,15 @@ app.post('/v1/shares', requireSession, async (req, res) => {
       branch,
       accessToken: repoAccessToken.accessToken,
     });
-    if (!noteExists) {
-      return res.status(404).json({ error: 'note not found' });
+    if (!owner || !repo || !notePath || !branch || !noteExists) {
+      return res
+        .status(404)
+        .json({ error: 'note not found. either no access or invalid owner/repo/path/branch' });
+    }
+    // once access is verified, we either bail if a share already exists, or create a new one
+    const existing = shareStore.findActiveByNote(owner, repo, notePath);
+    if (existing) {
+      return res.status(200).json(shareResponse(existing, env));
     }
     const installationId = await getRepoInstallationId(env, owner, repo);
     const id = generateShareId();
