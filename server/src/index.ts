@@ -266,10 +266,6 @@ app.get('/v1/share-links/:id', async (req, res) => {
   }
   res.json({
     id: record.id,
-    owner: record.owner,
-    repo: record.repo,
-    path: record.path,
-    branch: record.branch,
     createdAt: record.createdAt,
     createdBy: {
       login: record.createdByLogin,
@@ -305,7 +301,7 @@ app.get('/v1/share-links/:id/content', async (req, res) => {
   }
 });
 
-app.get('/v1/share-links/:id/assets/*', async (req, res) => {
+app.get('/v1/share-links/:id/assets', async (req, res) => {
   try {
     const id = getPathParam(req, 'id');
     if (!id) {
@@ -318,8 +314,8 @@ app.get('/v1/share-links/:id/assets/*', async (req, res) => {
     if (record.status !== 'active') {
       return res.status(404).json({ error: 'share not found' });
     }
-    const assetParam = getPathParam(req, '0') ?? '';
-    const pathCandidate = resolveAssetPath(record.path, decodeAssetParam(assetParam));
+    const rawPathParam = typeof req.query.path === 'string' ? req.query.path : '';
+    const pathCandidate = resolveAssetPath(record.path, decodeAssetParam(rawPathParam));
     if (!pathCandidate) {
       return res.status(400).json({ error: 'invalid asset path' });
     }
@@ -335,15 +331,7 @@ app.get('/v1/share-links/:id/assets/*', async (req, res) => {
     if (!allowedPaths.has(pathCandidate)) {
       return res.status(404).json({ error: 'asset not found' });
     }
-    let encodedAssetPath = encodeAssetPath(pathCandidate);
-    const encodedFromUrl = extractEncodedAssetPath(req);
-    if (encodedFromUrl) {
-      const decodedFromUrl = decodeAssetParam(encodedFromUrl);
-      const normalizedFromUrl = resolveAssetPath(record.path, decodedFromUrl);
-      if (normalizedFromUrl === pathCandidate) {
-        encodedAssetPath = encodedFromUrl;
-      }
-    }
+    const encodedAssetPath = encodeAssetPath(pathCandidate);
     const ghRes = await installationRequest(
       env,
       record.installationId,
@@ -612,21 +600,6 @@ function getPathParam(req: express.Request, key: string): string | undefined {
   const params = req.params as Record<string, string | undefined>;
   const value = params[key];
   return typeof value === 'string' ? value : undefined;
-}
-
-function extractEncodedAssetPath(req: express.Request): string | undefined {
-  const originalUrl = req.originalUrl || '';
-  const marker = '/assets/';
-  const index = originalUrl.indexOf(marker);
-  if (index === -1) return undefined;
-  let encoded = originalUrl.slice(index + marker.length);
-  const queryIndex = encoded.indexOf('?');
-  if (queryIndex !== -1) {
-    encoded = encoded.slice(0, queryIndex);
-  }
-  encoded = encoded.replace(/^\/+/, '');
-  if (encoded.length === 0) return undefined;
-  return encoded;
 }
 
 async function fetchShareMarkdown(record: ShareRecord, env: Env): Promise<string> {

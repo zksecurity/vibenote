@@ -1,10 +1,6 @@
 // Helpers for the public share viewer to talk to the backend API.
 type ShareMetaResponse = {
   id: string;
-  owner: string;
-  repo: string;
-  path: string;
-  branch: string;
   createdAt: string;
   createdBy: { login: string };
 };

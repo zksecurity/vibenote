@@ -75,12 +75,12 @@ export function ShareApp() {
 
   const renderedHtml = useMemo(() => {
     if (state.status !== 'ready') return '';
-    return renderMarkdown(state.markdown, { shareId: state.id, notePath: state.meta.path });
+    return renderMarkdown(state.markdown, { shareId: state.id });
   }, [state]);
 
   const noteTitle = useMemo(() => {
     if (state.status !== 'ready') return null;
-    return deriveTitle(state.markdown, state.meta.path);
+    return deriveTitle(state.markdown);
   }, [state]);
 
   useEffect(() => {
@@ -163,17 +163,16 @@ function resolveShareId(): string | null {
   return null;
 }
 
-function deriveTitle(markdown: string, fallback: string): string {
-  const match = markdown.match(/^\\s*#\\s+(.+)$/m);
+function deriveTitle(markdown: string): string | null {
+  const match = markdown.match(/^\s*#\s+(.+)$/m);
   if (match && match[1]) {
-    return match[1].trim();
+    const heading = match[1].trim();
+    return heading.length > 0 ? heading : null;
   }
-  const base = fallback.split('/').pop();
-  if (!base) return fallback;
-  return base.replace(/\\.md$/i, '');
+  return null;
 }
 
-function renderMarkdown(markdown: string, options: { shareId: string; notePath: string }): string {
+function renderMarkdown(markdown: string, options: { shareId: string }): string {
   configureDomPurifyOnce();
   configureMarkedOnce();
   const raw = marked.parse(markdown, { async: false });
@@ -187,7 +186,7 @@ function renderMarkdown(markdown: string, options: { shareId: string; notePath: 
   }
 }
 
-function rewriteAssetUrls(html: string, options: { shareId: string; notePath: string }): string {
+function rewriteAssetUrls(html: string, options: { shareId: string }): string {
   if (typeof window === 'undefined') return html;
   const container = document.createElement('div');
   container.innerHTML = html;
@@ -197,10 +196,9 @@ function rewriteAssetUrls(html: string, options: { shareId: string; notePath: st
       if (!node.hasAttribute(attr)) continue;
       const value = node.getAttribute(attr);
       if (!value) continue;
-      if (!isRelativeAssetUrl(value)) continue;
-      const resolvedPath = resolveAssetPath(options.notePath, value);
-      if (!resolvedPath) continue;
-      if (isBlockedAttachment(resolvedPath)) {
+      const trimmed = value.trim();
+      if (!isRelativeAssetUrl(trimmed)) continue;
+      if (isBlockedAttachment(trimmed)) {
         if (node instanceof HTMLAnchorElement && attr === 'href') {
           disableShareLink(node);
         } else {
@@ -208,7 +206,7 @@ function rewriteAssetUrls(html: string, options: { shareId: string; notePath: st
         }
         continue;
       }
-      node.setAttribute(attr, buildAssetUrl(options.shareId, resolvedPath));
+      node.setAttribute(attr, buildAssetUrl(options.shareId, trimmed));
     }
   }
   return container.innerHTML;
@@ -226,47 +224,9 @@ function isRelativeAssetUrl(value: string): boolean {
   return true;
 }
 
-function resolveAssetPath(notePath: string, target: string): string | null {
-  const cleaned = target.replace(/\\/g, '/');
-  let combined: string;
-  if (cleaned.startsWith('/')) {
-    combined = cleaned.replace(/^\/+/, '');
-  } else {
-    const dir = notePath.includes('/') ? notePath.slice(0, notePath.lastIndexOf('/')) : '';
-    if (dir && cleaned.startsWith(`${dir}/`)) {
-      combined = cleaned;
-    } else {
-      combined = dir ? `${dir}/${cleaned}` : cleaned;
-    }
-  }
-  const segments: string[] = [];
-  for (const part of combined.split('/')) {
-    if (part === '' || part === '.') continue;
-    if (part === '..') {
-      if (segments.length === 0) return null;
-      segments.pop();
-      continue;
-    }
-    segments.push(part);
-  }
-  if (segments.length === 0) return null;
-  return segments.join('/');
-}
-
-function buildAssetUrl(shareId: string, assetPath: string): string {
-  const encoded = assetPath
-    .split('/')
-    .map((segment) => encodeURIComponent(decodeSegment(segment)))
-    .join('/');
-  return `${getApiBase()}/v1/share-links/${encodeURIComponent(shareId)}/assets/${encoded}`;
-}
-
-function decodeSegment(segment: string): string {
-  try {
-    return decodeURIComponent(segment);
-  } catch {
-    return segment;
-  }
+function buildAssetUrl(shareId: string, relativePath: string): string {
+  const params = new URLSearchParams({ path: relativePath });
+  return `${getApiBase()}/v1/share-links/${encodeURIComponent(shareId)}/assets?${params.toString()}`;
 }
 
 let domPurifyConfigured = false;
@@ -393,9 +353,10 @@ const DISABLED_LINK_TOOLTIP = 'This link is not available in the shared view.';
 
 function isBlockedAttachment(pathValue: string): boolean {
   const lower = pathValue.toLowerCase();
-  const dotIndex = lower.lastIndexOf('.');
+  const clean = lower.split(/[?#]/, 1)[0] ?? lower;
+  const dotIndex = clean.lastIndexOf('.');
   if (dotIndex === -1) return false;
-  const extension = lower.slice(dotIndex);
+  const extension = clean.slice(dotIndex);
   return BLOCKED_ASSET_EXTENSIONS.has(extension);
 }
 
