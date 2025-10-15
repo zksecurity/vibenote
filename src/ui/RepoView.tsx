@@ -6,7 +6,7 @@ import { AssetViewer } from './AssetViewer';
 import { RepoSwitcher } from './RepoSwitcher';
 import { Toggle } from './Toggle';
 import { GitHubIcon, ExternalLinkIcon, NotesIcon, CloseIcon, SyncIcon, ShareIcon } from './RepoIcons';
-import { useRepoData, type ShareState } from '../data';
+import { useRepoData } from '../data';
 import type { FileMeta } from '../storage/local';
 import {
   getExpandedFolders,
@@ -19,6 +19,7 @@ import {
 import type { RepoRoute, Route } from './routing';
 import { normalizePath, pathsEqual } from '../lib/util';
 import { useRepoAssetLoader } from './useRepoAssetLoader';
+import { ShareDialog } from './ShareDialog';
 
 type RepoViewProps = {
   slug: string;
@@ -37,138 +38,6 @@ const primaryModifier = detectPrimaryShortcut();
 
 export function RepoView(props: RepoViewProps) {
   return <RepoViewInner key={props.slug} {...props} />;
-}
-
-type ShareDialogProps = {
-  share: ShareState;
-  notePath: string | undefined;
-  onClose: () => void;
-  onCreate: () => Promise<void>;
-  onRevoke: () => Promise<void>;
-  onRefresh: () => Promise<void>;
-};
-
-function ShareDialog({ share, notePath, onClose, onCreate, onRevoke, onRefresh }: ShareDialogProps) {
-  const shareUrl = share.link?.url ?? '';
-  const noteLabel = notePath ? notePath.split('/').pop() ?? notePath : 'note';
-  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
-
-  useEffect(() => {
-    setCopyState('idle');
-  }, [shareUrl]);
-
-  const copyLink = async () => {
-    if (!shareUrl) return;
-    try {
-      await navigator.clipboard.writeText(shareUrl);
-      setCopyState('copied');
-      window.setTimeout(() => setCopyState('idle'), 2000);
-      return;
-    } catch {
-      try {
-        const area = document.createElement('textarea');
-        area.value = shareUrl;
-        area.setAttribute('readonly', '');
-        area.style.position = 'absolute';
-        area.style.left = '-9999px';
-        document.body.appendChild(area);
-        area.select();
-        document.execCommand('copy');
-        document.body.removeChild(area);
-        setCopyState('copied');
-        window.setTimeout(() => setCopyState('idle'), 2000);
-        return;
-      } catch {
-        setCopyState('error');
-        window.setTimeout(() => setCopyState('idle'), 2000);
-      }
-    }
-  };
-
-  const renderBody = () => {
-    if (share.status === 'loading') {
-      return <p className="share-status">Checking share status...</p>;
-    }
-    if (share.status === 'error') {
-      return (
-        <div className="share-error">
-          <p>Could not load the share status.</p>
-          {share.error && <p className="share-error-detail">{share.error}</p>}
-          <button
-            className="btn secondary"
-            onClick={() => {
-              onRefresh();
-            }}
-          >
-            Try again
-          </button>
-        </div>
-      );
-    }
-    if (share.link) {
-      return (
-        <div className="share-success">
-          <div className="share-url-row">
-            <span className="share-url" title={shareUrl}>
-              {shareUrl}
-            </span>
-            <button className="btn secondary" onClick={copyLink} disabled={!shareUrl}>
-              {copyState === 'copied' ? 'Copied' : copyState === 'error' ? 'Copy failed' : 'Copy link'}
-            </button>
-          </div>
-          <p className="share-hint">The link stays live until you revoke it.</p>
-          <button
-            className="btn subtle share-revoke"
-            onClick={() => {
-              onRevoke();
-            }}
-          >
-            Revoke link
-          </button>
-        </div>
-      );
-    }
-    return (
-      <div className="share-create">
-        <button
-          className="btn primary"
-          onClick={() => {
-            onCreate();
-          }}
-        >
-          Create share link
-        </button>
-        <p className="share-hint">Links are unlisted and anyone with the URL can read the note.</p>
-      </div>
-    );
-  };
-
-  return (
-    <div className="share-overlay" role="dialog" aria-modal="true" aria-label="Share note dialog">
-      <div className="share-dialog">
-        <div className="share-dialog-header">
-          <h2 className="share-dialog-title">Share this note</h2>
-          <button className="btn ghost icon" onClick={onClose} aria-label="Close share dialog">
-            <CloseIcon />
-          </button>
-        </div>
-        <div className="share-dialog-body">
-          <p className="share-dialog-subtitle">
-            {share.link
-              ? 'Anyone with the link can view the latest version.'
-              : 'Generate a secret link to share the rendered Markdown with anyone.'}
-          </p>
-          <div className="share-note-summary">
-            <span className="share-note-label">Note</span>
-            <span className="share-note-name" title={notePath ?? ''}>
-              {noteLabel}
-            </span>
-          </div>
-          {renderBody()}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
@@ -192,7 +61,6 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
 
   // Data layer exposes repo-backed state and the high-level actions the UI needs.
   const { state, actions } = useRepoData({ slug, route, recordRecent, setActivePath });
-  const { createShareLink, refreshShareLink, revokeShareLink } = actions;
   const {
     hasSession,
     user,
@@ -246,8 +114,8 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
   useEffect(() => {
     if (!shareOpen) return;
     if (share.status === 'ready' || share.status === 'loading') return;
-    void refreshShareLink();
-  }, [shareOpen, share.status, refreshShareLink]);
+    void actions.refreshShareLink();
+  }, [shareOpen, share.status, actions.refreshShareLink]);
 
   const [showSwitcher, setShowSwitcher] = useState(false);
 
@@ -373,7 +241,13 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
                 <button
                   className={`btn icon sync-btn share-btn${share.link ? ' share-btn-active' : ''}`}
                   onClick={() => setShareOpen(true)}
-                  title={share.link ? 'Manage share link' : shareDisabled ? 'Checking share status' : 'Create share link'}
+                  title={
+                    share.link
+                      ? 'Manage share link'
+                      : shareDisabled
+                      ? 'Checking share status'
+                      : 'Create share link'
+                  }
                   aria-label={share.link ? 'Manage share link' : 'Create share link'}
                   disabled={shareDisabled}
                   aria-disabled={shareDisabled}
@@ -603,9 +477,9 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
           share={share}
           notePath={activePath}
           onClose={() => setShareOpen(false)}
-          onCreate={createShareLink}
-          onRevoke={revokeShareLink}
-          onRefresh={refreshShareLink}
+          onCreate={actions.createShareLink}
+          onRevoke={actions.revokeShareLink}
+          onRefresh={actions.refreshShareLink}
         />
       )}
     </div>
