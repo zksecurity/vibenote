@@ -346,7 +346,7 @@ function configureMarkedOnce() {
           closing = index;
           break;
         }
-        if (char === '\\n') return undefined;
+        if (char === '\n') return undefined;
         index += 1;
       }
       if (closing === -1) return undefined;

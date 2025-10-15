@@ -55,4 +55,33 @@ describe('share asset helpers', () => {
     const refs = extractRelativeAssetRefs(markdown);
     expect(refs).toHaveLength(0);
   });
+
+  it('collects attachment links while skipping markdown files', () => {
+    const markdown = `
+[Slides](attachments/talk.pdf)
+[Neighbour](../other-note.md)
+[Sibling note](linked-note.md)
+<a href="files/budget.csv">Budget</a>
+`;
+    const paths = collectAssetPaths('notes/shared.md', markdown);
+    expect(paths.has('notes/attachments/talk.pdf')).toBe(true);
+    expect(paths.has('notes/files/budget.csv')).toBe(true);
+    expect(paths.has('notes/other-note.md')).toBe(false);
+    expect(paths.has('notes/linked-note.md')).toBe(false);
+    expect(paths.size).toBe(2);
+  });
+
+  it('collects media sources from html tags', () => {
+    const markdown = `
+<video src="media/intro.mp4"></video>
+<audio src="media/theme.mp3"></audio>
+<source src="media/intro.webm" type="video/webm" />
+<track src="media/captions.vtt" kind="captions" />
+`;
+    const paths = collectAssetPaths('notes/shared.md', markdown);
+    expect(paths.has('notes/media/intro.mp4')).toBe(true);
+    expect(paths.has('notes/media/theme.mp3')).toBe(true);
+    expect(paths.has('notes/media/intro.webm')).toBe(true);
+    expect(paths.has('notes/media/captions.vtt')).toBe(true);
+  });
 });

@@ -3,6 +3,17 @@ import path from 'node:path';
 export { resolveAssetPath, decodeAssetParam, encodeAssetPath, extractRelativeAssetRefs };
 export { collectAssetPaths };
 
+const BLOCKED_ASSET_EXTENSIONS = new Set([
+  '.md',
+  '.markdown',
+  '.mdown',
+  '.mkd',
+  '.mkdn',
+  '.mdx',
+  '.html',
+  '.htm',
+]);
+
 function resolveAssetPath(notePath: string, requestPath: string): string | null {
   let candidate = requestPath.trim();
   if (candidate.length === 0) return null;
@@ -57,14 +68,55 @@ function extractRelativeAssetRefs(markdown: string): string[] {
     add(captureUrl(match[1]));
   }
 
+  const inlineLinkPattern = /\[([^\]]*?)]\(([^)]+)\)/g;
+  for (const match of markdown.matchAll(inlineLinkPattern)) {
+    const index = match.index ?? 0;
+    if (index > 0 && markdown[index - 1] === '!') {
+      continue;
+    }
+    add(captureUrl(match[2]));
+  }
+
   const htmlImgPattern = /<img[^>]*src=["']([^"']+)["'][^>]*>/gi;
   for (const match of markdown.matchAll(htmlImgPattern)) {
+    add(match[1]);
+  }
+
+  const htmlAnchorPattern = /<a[^>]*href=["']([^"']+)["'][^>]*>/gi;
+  for (const match of markdown.matchAll(htmlAnchorPattern)) {
+    add(match[1]);
+  }
+
+  const htmlMediaPattern = /<(?:audio|video)[^>]*src=["']([^"']+)["'][^>]*>/gi;
+  for (const match of markdown.matchAll(htmlMediaPattern)) {
+    add(match[1]);
+  }
+
+  const htmlSourcePattern = /<(?:source|track)[^>]*src=["']([^"']+)["'][^>]*>/gi;
+  for (const match of markdown.matchAll(htmlSourcePattern)) {
     add(match[1]);
   }
 
   const definitions = extractReferenceDefinitions(markdown);
   const referenceImagePattern = /!\[([^\]]*)]\[([^\]]*)]/g;
   for (const match of markdown.matchAll(referenceImagePattern)) {
+    let label = match[2];
+    if (label === undefined) continue;
+    if (label.trim().length === 0) {
+      label = match[1] ?? '';
+    }
+    const target = definitions.get(label.trim().toLowerCase());
+    if (target) {
+      add(target);
+    }
+  }
+
+  const referenceLinkPattern = /\[([^\]]*)]\[([^\]]*)]/g;
+  for (const match of markdown.matchAll(referenceLinkPattern)) {
+    const index = match.index ?? 0;
+    if (index > 0 && markdown[index - 1] === '!') {
+      continue;
+    }
     let label = match[2];
     if (label === undefined) continue;
     if (label.trim().length === 0) {
@@ -83,7 +135,7 @@ function collectAssetPaths(notePath: string, markdown: string): Set<string> {
   const paths = new Set<string>();
   for (const ref of extractRelativeAssetRefs(markdown)) {
     const normalized = resolveAssetPath(notePath, decodeAssetParam(ref));
-    if (normalized) {
+    if (normalized && isAllowedAttachment(normalized)) {
       paths.add(normalized);
     }
   }
@@ -149,4 +201,14 @@ function decodeURIComponentSafe(value: string): string {
   } catch {
     return value;
   }
+}
+
+function isAllowedAttachment(pathValue: string): boolean {
+  const lower = pathValue.toLowerCase();
+  const dotIndex = lower.lastIndexOf('.');
+  if (dotIndex === -1) {
+    return true;
+  }
+  const extension = lower.slice(dotIndex);
+  return !BLOCKED_ASSET_EXTENSIONS.has(extension);
 }
