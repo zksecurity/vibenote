@@ -78,19 +78,6 @@ export function ShareApp() {
     return renderMarkdown(state.markdown, { shareId: state.id });
   }, [state]);
 
-  const noteTitle = useMemo(() => {
-    if (state.status !== 'ready') return null;
-    return deriveTitle(state.markdown);
-  }, [state]);
-
-  useEffect(() => {
-    if (noteTitle) {
-      document.title = `${noteTitle} · VibeNote Share`;
-    } else {
-      document.title = 'VibeNote Share';
-    }
-  }, [noteTitle]);
-
   if (state.status === 'loading') {
     return (
       <main className="share-app">
@@ -159,15 +146,6 @@ function resolveShareId(): string | null {
     }
   } catch {
     // ignore and fall through
-  }
-  return null;
-}
-
-function deriveTitle(markdown: string): string | null {
-  const match = markdown.match(/^\s*#\s+(.+)$/m);
-  if (match && match[1]) {
-    const heading = match[1].trim();
-    return heading.length > 0 ? heading : null;
   }
   return null;
 }
