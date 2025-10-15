@@ -134,17 +134,9 @@ export function ShareApp() {
 
 function resolveShareId(): string | null {
   try {
-    const { pathname, search, hash } = window.location;
-    const pathMatch = pathname.match(/\/s\/([A-Za-z0-9_-]{6,})/);
-    if (pathMatch && pathMatch[1]) return pathMatch[1];
-    const params = new URLSearchParams(search);
-    const viaQuery = params.get('id');
-    if (viaQuery) return viaQuery;
-    if (hash) {
-      const trimmed = hash.replace(/^#/, '');
-      if (trimmed.startsWith('s/')) return trimmed.slice(2);
-      if (trimmed.startsWith('id=')) return trimmed.slice(3);
-    }
+    let pathname = window.location.pathname;
+    let match = pathname.match(/\/s\/([A-Za-z0-9_-]{6,})/);
+    if (match && match[1]) return match[1];
   } catch {
     // ignore and fall through
   }
