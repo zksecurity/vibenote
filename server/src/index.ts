@@ -144,19 +144,13 @@ app.post(
   requireSession,
   handleErrors(async (req, res) => {
     const session = req.sessionUser!;
-    const repoAccessToken = await refreshAccessToken(env, sessionStore, session.sessionId);
+    let { accessToken } = await refreshAccessToken(env, sessionStore, session.sessionId);
     let { owner, repo, path, branch } = parseShareBody(req.body);
 
     // verify user has read access to the repo, otherwise they are not allowed to create a share.
     // they could guess a repo/owner/path and get access to private notes otherwise!
     // note that we even make this request if owner/repo/path is invalid, to avoid leaking info about existing paths to a timing attack.
-    const noteExists = await verifyNoteExistsWithUserToken({
-      owner,
-      repo,
-      path,
-      branch,
-      accessToken: repoAccessToken.accessToken,
-    });
+    const noteExists = await verifyNoteExistsWithUserToken({ owner, repo, path, branch, accessToken });
     if (!owner || !repo || !path || !branch || !noteExists)
       throw HttpError(404, 'note not found. either no access or invalid owner/repo/path/branch');
 
