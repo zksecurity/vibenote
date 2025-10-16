@@ -30,8 +30,21 @@ function sharingEndpoints(app: express.Express, sessionStore: SessionStoreInstan
       // verify user has read access to the repo, otherwise they are not allowed to create a share.
       // they could guess a repo/owner/path and get access to private notes otherwise!
       // note that we even make this request if owner/repo/path is invalid, to avoid leaking info about existing paths to a timing attack.
+      const repoRes = await fetchRepo(env, sessionStore, session.sessionId, owner, repo);
+      if (!owner || !repo || !path || !branch || repoRes.status === 404)
+        throw HttpError(404, 'note not found. either no access or invalid owner/repo/path/branch');
+      if (!repoRes.ok) {
+        const text = await repoRes.text();
+        throw HttpError(502, `github error ${repoRes.status}: ${text}`);
+      }
+      const repoJson = (await repoRes.json()) as any;
+      const permissions =
+        repoJson && typeof repoJson.permissions === 'object' ? repoJson.permissions : undefined;
+      if (!permissions || permissions.push !== true)
+        throw HttpError(403, 'insufficient permissions to share note');
+
       const noteExists = await verifyNoteExistsWithUserToken({ owner, repo, path, branch, accessToken });
-      if (!owner || !repo || !path || !branch || !noteExists)
+      if (!noteExists)
         throw HttpError(404, 'note not found. either no access or invalid owner/repo/path/branch');
 
       // once access is verified, we either bail if a share already exists, or create a new one

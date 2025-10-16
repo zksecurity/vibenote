@@ -52,6 +52,7 @@ This document captures the core architecture, sync logic, and decisions so anoth
 
 - The share feature introduces a lightweight server module that persists share metadata in `SHARE_STORE_FILE` (encrypted session store lives alongside it).
 - It exposes `POST/GET/DELETE /v1/shares` plus `GET /v1/share-links/:id/{metadata,content,assets}`.
+- Creating/revoking shares requires GitHub push permission; read-only collaborators may only view existing links.
 - When public viewers request content, the backend uses the GitHub App installation token to stream Markdown and referenced assets. Only paths discovered in the note are served; nothing is cached beyond a short-lived asset allow-list.
 - Revoking a share removes the record and clears cached asset paths immediately.
 

@@ -61,7 +61,7 @@ Future versions will add snapshotting, expiring links, and optional restricted s
 
 | Action                       | Behavior                                                                                                |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------- |
-| Create share                 | Generates a new secret ID and stores metadata linking it to the note’s repo/path.                       |
+| Create share                 | Generates a new secret ID and stores metadata linking it to the note’s repo/path (requires GitHub push permission). |
 | Open share URL               | Viewer fetches metadata, then fetches note and assets directly (through our backend proxy) from GitHub. |
 | Edit note in GitHub          | Changes appear automatically when the share link is reloaded.                                           |
 | Revoke share                 | The share ID is invalidated; the link stops working.                                                    |
@@ -84,6 +84,7 @@ Future versions will add snapshotting, expiring links, and optional restricted s
      - **Proxy note & asset requests** (fetch from the GitHub Content API via the App installation token)
 
    - Enforces that each share grants access to **only one Markdown file** and its **referenced assets**.
+   - Only collaborators with GitHub push access can create or revoke shares; read-only collaborators may only view existing links.
    - Handles revocation and expiry (if implemented later).
 
 2. **Public Viewer (frontend)**
