@@ -231,7 +231,8 @@ app.get(
   '/v1/share-links/:id/content',
   handleErrors(async (req, res) => {
     const record = getShareRecord(req);
-    const text = await fetchShareMarkdown(record, env);
+    const ghRes = await fetchShareContent(env, record, record.path);
+    const text = await ghRes.text();
     cacheShareAssets(record.id, record.path, text);
     res
       .status(200)
@@ -250,22 +251,7 @@ app.get(
     if (!pathCandidate) throw Error('invalid asset path');
     let allowedPaths = await ensureShareAssetsLoaded(record, env);
     if (!allowedPaths.has(pathCandidate)) throw HttpError(404, 'asset not found');
-    const encodedAssetPath = encodeAssetPath(pathCandidate);
-    const ghRes = await installationRequest(
-      env,
-      record.installationId,
-      `/repos/${encodeURIComponent(record.owner)}/${encodeURIComponent(
-        record.repo
-      )}/contents/${encodedAssetPath}?ref=${encodeURIComponent(record.branch)}`,
-      {
-        headers: { Accept: 'application/vnd.github.raw' },
-      }
-    );
-    if (ghRes.status === 404) throw HttpError(404, 'asset not found');
-    if (!ghRes.ok) {
-      const text = await ghRes.text();
-      throw HttpError(502, `github error ${ghRes.status}: ${text}`);
-    }
+    const ghRes = await fetchShareContent(env, record, pathCandidate);
     const buffer = Buffer.from(await ghRes.arrayBuffer());
     const contentType = ghRes.headers.get('Content-Type') ?? 'application/octet-stream';
     const headers: Record<string, string> = {
@@ -493,25 +479,21 @@ function getPathParam(req: express.Request, key: string): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
-async function fetchShareMarkdown(record: ShareRecord, env: Env): Promise<string> {
+async function fetchShareContent(env: Env, record: ShareRecord, path: string) {
   const ghRes = await installationRequest(
     env,
     record.installationId,
     `/repos/${encodeURIComponent(record.owner)}/${encodeURIComponent(record.repo)}/contents/${encodeAssetPath(
-      record.path
+      path
     )}?ref=${encodeURIComponent(record.branch)}`,
-    {
-      headers: { Accept: 'application/vnd.github.raw' },
-    }
+    { headers: { Accept: 'application/vnd.github.raw' } }
   );
-  if (ghRes.status === 404) {
-    throw HttpError(404, 'note not found');
-  }
+  if (ghRes.status === 404) throw HttpError(404, 'content not found');
   if (!ghRes.ok) {
     const text = await ghRes.text();
     throw HttpError(502, `github error ${ghRes.status}: ${text}`);
   }
-  return await ghRes.text();
+  return ghRes;
 }
 
 function cacheShareAssets(shareId: string, notePath: string, markdown: string): Set<string> {
@@ -525,7 +507,8 @@ async function ensureShareAssetsLoaded(record: ShareRecord, env: Env): Promise<S
   if (cached && Date.now() - cached.cachedAt <= SHARE_ASSET_CACHE_TTL_MS) {
     return cached.paths;
   }
-  const markdown = await fetchShareMarkdown(record, env);
+  const ghRes = await fetchShareContent(env, record, record.path);
+  const markdown = await ghRes.text();
   return cacheShareAssets(record.id, record.path, markdown);
 }
 
