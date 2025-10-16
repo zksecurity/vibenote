@@ -128,7 +128,7 @@ app.post('/v1/webhooks/github', (_req, res) => {
   res.status(204).end();
 });
 
-sharingEndpoints(app, sessionStore);
+sharingEndpoints(app);
 
 const server = app.listen(env.PORT, () => {
   console.log(`[vibenote] api listening on :${env.PORT}`);
