@@ -118,6 +118,7 @@ body {
     border: none;
     box-shadow: none;
     min-height: 100vh;
+    box-sizing: border-box;
   }
 
   .share-content {
@@ -151,6 +152,7 @@ body {
 .share-app {
   min-height: 100vh;
   padding: clamp(32px, 12vh, 96px) clamp(16px, 6vw, 40px);
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: center;
