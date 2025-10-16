@@ -3,6 +3,8 @@
 import 'dotenv/config';
 import crypto from 'node:crypto';
 
+export { type Env, env };
+
 type Env = {
   PORT: number;
   ALLOWED_ORIGINS: string[];
@@ -19,7 +21,9 @@ type Env = {
   PUBLIC_VIEWER_BASE_URL: string;
 };
 
-export function getEnv(): Env {
+const env = getEnv();
+
+function getEnv(): Env {
   const port = Number(process.env.PORT ?? 8787);
   const allowed = (process.env.ALLOWED_ORIGINS ?? 'http://localhost:3000')
     .split(',')
@@ -102,12 +106,12 @@ function ensurePkcs8(pem: string): string {
       throw new Error(`Failed to convert RSA private key to PKCS#8: ${(error as Error).message}`);
     }
   }
-  throw new Error('GITHUB_APP_PRIVATE_KEY must be PKCS#8 (-----BEGIN PRIVATE KEY-----) or an RSA key convertible to PKCS#8');
+  throw new Error(
+    'GITHUB_APP_PRIVATE_KEY must be PKCS#8 (-----BEGIN PRIVATE KEY-----) or an RSA key convertible to PKCS#8'
+  );
 }
 
 function detectPemHeader(pem: string): string | null {
   const match = pem.match(/-----BEGIN ([A-Z ]+)-----/);
   return match ? match[1] ?? null : null;
 }
-
-export type { Env };
