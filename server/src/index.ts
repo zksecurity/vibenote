@@ -41,7 +41,7 @@ app.use(
     origin: (origin, cb) => {
       if (!origin) return cb(null, true);
       if (env.ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
-      return cb(new Error('CORS not allowed'));
+      return cb(Error('CORS not allowed'));
     },
     credentials: true,
   })
@@ -179,17 +179,21 @@ app.get(
   '/v1/shares',
   requireSession,
   handleErrors(async (req, res) => {
-    let { owner, repo, path } = parseShareBody(req.query);
-    if (!owner || !repo || !path) throw Error('missing or invalid owner/repo/path');
-
     const session = req.sessionUser!;
-    // ensure the repo is readable by the user
+    let { owner, repo, path } = parseShareBody(req.query);
+
+    // verify user has read access to the repo, otherwise they are not allowed to see share links.
+    // they could guess a repo/owner/path and get access to private notes otherwise!
+    // note that we even make this request if owner/repo/path is invalid, to avoid leaking info about existing paths to a timing attack.
     let result = await fetchRepo(env, sessionStore, session.sessionId, owner, repo);
-    if (result.status === 404) throw HttpError(404, 'repository not found or not accessible');
+    if (!owner || !repo || !path || result.status === 404)
+      throw HttpError(404, 'note not found. either no access or invalid owner/repo/path/branch');
     if (!result.ok) {
       const text = await result.text();
-      throw HttpError(502, `github repo permissions check failed (${result.status}): ${text}`);
+      throw HttpError(502, `github error ${result.status}: ${text}`);
     }
+
+    // once access is verified, we either return existing share, or null
     const existing = shareStore.findActiveByNote(owner, repo, path);
     res.json({ share: existing ? shareResponse(existing, env) : null });
   })
@@ -387,7 +391,7 @@ async function verifyNoteExistsWithUserToken(options: {
   if (res.status === 404) return false;
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`github note lookup failed (${res.status}): ${text}`);
+    throw Error(`github note lookup failed (${res.status}): ${text}`);
   }
   return true;
 }
