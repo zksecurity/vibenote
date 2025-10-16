@@ -125,7 +125,6 @@ const baseShare: ShareLink = {
   repo: 'notes',
   path: 'alpha.md',
   branch: 'main',
-  status: 'active',
   createdAt: new Date(0).toISOString(),
   createdByLogin: 'tester',
   createdByUserId: 'user-1',

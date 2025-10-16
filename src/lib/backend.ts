@@ -30,7 +30,6 @@ type ShareLink = {
   repo: string;
   path: string;
   branch: string;
-  status: 'active' | 'revoked';
   createdAt: string;
   createdByLogin: string;
   createdByUserId: string;
@@ -334,7 +333,6 @@ function parseShare(input: unknown): ShareLink | null {
   const repo = asString(data.repo);
   const path = asString(data.path);
   const branch = asString(data.branch);
-  const statusRaw = asString(data.status);
   const createdAt = asString(data.createdAt);
   const url = asString(data.url);
   const createdBy =
@@ -354,14 +352,12 @@ function parseShare(input: unknown): ShareLink | null {
   ) {
     return null;
   }
-  const status: 'active' | 'revoked' = statusRaw === 'revoked' ? 'revoked' : 'active';
   return {
     id,
     owner,
     repo,
     path,
     branch,
-    status,
     createdAt,
     createdByLogin,
     createdByUserId,

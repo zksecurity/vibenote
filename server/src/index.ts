@@ -148,10 +148,7 @@ app.post('/v1/webhooks/github', (_req, res) => {
 
 app.post('/v1/shares', requireSession, async (req, res) => {
   try {
-    const session = req.sessionUser;
-    if (!session) {
-      return res.status(401).json({ error: 'missing session' });
-    }
+    const session = req.sessionUser!;
     const repoAccessToken = await refreshAccessToken(env, sessionStore, session.sessionId);
 
     let body: Record<string, unknown> | null = req.body ?? null;
@@ -207,10 +204,7 @@ app.get('/v1/shares', requireSession, async (req, res) => {
     if (!owner || !repo || !notePath) {
       return res.status(400).json({ error: 'missing or invalid owner/repo/path' });
     }
-    const session = req.sessionUser;
-    if (!session) {
-      return res.status(401).json({ error: 'missing session' });
-    }
+    const session = req.sessionUser!;
     await ensureRepoReadableByUser(env, sessionStore, session.sessionId, owner, repo);
     const existing = shareStore.findActiveByNote(owner, repo, notePath);
     res.json({ share: existing ? shareResponse(existing, env) : null });
@@ -229,18 +223,12 @@ app.delete('/v1/shares/:id', requireSession, async (req, res) => {
     if (!record) {
       return res.status(404).json({ error: 'share not found' });
     }
-    const session = req.sessionUser;
-    if (!session) {
-      return res.status(401).json({ error: 'missing session' });
-    }
+    const session = req.sessionUser!;
     const canRevoke = await canUserRevokeShare(env, sessionStore, session, record);
     if (!canRevoke) {
       return res.status(403).json({ error: 'insufficient permissions to revoke share' });
     }
-    const removed = await shareStore.revoke(id, {
-      revokedByLogin: session.login,
-      revokedByUserId: session.sub,
-    });
+    const removed = await shareStore.revoke(id);
     if (!removed) {
       return res.status(404).json({ error: 'share not found' });
     }
@@ -261,9 +249,6 @@ app.get('/v1/share-links/:id', async (req, res) => {
   if (!record) {
     return res.status(404).json({ error: 'share not found' });
   }
-  if (record.status !== 'active') {
-    return res.status(404).json({ error: 'share not found' });
-  }
   res.json({
     id: record.id,
     createdBy: { login: record.createdByLogin },
@@ -278,9 +263,6 @@ app.get('/v1/share-links/:id/content', async (req, res) => {
     }
     const record = shareStore.get(id);
     if (!record) {
-      return res.status(404).json({ error: 'share not found' });
-    }
-    if (record.status !== 'active') {
       return res.status(404).json({ error: 'share not found' });
     }
     const text = await fetchShareMarkdown(record, env);
@@ -306,9 +288,6 @@ app.get('/v1/share-links/:id/assets', async (req, res) => {
     }
     const record = shareStore.get(id);
     if (!record) {
-      return res.status(404).json({ error: 'share not found' });
-    }
-    if (record.status !== 'active') {
       return res.status(404).json({ error: 'share not found' });
     }
     const rawPathParam = typeof req.query.path === 'string' ? req.query.path : '';
@@ -420,7 +399,6 @@ function shareResponse(record: ShareRecord, env: Env) {
     repo: record.repo,
     path: record.path,
     branch: record.branch,
-    status: record.status,
     createdAt: record.createdAt,
     createdBy: {
       login: record.createdByLogin,

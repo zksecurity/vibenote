@@ -30,12 +30,12 @@ describe('ShareStore', () => {
 
     const created = await store.create(SAMPLE);
     expect(created.id).toBe(SAMPLE.id);
-    expect(created.status).toBe('active');
+    expect(created.createdAt.length).toBeGreaterThan(0);
 
     const found = store.findActiveByNote(SAMPLE.owner, SAMPLE.repo, SAMPLE.path);
     expect(found?.id).toBe(SAMPLE.id);
 
-    await store.revoke(SAMPLE.id, { revokedByLogin: 'octo-dev', revokedByUserId: 'u1' });
+    await store.revoke(SAMPLE.id);
     expect(store.findActiveByNote(SAMPLE.owner, SAMPLE.repo, SAMPLE.path)).toBeUndefined();
 
     const reloaded = createShareStore({ filePath });

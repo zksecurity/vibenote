@@ -1,8 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-export type ShareStatus = 'active' | 'revoked';
-
 export type ShareRecord = {
   id: string;
   owner: string;
@@ -12,18 +10,14 @@ export type ShareRecord = {
   createdByUserId: string;
   createdByLogin: string;
   createdAt: string;
-  status: ShareStatus;
   installationId: number;
-  revokedAt?: string;
-  revokedByUserId?: string;
-  revokedByLogin?: string;
 };
 
 export type ShareStoreOptions = {
   filePath: string;
 };
 
-type ShareRecordInput = Omit<ShareRecord, 'createdAt' | 'status'>;
+type ShareRecordInput = Omit<ShareRecord, 'createdAt'>;
 
 type ShareStoreData = {
   records: ShareRecord[];
@@ -35,17 +29,14 @@ export function createShareStore(options: ShareStoreOptions): ShareStoreInstance
   return new ShareStore(options);
 }
 
-export interface ShareStoreInstance {
+export type ShareStoreInstance = {
   init(): Promise<void>;
   create(record: ShareRecordInput): Promise<ShareRecord>;
   get(id: string): ShareRecord | undefined;
   findActiveByNote(owner: string, repo: string, path: string): ShareRecord | undefined;
   listByRepo(owner: string, repo: string): ShareRecord[];
-  revoke(
-    id: string,
-    metadata: { revokedByUserId: string; revokedByLogin: string; revokedAt?: string }
-  ): Promise<boolean>;
-}
+  revoke(id: string): Promise<boolean>;
+};
 
 class ShareStore implements ShareStoreInstance {
   #filePath: string;
@@ -75,8 +66,7 @@ class ShareStore implements ShareStoreInstance {
       } else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.records)) {
         this.#hydrate(parsed.records);
       } else {
-        this.#shares.clear();
-        this.#noteIndex.clear();
+        this.#hydrate([]);
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -92,7 +82,6 @@ class ShareStore implements ShareStoreInstance {
     let finalRecord: ShareRecord = {
       ...record,
       createdAt: nowIso,
-      status: 'active',
     };
     this.#shares.set(finalRecord.id, finalRecord);
     this.#noteIndex.set(noteKey(finalRecord.owner, finalRecord.repo, finalRecord.path), finalRecord.id);
@@ -109,7 +98,6 @@ class ShareStore implements ShareStoreInstance {
     let id = this.#noteIndex.get(key);
     if (!id) return undefined;
     let record = this.#shares.get(id);
-    if (!record || record.status !== 'active') return undefined;
     return record;
   }
 
@@ -124,10 +112,7 @@ class ShareStore implements ShareStoreInstance {
     return results;
   }
 
-  async revoke(
-    id: string,
-    _metadata: { revokedByUserId: string; revokedByLogin: string; revokedAt?: string }
-  ): Promise<boolean> {
+  async revoke(id: string): Promise<boolean> {
     let existing = this.#shares.get(id);
     if (!existing) return false;
     this.#shares.delete(id);
@@ -141,11 +126,8 @@ class ShareStore implements ShareStoreInstance {
     this.#noteIndex.clear();
     for (let record of records) {
       if (!record || typeof record.id !== 'string') continue;
-      let normalized = normalizeRecord(record);
-      this.#shares.set(normalized.id, normalized);
-      if (normalized.status === 'active') {
-        this.#noteIndex.set(noteKey(normalized.owner, normalized.repo, normalized.path), normalized.id);
-      }
+      this.#shares.set(record.id, record);
+      this.#noteIndex.set(noteKey(record.owner, record.repo, record.path), record.id);
     }
   }
 
@@ -163,23 +145,4 @@ class ShareStore implements ShareStoreInstance {
 
 function noteKey(owner: string, repo: string, filePath: string): string {
   return `${owner.toLowerCase()}::${repo.toLowerCase()}::${filePath}`;
-}
-
-function normalizeRecord(record: ShareRecord): ShareRecord {
-  let normalizedPath = normalizePath(record.path);
-  return {
-    ...record,
-    owner: record.owner,
-    repo: record.repo,
-    branch: record.branch,
-    path: normalizedPath,
-    status: record.status === 'revoked' ? 'revoked' : 'active',
-  };
-}
-
-function normalizePath(p: string): string {
-  let cleaned = p.trim().replace(/\\/g, '/');
-  cleaned = cleaned.replace(/^\/+/, '');
-  cleaned = cleaned.replace(/\/{2,}/g, '/');
-  return cleaned;
 }
