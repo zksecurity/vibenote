@@ -62,8 +62,9 @@ app.get('/v1/auth/github/start', async (req, res) => {
   res.redirect(redirect);
 });
 
-app.get('/v1/auth/github/callback', async (req, res) => {
-  try {
+app.get(
+  '/v1/auth/github/callback',
+  handleErrors(async (req, res) => {
     let code = String(req.query.code ?? '');
     let stateToken = String(req.query.state ?? '');
     let { html } = await handleAuthCallback(
@@ -75,59 +76,53 @@ app.get('/v1/auth/github/callback', async (req, res) => {
       requestOrigin(req)
     );
     res.status(200).type('html').send(html);
-  } catch (error: unknown) {
-    res.status(400).json({ error: getErrorMessage(error) });
-  }
-});
+  })
+);
 
-app.post('/v1/auth/github/refresh', requireSession, async (req, res) => {
-  try {
+app.post(
+  '/v1/auth/github/refresh',
+  requireSession,
+  handleErrors(async (req, res) => {
     let claims = req.sessionUser;
-    if (!claims) {
-      return res.status(401).json({ error: 'missing session' });
-    }
+    if (!claims) throw new HttpError(401, 'missing session');
     let tokens = await refreshAccessToken(env, sessionStore, claims.sessionId);
     res.json({ accessToken: tokens.accessToken, accessTokenExpiresAt: tokens.accessTokenExpiresAt });
-  } catch (error: unknown) {
-    res.status(401).json({ error: getErrorMessage(error) });
-  }
-});
+  })
+);
 
-app.post('/v1/auth/github/logout', requireSession, async (req, res) => {
-  try {
+app.post(
+  '/v1/auth/github/logout',
+  requireSession,
+  handleErrors(async (req, res) => {
     let claims = req.sessionUser;
-    if (!claims) {
-      return res.status(401).json({ error: 'missing session' });
-    }
+    if (!claims) throw new HttpError(401, 'missing session');
     await logoutSession(sessionStore, claims.sessionId);
     res.status(204).end();
-  } catch (error: unknown) {
-    res.status(400).json({ error: getErrorMessage(error) });
-  }
-});
+  })
+);
 
-app.get('/v1/app/install-url', async (req, res) => {
-  let owner = String(req.query.owner ?? '');
-  let repo = String(req.query.repo ?? '');
-  let returnTo = String(req.query.returnTo ?? '');
-  let sanitizedReturnTo = normalizeReturnTo(returnTo, env.ALLOWED_ORIGINS);
-  if (sanitizedReturnTo === null && returnTo.trim().length > 0) {
-    return res.status(400).json({ error: 'invalid returnTo origin' });
-  }
-  let url = await buildInstallUrl(env, owner, repo, sanitizedReturnTo ?? '');
-  res.json({ url });
-});
+app.get(
+  '/v1/app/install-url',
+  handleErrors(async (req, res) => {
+    let owner = String(req.query.owner ?? '');
+    let repo = String(req.query.repo ?? '');
+    let returnTo = String(req.query.returnTo ?? '');
+    let sanitizedReturnTo = normalizeReturnTo(returnTo, env.ALLOWED_ORIGINS);
+    if (sanitizedReturnTo === null && returnTo.trim().length > 0) throw Error('invalid returnTo origin');
+    let url = await buildInstallUrl(env, owner, repo, sanitizedReturnTo ?? '');
+    res.json({ url });
+  })
+);
 
-app.get('/v1/app/setup', async (req, res) => {
-  try {
+app.get(
+  '/v1/app/setup',
+  handleErrors(async (req, res) => {
     let installationId = req.query.installation_id ? String(req.query.installation_id) : null;
     let setupAction = req.query.setup_action ? String(req.query.setup_action) : null;
     let stateToken = String(req.query.state ?? '');
     let returnTo = String(req.query.returnTo ?? '');
     let sanitizedReturnTo = normalizeReturnTo(returnTo, env.ALLOWED_ORIGINS);
-    if (sanitizedReturnTo === null && returnTo.trim().length > 0) {
-      return res.status(400).json({ error: 'invalid returnTo origin' });
-    }
+    if (sanitizedReturnTo === null && returnTo.trim().length > 0) throw Error('invalid returnTo origin');
     let target = await buildSetupRedirect(
       env,
       stateToken,
@@ -137,17 +132,17 @@ app.get('/v1/app/setup', async (req, res) => {
       requestOrigin(req)
     );
     res.redirect(target);
-  } catch (error: unknown) {
-    res.status(400).json({ error: getErrorMessage(error) });
-  }
-});
+  })
+);
 
 app.post('/v1/webhooks/github', (_req, res) => {
   res.status(204).end();
 });
 
-app.post('/v1/shares', requireSession, async (req, res) => {
-  try {
+app.post(
+  '/v1/shares',
+  requireSession,
+  handleErrors(async (req, res) => {
     const session = req.sessionUser!;
     const repoAccessToken = await refreshAccessToken(env, sessionStore, session.sessionId);
     let { owner, repo, path, branch } = parseShareBody(req.body);
@@ -162,16 +157,13 @@ app.post('/v1/shares', requireSession, async (req, res) => {
       branch,
       accessToken: repoAccessToken.accessToken,
     });
-    if (!owner || !repo || !path || !branch || !noteExists) {
-      return res
-        .status(404)
-        .json({ error: 'note not found. either no access or invalid owner/repo/path/branch' });
-    }
+    if (!owner || !repo || !path || !branch || !noteExists)
+      throw new HttpError(404, 'note not found. either no access or invalid owner/repo/path/branch');
+
     // once access is verified, we either bail if a share already exists, or create a new one
     const existing = shareStore.findActiveByNote(owner, repo, path);
-    if (existing) {
-      return res.status(200).json(shareResponse(existing, env));
-    }
+    if (existing) return res.status(200).json(shareResponse(existing, env));
+
     const installationId = await getRepoInstallationId(env, owner, repo);
     const id = generateShareId();
     const record = await shareStore.create({
@@ -186,86 +178,59 @@ app.post('/v1/shares', requireSession, async (req, res) => {
     });
     console.log(`[vibenote] share created ${owner}/${repo}`);
     res.status(201).json(shareResponse(record, env));
-  } catch (error) {
-    res.status(400).json({ error: getErrorMessage(error) });
-  }
-});
+  })
+);
 
-app.get('/v1/shares', requireSession, async (req, res) => {
-  try {
+app.get(
+  '/v1/shares',
+  requireSession,
+  handleErrors(async (req, res) => {
     let { owner, repo, path } = parseShareBody(req.query);
-    if (!owner || !repo || !path) {
-      return res.status(400).json({ error: 'missing or invalid owner/repo/path' });
-    }
+    if (!owner || !repo || !path) throw Error('missing or invalid owner/repo/path');
+
     const session = req.sessionUser!;
     // ensure the repo is readable by the user
     let result = await fetchRepo(env, sessionStore, session.sessionId, owner, repo);
-    if (result.status === 404) {
-      throw Error('repository not found or not accessible');
-    }
+    if (result.status === 404) throw new HttpError(404, 'repository not found or not accessible');
     if (!result.ok) {
       const text = await result.text();
-      throw Error(`github repo permissions check failed (${result.status}): ${text}`);
+      throw new HttpError(502, `github repo permissions check failed (${result.status}): ${text}`);
     }
     const existing = shareStore.findActiveByNote(owner, repo, path);
     res.json({ share: existing ? shareResponse(existing, env) : null });
-  } catch (error) {
-    res.status(400).json({ error: getErrorMessage(error) });
-  }
-});
+  })
+);
 
-app.delete('/v1/shares/:id', requireSession, async (req, res) => {
-  try {
-    const id = getPathParam(req, 'id');
-    if (!id || !isValidShareId(id)) {
-      return res.status(404).json({ error: 'share not found' });
-    }
-    const record = shareStore.get(id);
-    if (!record) {
-      return res.status(404).json({ error: 'share not found' });
-    }
+app.delete(
+  '/v1/shares/:id',
+  requireSession,
+  handleErrors(async (req, res) => {
+    const record = getShareRecord(req);
     const session = req.sessionUser!;
     const canRevoke = await canUserRevokeShare(env, sessionStore, session, record);
-    if (!canRevoke) {
-      return res.status(403).json({ error: 'insufficient permissions to revoke share' });
-    }
-    const removed = await shareStore.revoke(id);
-    if (!removed) {
-      return res.status(404).json({ error: 'share not found' });
-    }
+    if (!canRevoke) throw new HttpError(403, 'insufficient permissions to revoke share');
+
+    const removed = await shareStore.revoke(record.id);
+    if (!removed) throw new HttpError(404, 'share not found');
+
     console.log(`[vibenote] share revoked ${record.owner}/${record.repo}`);
-    shareAssetCache.delete(id);
+    shareAssetCache.delete(record.id);
     res.status(204).end();
-  } catch (error) {
-    res.status(400).json({ error: getErrorMessage(error) });
-  }
-});
+  })
+);
 
-app.get('/v1/share-links/:id', async (req, res) => {
-  const id = getPathParam(req, 'id');
-  if (!id || !isValidShareId(id)) {
-    return res.status(404).json({ error: 'share not found' });
-  }
-  const record = shareStore.get(id);
-  if (!record) {
-    return res.status(404).json({ error: 'share not found' });
-  }
-  res.json({
-    id: record.id,
-    createdBy: { login: record.createdByLogin },
-  });
-});
+app.get(
+  '/v1/share-links/:id',
+  handleErrors(async (req, res) => {
+    const record = getShareRecord(req);
+    res.json({ id: record.id, createdBy: { login: record.createdByLogin } });
+  })
+);
 
-app.get('/v1/share-links/:id/content', async (req, res) => {
-  try {
-    const id = getPathParam(req, 'id');
-    if (!id) {
-      return res.status(404).json({ error: 'share not found' });
-    }
-    const record = shareStore.get(id);
-    if (!record) {
-      return res.status(404).json({ error: 'share not found' });
-    }
+app.get(
+  '/v1/share-links/:id/content',
+  handleErrors(async (req, res) => {
+    const record = getShareRecord(req);
     const text = await fetchShareMarkdown(record, env);
     cacheShareAssets(record.id, record.path, text);
     res
@@ -273,33 +238,18 @@ app.get('/v1/share-links/:id/content', async (req, res) => {
       .setHeader('Content-Type', 'text/markdown; charset=utf-8')
       .setHeader('Cache-Control', 'no-store')
       .send(text);
-  } catch (error) {
-    if (error instanceof HttpError) {
-      return res.status(error.status).json({ error: error.message });
-    }
-    res.status(400).json({ error: getErrorMessage(error) });
-  }
-});
+  })
+);
 
-app.get('/v1/share-links/:id/assets', async (req, res) => {
-  try {
-    const id = getPathParam(req, 'id');
-    if (!id) {
-      return res.status(404).json({ error: 'share not found' });
-    }
-    const record = shareStore.get(id);
-    if (!record) {
-      return res.status(404).json({ error: 'share not found' });
-    }
+app.get(
+  '/v1/share-links/:id/assets',
+  handleErrors(async (req, res) => {
+    const record = getShareRecord(req);
     const rawPathParam = decodeURIComponent(asTrimmedString(req.query.path));
     const pathCandidate = resolveAssetPath(record.path, rawPathParam);
-    if (!pathCandidate) {
-      return res.status(400).json({ error: 'invalid asset path' });
-    }
+    if (!pathCandidate) throw Error('invalid asset path');
     let allowedPaths = await ensureShareAssetsLoaded(record, env);
-    if (!allowedPaths.has(pathCandidate)) {
-      return res.status(404).json({ error: 'asset not found' });
-    }
+    if (!allowedPaths.has(pathCandidate)) throw new HttpError(404, 'asset not found');
     const encodedAssetPath = encodeAssetPath(pathCandidate);
     const ghRes = await installationRequest(
       env,
@@ -311,12 +261,10 @@ app.get('/v1/share-links/:id/assets', async (req, res) => {
         headers: { Accept: 'application/vnd.github.raw' },
       }
     );
-    if (ghRes.status === 404) {
-      return res.status(404).json({ error: 'asset not found' });
-    }
+    if (ghRes.status === 404) throw new HttpError(404, 'asset not found');
     if (!ghRes.ok) {
       const text = await ghRes.text();
-      return res.status(502).json({ error: `github error ${ghRes.status}: ${text}` });
+      throw new HttpError(502, `github error ${ghRes.status}: ${text}`);
     }
     const buffer = Buffer.from(await ghRes.arrayBuffer());
     const contentType = ghRes.headers.get('Content-Type') ?? 'application/octet-stream';
@@ -330,13 +278,8 @@ app.get('/v1/share-links/:id/assets', async (req, res) => {
     const lastModified = ghRes.headers.get('Last-Modified');
     if (lastModified) headers['Last-Modified'] = lastModified;
     res.status(200).set(headers).send(buffer);
-  } catch (error) {
-    if (error instanceof HttpError) {
-      return res.status(error.status).json({ error: error.message });
-    }
-    res.status(400).json({ error: getErrorMessage(error) });
-  }
-});
+  })
+);
 
 const server = app.listen(env.PORT, () => {
   console.log(`[vibenote] api listening on :${env.PORT}`);
@@ -528,6 +471,14 @@ function parseShareBody(inputBody: unknown) {
   return { owner, repo, path, branch };
 }
 
+function getShareRecord(req: express.Request) {
+  let id = getPathParam(req, 'id');
+  if (!id || !isValidShareId(id)) throw new HttpError(404, 'share not found');
+  const record = shareStore.get(id);
+  if (!record || record.id !== id) throw new HttpError(404, 'share not found');
+  return record;
+}
+
 function generateShareId(): string {
   return crypto.randomBytes(18).toString('base64url');
 }
@@ -576,6 +527,20 @@ async function ensureShareAssetsLoaded(record: ShareRecord, env: Env): Promise<S
   }
   const markdown = await fetchShareMarkdown(record, env);
   return cacheShareAssets(record.id, record.path, markdown);
+}
+
+function handleErrors<T>(route: (req: express.Request, res: express.Response) => Promise<T>) {
+  return async function (req: express.Request, res: express.Response): Promise<T | void> {
+    try {
+      return await route(req, res);
+    } catch (error) {
+      if (error instanceof HttpError) {
+        res.status(error.status).json({ error: error.message });
+      } else {
+        res.status(400).json({ error: getErrorMessage(error) });
+      }
+    }
+  };
 }
 
 class HttpError extends Error {
