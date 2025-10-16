@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react';
 
-export { GitHubIcon, ExternalLinkIcon, NotesIcon, CloseIcon, SyncIcon };
+export { GitHubIcon, ExternalLinkIcon, NotesIcon, CloseIcon, SyncIcon, ShareIcon };
 
 function GitHubIcon(): ReactElement {
   return (
@@ -50,6 +50,15 @@ function SyncIcon({ spinning }: { spinning: boolean }): ReactElement {
       <path d="M13.5 8a5.5 5.5 0 0 1-9 3.9" strokeWidth="1.4" strokeLinecap="round" />
       <path d="M11.5 2.5 13.5 5l-3 .5" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M4.5 13.5 2.5 11l3-.5" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function ShareIcon(): ReactElement {
+  return (
+    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden>
+      <path d="M12 5.5a1.75 1.75 0 1 0-1.69-2.16l-4.02 2.3a1.75 1.75 0 0 0 0 2.72l4.02 2.3a1.75 1.75 0 1 0 .38-.66l-4.02-2.3a.75.75 0 0 1 0-1.16l4.02-2.3A1.74 1.74 0 0 0 12 5.5Z" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="4" cy="8" r="2.25" strokeWidth="1.4" />
     </svg>
   );
 }

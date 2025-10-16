@@ -204,6 +204,21 @@ textarea {
   flex: 1 1 auto;
 }
 
+.topbar-actions .share-btn {
+  color: var(--accent);
+}
+
+.topbar-actions .share-btn.share-btn-active {
+  background: rgba(9, 105, 218, 0.12);
+  border-color: rgba(9, 105, 218, 0.45);
+  color: var(--accent);
+}
+
+.topbar-actions .share-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .home-main {
   max-width: 960px;
   margin: 40px auto;
@@ -327,6 +342,13 @@ textarea {
     box-shadow 0.18s ease,
     color 0.18s ease;
   text-decoration: none;
+}
+
+.btn.icon {
+  padding: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
 }
 
 .btn:hover {
@@ -946,6 +968,134 @@ textarea:focus-visible {
   padding: 12px 16px;
   color: var(--accent);
   font-weight: 500;
+}
+
+.share-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 120;
+}
+
+.share-dialog {
+  background: var(--surface);
+  border-radius: 16px;
+  box-shadow: var(--shadow-soft);
+  padding: clamp(20px, 4vw, 28px);
+  width: min(480px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.share-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.share-dialog-title {
+  margin: 0;
+  font-size: 1.4rem;
+  font-weight: 600;
+}
+
+.share-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.share-dialog-subtitle {
+  margin: 0;
+  color: var(--muted);
+}
+
+.share-note-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+.share-note-label {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.share-note-name {
+  font-weight: 600;
+  color: var(--text);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.share-url-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.share-url {
+  flex: 1 1 auto;
+  max-width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface-subtle);
+  font-family: var(--code-font);
+  font-size: 0.92rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.share-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.share-status {
+  margin: 0;
+  color: var(--muted);
+}
+
+.share-error {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  background: #fff1f0;
+  border: 1px solid #ffcdc7;
+}
+
+.share-error-detail {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #b42318;
+}
+
+.share-success,
+.share-create {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.share-revoke {
+  align-self: flex-start;
+  color: #b42318;
 }
 
 /* Repo Switcher */

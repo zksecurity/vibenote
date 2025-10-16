@@ -5,7 +5,7 @@ import { Editor } from './Editor';
 import { AssetViewer } from './AssetViewer';
 import { RepoSwitcher } from './RepoSwitcher';
 import { Toggle } from './Toggle';
-import { GitHubIcon, ExternalLinkIcon, NotesIcon, CloseIcon, SyncIcon } from './RepoIcons';
+import { GitHubIcon, ExternalLinkIcon, NotesIcon, CloseIcon, SyncIcon, ShareIcon } from './RepoIcons';
 import { useRepoData } from '../data';
 import type { FileMeta } from '../storage/local';
 import {
@@ -19,6 +19,7 @@ import {
 import type { RepoRoute, Route } from './routing';
 import { normalizePath, pathsEqual } from '../lib/util';
 import { useRepoAssetLoader } from './useRepoAssetLoader';
+import { ShareDialog } from './ShareDialog';
 
 type RepoViewProps = {
   slug: string;
@@ -80,6 +81,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
     autosync,
     syncing,
     statusMessage,
+    share,
     defaultBranch,
   } = state;
 
@@ -89,10 +91,14 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
   const isReadOnly = !canEdit && canRead;
   const layoutClass = showSidebar ? '' : 'single';
   const needsSessionRefresh = needsInstall && repoLinked;
+  const activeIsMarkdown = activeFile !== undefined && isMarkdownFile(activeFile);
+  const canShare = hasSession && route.kind === 'repo' && activePath !== undefined && canEdit && activeIsMarkdown;
+  const shareDisabled = share.status === 'idle' || share.status === 'loading';
 
   // Pure UI state: sidebar visibility and account menu.
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
 
   // Close the account dropdown when clicking anywhere else on the page.
   useEffect(() => {
@@ -105,6 +111,12 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
     document.addEventListener('click', onDoc);
     return () => document.removeEventListener('click', onDoc);
   }, []);
+
+  useEffect(() => {
+    if (!shareOpen) return;
+    if (share.status !== 'idle') return;
+    void actions.refreshShareLink();
+  }, [shareOpen, share.status, actions.refreshShareLink]);
 
   const [showSwitcher, setShowSwitcher] = useState(false);
 
@@ -226,6 +238,24 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
             </button>
           ) : (
             <>
+              {canShare && (
+                <button
+                  className={`btn icon sync-btn share-btn${share.link ? ' share-btn-active' : ''}`}
+                  onClick={() => setShareOpen(true)}
+                  title={
+                    share.link
+                      ? 'Manage share link'
+                      : shareDisabled
+                      ? 'Checking share status'
+                      : 'Create share link'
+                  }
+                  aria-label={share.link ? 'Manage share link' : 'Create share link'}
+                  disabled={shareDisabled}
+                  aria-disabled={shareDisabled}
+                >
+                  <ShareIcon />
+                </button>
+              )}
               {canSync && (
                 <button
                   className={`btn secondary sync-btn ${syncing ? 'is-syncing' : ''}`}
@@ -441,6 +471,16 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
           navigate={navigate}
           onRecordRecent={recordRecent}
           onClose={() => setShowSwitcher(false)}
+        />
+      )}
+      {shareOpen && (
+        <ShareDialog
+          share={share}
+          notePath={activePath}
+          onClose={() => setShareOpen(false)}
+          onCreate={actions.createShareLink}
+          onRevoke={actions.revokeShareLink}
+          onRefresh={actions.refreshShareLink}
         />
       )}
     </div>

@@ -37,7 +37,7 @@ This document captures the core architecture, sync logic, and decisions so anoth
   - Exchange OAuth authorization codes for access + refresh tokens.
   - Store refresh tokens encrypted on disk (`SESSION_ENCRYPTION_KEY`), rotate them on every refresh, and return the new short-lived access token to the browser.
   - Serve `/v1/auth/github/*` endpoints for login, refresh, logout, install/setup redirects, and basic health checks.
-  - Never touch repository contents; all GitHub REST calls originate from the browser with the user token.
+- Main SPA GitHub calls originate from the browser with the user token. The sharing backend is the only server component that fetches repository content, and it does so using the GitHub App installation token to stream Markdown/assets for public viewers.
 - Client flow:
   1. User installs the GitHub App (selecting repos or “all repos”).
   2. Popup returns a signed session JWT plus short-lived access token via `postMessage`.
@@ -47,6 +47,14 @@ This document captures the core architecture, sync logic, and decisions so anoth
   - Refresh tokens are encrypted at rest; delete `sessions.json` (or rotate `SESSION_ENCRYPTION_KEY`) to revoke all sessions.
   - No GitHub App private key is stored server-side; compromising the backend without refresh tokens grants no repo access.
   - Rate limits: minimise redundant GitHub calls, cache read responses, and treat 403 “abuse detection” responses as soft-failures with retry backoff.
+
+### Sharing backend add-on
+
+- The share feature introduces a lightweight server module that persists share metadata in `SHARE_STORE_FILE` (encrypted session store lives alongside it).
+- It exposes `POST/GET/DELETE /v1/shares` plus `GET /v1/share-links/:id/{metadata,content,assets}`.
+- Creating/revoking shares requires GitHub push permission; read-only collaborators may only view existing links.
+- When public viewers request content, the backend uses the GitHub App installation token to stream Markdown and referenced assets. Only paths discovered in the note are served; nothing is cached beyond a short-lived asset allow-list.
+- Revoking a share removes the record and clears cached asset paths immediately.
 
 ## Merge with Y.js
 
