@@ -15,7 +15,7 @@ import {
 import { createSessionStore, type SessionStoreInstance } from './session-store.ts';
 import { createShareStore, type ShareRecord } from './share-store.ts';
 import { getRepoInstallationId, installationRequest } from './github-app.ts';
-import { resolveAssetPath, decodeAssetParam, encodeAssetPath, collectAssetPaths } from './share-assets.ts';
+import { resolveAssetPath, encodeAssetPath, collectAssetPaths } from './share-assets.ts';
 
 declare module 'express-serve-static-core' {
   interface Request {
@@ -283,8 +283,8 @@ app.get('/v1/share-links/:id/assets', async (req, res) => {
     if (!record) {
       return res.status(404).json({ error: 'share not found' });
     }
-    const rawPathParam = typeof req.query.path === 'string' ? req.query.path : '';
-    const pathCandidate = resolveAssetPath(record.path, decodeAssetParam(rawPathParam));
+    const rawPathParam = decodeURIComponent(asTrimmedString(req.query.path));
+    const pathCandidate = resolveAssetPath(record.path, rawPathParam);
     if (!pathCandidate) {
       return res.status(400).json({ error: 'invalid asset path' });
     }

@@ -1,7 +1,6 @@
 import path from 'node:path';
 
-export { resolveAssetPath, decodeAssetParam, encodeAssetPath, extractRelativeAssetRefs };
-export { collectAssetPaths };
+export { resolveAssetPath, encodeAssetPath, extractRelativeAssetRefs, collectAssetPaths };
 
 const BLOCKED_ASSET_EXTENSIONS = new Set([
   '.md',
@@ -38,11 +37,6 @@ function resolveAssetPath(notePath: string, requestPath: string): string | null 
   return normalized;
 }
 
-function decodeAssetParam(raw: string | undefined): string {
-  if (typeof raw !== 'string') return '';
-  return decodeURIComponentSafe(raw);
-}
-
 function encodeAssetPath(pathValue: string): string {
   return pathValue
     .split('/')
@@ -51,16 +45,10 @@ function encodeAssetPath(pathValue: string): string {
 }
 
 function extractRelativeAssetRefs(markdown: string): string[] {
-  const results: string[] = [];
   const added = new Set<string>();
   const add = (raw: string | undefined) => {
-    if (!raw) return;
-    const target = normalizeLinkTarget(raw);
-    if (!target) return;
-    if (!added.has(target)) {
-      added.add(target);
-      results.push(target);
-    }
+    let target = normalizeLinkTarget(raw);
+    if (target) added.add(target);
   };
 
   const inlineImagePattern = /!\[[^\]]*]\(([^)]+)\)/g;
@@ -128,13 +116,23 @@ function extractRelativeAssetRefs(markdown: string): string[] {
     }
   }
 
-  return results;
+  // try to decode to valid URL, but just ignore ref if it fails
+  // (we don't want to reject the whole note just because of one bad link)
+  return [...added]
+    .map((ref) => {
+      try {
+        return decodeURIComponent(ref);
+      } catch {
+        return undefined;
+      }
+    })
+    .filter((v) => v !== undefined);
 }
 
 function collectAssetPaths(notePath: string, markdown: string): Set<string> {
   const paths = new Set<string>();
   for (const ref of extractRelativeAssetRefs(markdown)) {
-    const normalized = resolveAssetPath(notePath, decodeAssetParam(ref));
+    const normalized = resolveAssetPath(notePath, ref);
     if (normalized && isAllowedAttachment(normalized)) {
       paths.add(normalized);
     }
@@ -142,7 +140,7 @@ function collectAssetPaths(notePath: string, markdown: string): Set<string> {
   return paths;
 }
 
-function normalizeLinkTarget(raw: string): string | undefined {
+function normalizeLinkTarget(raw: string | undefined): string | undefined {
   if (!raw) return undefined;
   let trimmed = raw.trim();
   if (trimmed.length === 0) return undefined;
@@ -193,14 +191,6 @@ function extractReferenceDefinitions(markdown: string): Map<string, string> {
     map.set(labelRaw.trim().toLowerCase(), target);
   }
   return map;
-}
-
-function decodeURIComponentSafe(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
 }
 
 function isAllowedAttachment(pathValue: string): boolean {
