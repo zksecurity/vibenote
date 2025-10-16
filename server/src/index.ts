@@ -198,7 +198,15 @@ app.get('/v1/shares', requireSession, async (req, res) => {
       return res.status(400).json({ error: 'missing or invalid owner/repo/path' });
     }
     const session = req.sessionUser!;
-    await ensureRepoReadableByUser(env, sessionStore, session.sessionId, owner, repo);
+    // ensure the repo is readable by the user
+    let result = await fetchRepo(env, sessionStore, session.sessionId, owner, repo);
+    if (result.status === 404) {
+      throw Error('repository not found or not accessible');
+    }
+    if (!result.ok) {
+      const text = await result.text();
+      throw Error(`github repo permissions check failed (${result.status}): ${text}`);
+    }
     const existing = shareStore.findActiveByNote(owner, repo, path);
     res.json({ share: existing ? shareResponse(existing, env) : null });
   } catch (error) {
@@ -288,15 +296,7 @@ app.get('/v1/share-links/:id/assets', async (req, res) => {
     if (!pathCandidate) {
       return res.status(400).json({ error: 'invalid asset path' });
     }
-    let allowedPaths: Set<string>;
-    try {
-      allowedPaths = await ensureShareAssetsLoaded(record, env);
-    } catch (error) {
-      if (error instanceof HttpError) {
-        return res.status(error.status).json({ error: error.message });
-      }
-      throw error;
-    }
+    let allowedPaths = await ensureShareAssetsLoaded(record, env);
     if (!allowedPaths.has(pathCandidate)) {
       return res.status(404).json({ error: 'asset not found' });
     }
@@ -469,30 +469,20 @@ async function verifyNoteExistsWithUserToken(options: {
   return true;
 }
 
-async function ensureRepoReadableByUser(
+async function fetchRepo(
   env: Env,
   store: SessionStoreInstance,
   sessionId: string,
   owner: string,
   repo: string
-): Promise<void> {
+) {
   const tokens = await refreshAccessToken(env, store, sessionId);
-  const res = await fetch(
-    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
-    {
-      headers: {
-        Authorization: `Bearer ${tokens.accessToken}`,
-        Accept: 'application/vnd.github+json',
-      },
-    }
-  );
-  if (res.status === 404) {
-    throw new Error('repository not found or not accessible');
-  }
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`github repo permissions check failed (${res.status}): ${text}`);
-  }
+  return fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, {
+    headers: {
+      Authorization: `Bearer ${tokens.accessToken}`,
+      Accept: 'application/vnd.github+json',
+    },
+  });
 }
 
 async function canUserRevokeShare(
@@ -503,27 +493,12 @@ async function canUserRevokeShare(
 ): Promise<boolean> {
   if (session.sub === record.createdByUserId) return true;
   try {
-    const tokens = await refreshAccessToken(env, store, session.sessionId);
-    const res = await fetch(
-      `https://api.github.com/repos/${encodeURIComponent(record.owner)}/${encodeURIComponent(record.repo)}`,
-      {
-        headers: {
-          Authorization: `Bearer ${tokens.accessToken}`,
-          Accept: 'application/vnd.github+json',
-        },
-      }
-    );
-    if (!res.ok) {
-      return false;
-    }
-    const json = (await res.json()) as any;
-    const permissions = json && typeof json.permissions === 'object' ? json.permissions : undefined;
-    if (permissions && permissions.push === true) {
-      return true;
-    }
-  } catch {
-    return false;
-  }
+    let res = await fetchRepo(env, store, session.sessionId, record.owner, record.repo);
+    if (!res.ok) return false;
+    let json = (await res.json()) as any;
+    let permissions = json && typeof json.permissions === 'object' ? json.permissions : undefined;
+    if (permissions?.push === true) return true;
+  } catch {}
   return false;
 }
 
