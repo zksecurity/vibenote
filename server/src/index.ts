@@ -84,7 +84,7 @@ app.post(
   requireSession,
   handleErrors(async (req, res) => {
     let claims = req.sessionUser;
-    if (!claims) throw new HttpError(401, 'missing session');
+    if (!claims) throw HttpError(401, 'missing session');
     let tokens = await refreshAccessToken(env, sessionStore, claims.sessionId);
     res.json({ accessToken: tokens.accessToken, accessTokenExpiresAt: tokens.accessTokenExpiresAt });
   })
@@ -95,7 +95,7 @@ app.post(
   requireSession,
   handleErrors(async (req, res) => {
     let claims = req.sessionUser;
-    if (!claims) throw new HttpError(401, 'missing session');
+    if (!claims) throw HttpError(401, 'missing session');
     await logoutSession(sessionStore, claims.sessionId);
     res.status(204).end();
   })
@@ -158,7 +158,7 @@ app.post(
       accessToken: repoAccessToken.accessToken,
     });
     if (!owner || !repo || !path || !branch || !noteExists)
-      throw new HttpError(404, 'note not found. either no access or invalid owner/repo/path/branch');
+      throw HttpError(404, 'note not found. either no access or invalid owner/repo/path/branch');
 
     // once access is verified, we either bail if a share already exists, or create a new one
     const existing = shareStore.findActiveByNote(owner, repo, path);
@@ -191,10 +191,10 @@ app.get(
     const session = req.sessionUser!;
     // ensure the repo is readable by the user
     let result = await fetchRepo(env, sessionStore, session.sessionId, owner, repo);
-    if (result.status === 404) throw new HttpError(404, 'repository not found or not accessible');
+    if (result.status === 404) throw HttpError(404, 'repository not found or not accessible');
     if (!result.ok) {
       const text = await result.text();
-      throw new HttpError(502, `github repo permissions check failed (${result.status}): ${text}`);
+      throw HttpError(502, `github repo permissions check failed (${result.status}): ${text}`);
     }
     const existing = shareStore.findActiveByNote(owner, repo, path);
     res.json({ share: existing ? shareResponse(existing, env) : null });
@@ -208,10 +208,10 @@ app.delete(
     const record = getShareRecord(req);
     const session = req.sessionUser!;
     const canRevoke = await canUserRevokeShare(env, sessionStore, session, record);
-    if (!canRevoke) throw new HttpError(403, 'insufficient permissions to revoke share');
+    if (!canRevoke) throw HttpError(403, 'insufficient permissions to revoke share');
 
     const removed = await shareStore.revoke(record.id);
-    if (!removed) throw new HttpError(404, 'share not found');
+    if (!removed) throw HttpError(404, 'share not found');
 
     console.log(`[vibenote] share revoked ${record.owner}/${record.repo}`);
     shareAssetCache.delete(record.id);
@@ -249,7 +249,7 @@ app.get(
     const pathCandidate = resolveAssetPath(record.path, rawPathParam);
     if (!pathCandidate) throw Error('invalid asset path');
     let allowedPaths = await ensureShareAssetsLoaded(record, env);
-    if (!allowedPaths.has(pathCandidate)) throw new HttpError(404, 'asset not found');
+    if (!allowedPaths.has(pathCandidate)) throw HttpError(404, 'asset not found');
     const encodedAssetPath = encodeAssetPath(pathCandidate);
     const ghRes = await installationRequest(
       env,
@@ -261,10 +261,10 @@ app.get(
         headers: { Accept: 'application/vnd.github.raw' },
       }
     );
-    if (ghRes.status === 404) throw new HttpError(404, 'asset not found');
+    if (ghRes.status === 404) throw HttpError(404, 'asset not found');
     if (!ghRes.ok) {
       const text = await ghRes.text();
-      throw new HttpError(502, `github error ${ghRes.status}: ${text}`);
+      throw HttpError(502, `github error ${ghRes.status}: ${text}`);
     }
     const buffer = Buffer.from(await ghRes.arrayBuffer());
     const contentType = ghRes.headers.get('Content-Type') ?? 'application/octet-stream';
@@ -473,9 +473,9 @@ function parseShareBody(inputBody: unknown) {
 
 function getShareRecord(req: express.Request) {
   let id = getPathParam(req, 'id');
-  if (!id || !isValidShareId(id)) throw new HttpError(404, 'share not found');
+  if (!id || !isValidShareId(id)) throw HttpError(404, 'share not found');
   const record = shareStore.get(id);
-  if (!record || record.id !== id) throw new HttpError(404, 'share not found');
+  if (!record || record.id !== id) throw HttpError(404, 'share not found');
   return record;
 }
 
@@ -505,11 +505,11 @@ async function fetchShareMarkdown(record: ShareRecord, env: Env): Promise<string
     }
   );
   if (ghRes.status === 404) {
-    throw new HttpError(404, 'note not found');
+    throw HttpError(404, 'note not found');
   }
   if (!ghRes.ok) {
     const text = await ghRes.text();
-    throw new HttpError(502, `github error ${ghRes.status}: ${text}`);
+    throw HttpError(502, `github error ${ghRes.status}: ${text}`);
   }
   return await ghRes.text();
 }
@@ -534,7 +534,7 @@ function handleErrors<T>(route: (req: express.Request, res: express.Response) =>
     try {
       return await route(req, res);
     } catch (error) {
-      if (error instanceof HttpError) {
+      if (error instanceof HttpErrorClass) {
         res.status(error.status).json({ error: error.message });
       } else {
         res.status(400).json({ error: getErrorMessage(error) });
@@ -543,7 +543,11 @@ function handleErrors<T>(route: (req: express.Request, res: express.Response) =>
   };
 }
 
-class HttpError extends Error {
+function HttpError(status: number, message: string): HttpErrorClass {
+  return new HttpErrorClass(status, message);
+}
+
+class HttpErrorClass extends Error {
   status: number;
   constructor(status: number, message: string) {
     super(message);
