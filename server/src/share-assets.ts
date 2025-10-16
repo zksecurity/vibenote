@@ -51,64 +51,24 @@ function extractRelativeAssetRefs(markdown: string): string[] {
     if (target) added.add(target);
   };
 
-  const inlineImagePattern = /!\[[^\]]*]\(([^)]+)\)/g;
-  for (const match of markdown.matchAll(inlineImagePattern)) {
-    add(captureUrl(match[1]));
-  }
-
-  const inlineLinkPattern = /\[([^\]]*?)]\(([^)]+)\)/g;
-  for (const match of markdown.matchAll(inlineLinkPattern)) {
-    const index = match.index ?? 0;
-    if (index > 0 && markdown[index - 1] === '!') {
-      continue;
-    }
+  const inlinePattern = /(!)?\[[^\]]*]\(([^)]+)\)/g;
+  for (const match of markdown.matchAll(inlinePattern)) {
     add(captureUrl(match[2]));
   }
 
-  const htmlImgPattern = /<img[^>]*src=["']([^"']+)["'][^>]*>/gi;
-  for (const match of markdown.matchAll(htmlImgPattern)) {
-    add(match[1]);
-  }
-
-  const htmlAnchorPattern = /<a[^>]*href=["']([^"']+)["'][^>]*>/gi;
-  for (const match of markdown.matchAll(htmlAnchorPattern)) {
-    add(match[1]);
-  }
-
-  const htmlMediaPattern = /<(?:audio|video)[^>]*src=["']([^"']+)["'][^>]*>/gi;
-  for (const match of markdown.matchAll(htmlMediaPattern)) {
-    add(match[1]);
-  }
-
-  const htmlSourcePattern = /<(?:source|track)[^>]*src=["']([^"']+)["'][^>]*>/gi;
-  for (const match of markdown.matchAll(htmlSourcePattern)) {
-    add(match[1]);
+  const htmlAssetPattern =
+    /<(img|a|audio|video|source|track)\b[^>]*?(?:src|href)=["']([^"']+)["'][^>]*>/gi;
+  for (const match of markdown.matchAll(htmlAssetPattern)) {
+    add(match[2]);
   }
 
   const definitions = extractReferenceDefinitions(markdown);
-  const referenceImagePattern = /!\[([^\]]*)]\[([^\]]*)]/g;
-  for (const match of markdown.matchAll(referenceImagePattern)) {
-    let label = match[2];
+  const referencePattern = /(!)?\[([^\]]*)]\[([^\]]*)]/g;
+  for (const match of markdown.matchAll(referencePattern)) {
+    let label = match[3];
     if (label === undefined) continue;
     if (label.trim().length === 0) {
-      label = match[1] ?? '';
-    }
-    const target = definitions.get(label.trim().toLowerCase());
-    if (target) {
-      add(target);
-    }
-  }
-
-  const referenceLinkPattern = /\[([^\]]*)]\[([^\]]*)]/g;
-  for (const match of markdown.matchAll(referenceLinkPattern)) {
-    const index = match.index ?? 0;
-    if (index > 0 && markdown[index - 1] === '!') {
-      continue;
-    }
-    let label = match[2];
-    if (label === undefined) continue;
-    if (label.trim().length === 0) {
-      label = match[1] ?? '';
+      label = match[2] ?? '';
     }
     const target = definitions.get(label.trim().toLowerCase());
     if (target) {
@@ -126,7 +86,7 @@ function extractRelativeAssetRefs(markdown: string): string[] {
         return undefined;
       }
     })
-    .filter((v) => v !== undefined);
+    .filter((ref) => ref !== undefined);
 }
 
 function collectAssetPaths(notePath: string, markdown: string): Set<string> {
