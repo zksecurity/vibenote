@@ -30,7 +30,7 @@ function sharingEndpoints(app: express.Express, sessionStore: SessionStoreInstan
       // verify user has read access to the repo, otherwise they are not allowed to create a share.
       // they could guess a repo/owner/path and get access to private notes otherwise!
       // note that we even make this request if owner/repo/path is invalid, to avoid leaking info about existing paths to a timing attack.
-      const repoRes = await fetchRepo(env, sessionStore, session.sessionId, owner, repo);
+      const repoRes = await fetchRepo(env, sessionStore, session.sessionId, owner, repo, { accessToken });
       if (!owner || !repo || !path || !branch || repoRes.status === 404)
         throw HttpError(404, 'note not found. either no access or invalid owner/repo/path/branch');
       if (!repoRes.ok) {
@@ -212,12 +212,17 @@ async function fetchRepo(
   store: SessionStoreInstance,
   sessionId: string,
   owner: string,
-  repo: string
+  repo: string,
+  options?: { accessToken?: string }
 ) {
-  const tokens = await refreshAccessToken(env, store, sessionId);
+  let token = options?.accessToken;
+  if (!token) {
+    let tokens = await refreshAccessToken(env, store, sessionId);
+    token = tokens.accessToken;
+  }
   return fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, {
     headers: {
-      Authorization: `Bearer ${tokens.accessToken}`,
+      Authorization: `Bearer ${token}`,
       Accept: 'application/vnd.github+json',
     },
   });
