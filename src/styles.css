@@ -1290,6 +1290,7 @@ textarea:focus-visible {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
   height: 28px;
   line-height: 28px;
   border-radius: 6px;
@@ -1309,6 +1310,7 @@ textarea:focus-visible {
   justify-content: center;
   width: 18px;
   height: 18px;
+  flex: 0 0 18px;
   border: 0;
   background: transparent;
   color: #6e7781;
@@ -1318,8 +1320,12 @@ textarea:focus-visible {
   display: inline-block;
   width: 18px;
   height: 18px;
+  flex: 0 0 18px;
 }
 .tree-title {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1328,14 +1334,22 @@ textarea:focus-visible {
   width: 16px;
   height: 16px;
   display: inline-block;
+  flex: 0 0 16px;
   background-repeat: no-repeat;
   background-size: 16px 16px;
+  background-position: center;
 }
 .tree-icon.folder,
 .tree-icon.folder-open {
   /* Octicon-like closed folder silhouette */
   -webkit-mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M1.75 3A1.75 1.75 0 0 0 0 4.75v6.5C0 12.216.784 13 1.75 13h12.5A1.75 1.75 0 0 0 16 11.25V5.5A1.5 1.5 0 0 0 14.5 4h-6L7.22 2.72A1.75 1.75 0 0 0 6 2H1.75Z"/></svg>');
   mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M1.75 3A1.75 1.75 0 0 0 0 4.75v6.5C0 12.216.784 13 1.75 13h12.5A1.75 1.75 0 0 0 16 11.25V5.5A1.5 1.5 0 0 0 14.5 4h-6L7.22 2.72A1.75 1.75 0 0 0 6 2H1.75Z"/></svg>');
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 16px 16px;
+  mask-size: 16px 16px;
+  -webkit-mask-position: center;
+  mask-position: center;
   background-color: #218bff; /* GitHub blue */
 }
 .tree-icon.folder {
