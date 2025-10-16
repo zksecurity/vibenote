@@ -1,5 +1,8 @@
 # VibeNote — “Share Links” Feature (v1 Spec)
 
+> THIS WAS AN ORIGINAL DESIGN SPEC WHICH LIKELY GOT OUTDATED DURING IMPLEMENTATION.
+> PLEASE CHECK THE ACTUAL CODE FOR THE CURRENT STATE.
+
 ## Overview
 
 We’re adding a lightweight way to **share a single note** from an existing GitHub-backed collection via a **secret link**.
@@ -73,22 +76,22 @@ Future versions will add snapshotting, expiring links, and optional restricted s
 
 1. **Share Links Service (backend extension)**
 
-   - Stores a minimal mapping: share ID → (repo, file path, branch/ref, createdBy, status).
+   - Stores a minimal mapping: share ID → (repo, file path, branch/ref, createdBy, installationId, createdAt).
    - Serves three kinds of endpoints:
 
      - **Create a share** (called from main SPA)
      - **Resolve a share** (used by public viewer)
-     - **Proxy note & asset requests** (fetch from GitHub Content API)
+     - **Proxy note & asset requests** (fetch from the GitHub Content API via the App installation token)
 
    - Enforces that each share grants access to **only one Markdown file** and its **referenced assets**.
    - Handles revocation and expiry (if implemented later).
 
 2. **Public Viewer (frontend)**
 
-  - A simple SPA under `vibenote.dev`.
-   - Renders the shared note using the same components as the main app.
-   - Talks only to the share endpoints (no direct GitHub calls).
-   - Provides read-only display, consistent styling, and basic metadata (title, date, etc.).
+- A simple SPA under `vibenote.dev`.
+- Renders the shared note using the same components as the main app.
+- Talks only to the share endpoints (no direct GitHub calls).
+- Provides read-only display, consistent styling, and basic metadata (title, date, etc.).
 
 3. **GitHub Integration**
 
@@ -128,10 +131,10 @@ When someone opens a shared link:
 1. The viewer calls the backend to **resolve** metadata for the share ID.
 2. It requests the note content via a backend endpoint, which:
 
-   - Fetches the latest version of that file from GitHub.
-   - Streams it back as Markdown or rendered HTML.
+   - Fetches the latest version of that file from GitHub using the installation token.
+   - Streams the raw Markdown back to the viewer (the viewer renders it locally).
 
-3. Any relative image or attachment links in the Markdown are rewritten to go through the same backend proxy, which fetches those assets from GitHub as needed.
+3. Any relative image or attachment links in the Markdown are rewritten to go through the same backend proxy, which fetches those assets from GitHub as needed using the same helper.
 4. The viewer displays the rendered note and its assets.
 5. If the share is invalid, disabled, or expired, the viewer shows an error page.
 
@@ -169,14 +172,14 @@ The system design should leave room for these extensions — especially snapshot
     - `GET /v1/shares?owner=...&repo=...&path=...`
     - `DELETE /v1/shares/:id`
   - Environment:
-    - `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` (used to mint installation tokens).
-    - `SHARE_STORE_FILE` (JSON persistence for share records).
-    - `PUBLIC_VIEWER_BASE_URL` (sets the domain used in generated links).
-  - Proxy for note and asset fetching from GitHub.
-    - `GET /v1/share-links/:id`
-    - `GET /v1/share-links/:id/content`
-    - `GET /v1/share-links/:id/assets/*`
-  - Basic admin/revocation endpoint.
+    - `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` for installation tokens.
+    - `SHARE_STORE_FILE` JSON store holding `{ id, owner, repo, branch, path, createdBy*, installationId, createdAt }`.
+    - `PUBLIC_VIEWER_BASE_URL` used to mint the public URL (`${base}/s/:id`).
+  - Proxy for note and asset fetching from GitHub (both use the same streaming helper behind the scenes).
+    - `GET /v1/share-links/:id` (metadata)
+    - `GET /v1/share-links/:id/content` (raw Markdown)
+    - `GET /v1/share-links/:id/assets?path=...` (only for paths the Markdown referenced)
+  - Revocation endpoint (`DELETE /v1/shares/:id`) removes the record immediately and clears cached assets.
 
 - Public Viewer SPA:
 
