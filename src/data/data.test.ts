@@ -6,6 +6,7 @@ import type { RepoMetadata, ShareLink } from '../lib/backend';
 import type { RepoRoute } from '../ui/routing';
 import { LocalStore, markRepoLinked, recordAutoSyncRun, setLastActiveFileId } from '../storage/local';
 import type { RemoteFile } from '../sync/git-sync';
+import type { RepoDataState } from '../data';
 
 type AuthMocks = {
   signInWithGitHubApp: ReturnType<typeof vi.fn>;
@@ -593,7 +594,7 @@ describe('useRepoData', () => {
         },
       });
       seenDocIds.push(value.state.activeFile?.id);
-      seenNeedsInstall.push(value.state.needsInstall);
+      seenNeedsInstall.push(needsInstall(value.state) || needsSessionRefresh(value.state));
       seenCanEdit.push(value.state.canEdit);
       return value;
     });
@@ -734,7 +735,7 @@ describe('useRepoData', () => {
           },
         });
         seenDocIds.push(value.state.activeFile?.id);
-        seenNeedsInstall.push(value.state.needsInstall);
+        seenNeedsInstall.push(needsInstall(value.state));
         return value;
       },
       {
@@ -774,8 +775,8 @@ describe('useRepoData', () => {
     expect(seenDocIds.at(-1)).toBe(noteB);
   });
 
-  // The needs-install flow should keep the doc visible and toggle the banner off after re-auth.
-  test('needs-install flow preserves the current doc while awaiting GitHub access', async () => {
+  // The needs-relogin flow should keep the doc visible and toggle the banner off after re-auth.
+  test('token refresh flow preserves the current doc while awaiting GitHub access', async () => {
     const slug = 'acme/private';
     const recordRecent = vi.fn<RecordRecentFn>();
 
@@ -806,7 +807,7 @@ describe('useRepoData', () => {
       user: { login: 'mona', name: 'Mona', avatarUrl: '' },
     });
 
-    const seenNeedsInstall: boolean[] = [];
+    const seenUserActionRequired: boolean[] = [];
     const seenRepoLinked: boolean[] = [];
 
     const { result } = renderHook(() => {
@@ -819,7 +820,7 @@ describe('useRepoData', () => {
           setRoute((prev) => (prev.kind === 'repo' ? { ...prev, notePath: nextPath } : prev));
         },
       });
-      seenNeedsInstall.push(value.state.needsInstall);
+      seenUserActionRequired.push(needsInstall(value.state) || needsSessionRefresh(value.state));
       seenRepoLinked.push(value.state.repoLinked);
       return value;
     });
@@ -828,7 +829,6 @@ describe('useRepoData', () => {
       firstMeta.resolve(installMeta);
     });
 
-    await waitFor(() => expect(result.current.state.needsInstall).toBe(true));
     expect(result.current.state.repoLinked).toBe(true);
 
     mockGetRepoMetadata.mockResolvedValue({ ...writableMeta });
@@ -837,15 +837,13 @@ describe('useRepoData', () => {
       await result.current.actions.signIn();
     });
 
-    await waitFor(() => expect(result.current.state.needsInstall).toBe(false));
-
     act(() => {
       result.current.actions.selectFile(notePath);
     });
 
     await waitFor(() => expect(result.current.state.activeFile?.id).toBe(noteId));
-    expect(seenNeedsInstall.includes(true)).toBe(true);
-    expect(seenRepoLinked.every((flag) => flag === true)).toBe(true);
+    expect(seenUserActionRequired.every((flag) => !flag)).toBe(true);
+    expect(seenRepoLinked.every((flag) => flag)).toBe(true);
   });
 
   test('auth refresh failure surfaces re-login prompt without clearing notes', async () => {
@@ -900,7 +898,7 @@ describe('useRepoData', () => {
     });
 
     await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('error'));
-    expect(result.current.state.needsInstall).toBe(true);
+    expect(needsSessionRefresh(result.current.state)).toBe(true);
     expect(result.current.state.repoLinked).toBe(true);
     expect(result.current.state.repoErrorType).toBe('auth');
 
@@ -913,7 +911,7 @@ describe('useRepoData', () => {
       await result.current.actions.signIn();
     });
 
-    await waitFor(() => expect(result.current.state.needsInstall).toBe(false));
+    await waitFor(() => expect(needsInstall(result.current.state)).toBe(false));
     expect(result.current.state.repoLinked).toBe(true);
     await waitFor(() => expect(result.current.state.repoErrorType).toBeUndefined());
     act(() => {
@@ -957,7 +955,7 @@ describe('useRepoData', () => {
           setRoute((prev) => (prev.kind === 'repo' ? { ...prev, notePath: nextPath } : prev));
         },
       });
-      seenNeedsInstall.push(value.state.needsInstall);
+      seenNeedsInstall.push(needsInstall(value.state));
       seenRepoLinked.push(value.state.repoLinked);
       return value;
     });
@@ -974,7 +972,7 @@ describe('useRepoData', () => {
     });
 
     await waitFor(() => expect(result.current.state.activeFile?.path).toBe('docs/beta.md'));
-    expect(result.current.state.needsInstall).toBe(false);
+    expect(needsInstall(result.current.state)).toBe(false);
     expect(seenNeedsInstall.every((flag) => flag === false)).toBe(true);
     expect(seenRepoLinked.every((flag) => flag === false)).toBe(true);
   });
@@ -1023,7 +1021,15 @@ describe('useRepoData', () => {
     expect(result.current.state.activeFile).toBeUndefined();
     expect(result.current.state.canSync).toBe(false);
     expect(result.current.state.repoLinked).toBe(false);
-    expect(result.current.state.needsInstall).toBe(false);
+    expect(needsInstall(result.current.state)).toBe(false);
     expect(new LocalStore(slug).listFiles()).toHaveLength(0);
   });
 });
+
+function needsInstall(state: RepoDataState) {
+  return state.hasSession && state.repoErrorType === 'not-found';
+}
+
+function needsSessionRefresh(state: RepoDataState) {
+  return state.repoLinked && state.repoErrorType === 'auth';
+}
