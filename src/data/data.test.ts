@@ -223,7 +223,7 @@ describe('useRepoData', () => {
     expect(result.current.state.canEdit).toBe(true);
     expect(result.current.state.canSync).toBe(false);
     expect(result.current.state.files).toHaveLength(1);
-    expect(result.current.state.files[0]?.title).toBe('Welcome');
+    expect(result.current.state.files[0]?.title).toBe('README');
     const welcomePath = result.current.state.files[0]?.path;
     expect(welcomePath).toBeDefined();
 
@@ -240,7 +240,7 @@ describe('useRepoData', () => {
     const recordRecent = vi.fn<RecordRecentFn>();
     const store = new LocalStore('new');
     const alphaId = store.createFile('Alpha.md', 'alpha text');
-    const welcome = store.listFiles().find((note) => note.title === 'Welcome');
+    const welcome = store.listFiles().find((note) => note.title === 'README');
     const alpha = store.loadFileById(alphaId);
     if (!alpha) throw new Error('Failed to seed alpha note');
     if (!welcome) throw new Error('Missing welcome note');

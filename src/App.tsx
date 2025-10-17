@@ -28,7 +28,7 @@ export function App() {
     // if the route is /home and there are no recent repos, redirect to /new for the onboarding flow
     if (route.kind === 'home') {
       if (listRecentRepos().length === 0) {
-        navigate({ kind: 'new' }, { replace: true });
+        navigate({ kind: 'new', notePath: 'README.md' }, { replace: true });
       }
     }
   }, [route]);

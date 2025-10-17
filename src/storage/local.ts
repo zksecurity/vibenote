@@ -254,7 +254,7 @@ export class LocalStore {
     // that layout should be documented clearly in the form of types and zod schemas
     this.backfillFolders();
     if (slug === 'new' && this.index.length === 0) {
-      this.createFile('Welcome.md', WELCOME_NOTE);
+      this.createFile('README.md', WELCOME_NOTE);
       this.index = this.loadIndex();
     }
     ensureRepoSubscribers(this.slug);
