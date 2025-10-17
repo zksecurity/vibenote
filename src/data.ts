@@ -135,7 +135,7 @@ type RepoDataInputs = {
     title?: string;
     connected?: boolean;
   }) => void;
-  setActivePath: (notePath: string | undefined) => void;
+  setActivePath: (notePath: string | undefined, options?: { replace?: boolean }) => void;
 };
 
 /**
@@ -250,7 +250,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   useEffect(() => {
     if (activeFile?.path === undefined) return;
     if (pathsEqual(desiredPath, activeFile.path)) return;
-    setActivePath(activeFile.path);
+    setActivePath(activeFile.path, { replace: true });
   }, [activeFile?.path, desiredPath]);
 
   // Remember recently opened repos once we know the current repo is reachable.
@@ -321,7 +321,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
           let readmePath = synced.find((note) => note.path.toLowerCase() === 'readme.md')?.path;
           let initialPath = storedPath ?? readmePath;
           if (initialPath !== undefined && !pathsEqual(desiredPath, initialPath)) {
-            setActivePath(initialPath);
+            setActivePath(initialPath, { replace: true });
           }
         }
         markRepoLinked(slug);
@@ -376,9 +376,9 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
 
   // CLICK HANDLERS
 
-  const ensureActivePath = (nextPath: string | undefined) => {
+  const ensureActivePath = (nextPath: string | undefined, options?: { replace?: boolean }) => {
     if (pathsEqual(route.notePath, nextPath)) return;
-    setActivePath(nextPath);
+    setActivePath(nextPath, options);
   };
 
   // "Connect GitHub" button in the header
@@ -428,7 +428,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     setLinked(false);
     setAutosync(false);
     resetReadOnlyState();
-    ensureActivePath(undefined);
+    ensureActivePath(undefined, { replace: true });
     initialPullRef.current.done = false;
 
     setStatusMessage('Signed out');
@@ -503,7 +503,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       let store = getRepoStore(slug);
       let nextPath = store.renameFile(path, name);
       if (nextPath && pathsEqual(activePath, path)) {
-        ensureActivePath(nextPath);
+        ensureActivePath(nextPath, { replace: true });
       }
       scheduleAutoSync();
     } catch (error) {
@@ -519,7 +519,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       setStatusMessage('Unable to delete file.');
       return;
     }
-    if (pathsEqual(activePath, path)) ensureActivePath(undefined);
+    if (pathsEqual(activePath, path)) ensureActivePath(undefined, { replace: true });
     scheduleAutoSync();
   };
 
@@ -542,7 +542,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     if (hasFiles && !window.confirm('Delete folder and all contained files?')) return;
     localStore.deleteFolder(dir);
     if (activePath !== undefined && isPathInsideDir(activePath, dir)) {
-      ensureActivePath(undefined);
+      ensureActivePath(undefined, { replace: true });
     }
     scheduleAutoSync();
   };

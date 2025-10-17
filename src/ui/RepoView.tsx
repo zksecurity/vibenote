@@ -43,18 +43,19 @@ export function RepoView(props: RepoViewProps) {
 
 function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
   const setActivePath = useCallback(
-    (nextPath: string | undefined) => {
+    (nextPath: string | undefined, options?: { replace?: boolean }) => {
+      let replace = options?.replace === true;
       if (route.kind === 'repo') {
         if (pathsEqual(route.notePath, nextPath)) return;
         navigate(
           { kind: 'repo', owner: route.owner, repo: route.repo, notePath: nextPath },
-          { replace: true }
+          { replace }
         );
         return;
       }
       if (route.kind === 'new') {
         if (pathsEqual(route.notePath, nextPath)) return;
-        navigate({ kind: 'new', notePath: nextPath }, { replace: true });
+        navigate({ kind: 'new', notePath: nextPath }, { replace });
       }
     },
     [route, navigate]
