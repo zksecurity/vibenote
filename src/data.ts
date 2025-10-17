@@ -42,7 +42,7 @@ import {
   type RemoteFile,
 } from './sync/git-sync';
 import { logError } from './lib/logging';
-import { useReadOnlyFiles } from './data/readonly-notes';
+import { useReadOnlyFiles } from './data/useReadOnlyFiles';
 import { normalizePath } from './lib/util';
 import type { RepoRoute } from './ui/routing';
 
