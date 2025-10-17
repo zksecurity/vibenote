@@ -1,4 +1,6 @@
-import React from 'react';
+// Home screen listing recent repositories and entry points for setup.
+import 'react';
+import { ChevronRight } from 'lucide-react';
 import type { Route } from './routing';
 import type { RecentRepo } from '../storage/local';
 
@@ -56,14 +58,7 @@ export function HomeView({ recents, navigate }: HomeViewProps) {
                 <button className="home-repo" onClick={() => openEntry(entry)}>
                   <span className="home-repo-label">{renderLabel(entry)}</span>
                   <span aria-hidden className="home-repo-arrow">
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor">
-                      <path
-                        d="M6 12 10 8 6 4"
-                        strokeWidth="1.6"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
+                    <ChevronRight aria-hidden size={16} strokeWidth={1.6} />
                   </span>
                 </button>
               </li>

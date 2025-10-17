@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { Route } from './routing';
 import { listRecentRepos, type RecentRepo } from '../storage/local';
 import { repoExists } from '../sync/git-sync';
+import { useOnClickOutside } from './useOnClickOutside';
 
 type Props = {
   route: Route;
@@ -9,6 +10,7 @@ type Props = {
   navigate: (route: Route, options?: { replace?: boolean }) => void;
   onClose: () => void;
   onRecordRecent: (entry: { slug: string; owner?: string; repo?: string; connected?: boolean }) => void;
+  triggerRef?: RefObject<HTMLElement | null>;
 };
 
 type Parsed = { owner: string; repo: string } | null;
@@ -20,13 +22,13 @@ function parseOwnerRepo(input: string): Parsed {
   return { owner, repo };
 }
 
-export function RepoSwitcher({ route, slug, navigate, onClose, onRecordRecent }: Props) {
+export function RepoSwitcher({ route, slug, navigate, onClose, onRecordRecent, triggerRef }: Props) {
   const [input, setInput] = useState('');
   const [recents, setRecents] = useState<RecentRepo[]>(() => listRecentRepos());
   const [checking, setChecking] = useState(false);
   const [exists, setExists] = useState<boolean | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const panelRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useOnClickOutside(onClose, { trigger: triggerRef });
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -34,26 +36,8 @@ export function RepoSwitcher({ route, slug, navigate, onClose, onRecordRecent }:
   }, [route]);
 
   useEffect(() => {
-    // focus input on open
     inputRef.current?.focus();
-    const openedAt = performance.now();
-    const onDoc = (e: MouseEvent) => {
-      // ignore the opening click that triggered the switcher
-      if (performance.now() - openedAt < 200) return;
-      const el = e.target as HTMLElement;
-      if (!panelRef.current) return;
-      if (!el.closest('.repo-switcher-panel')) onClose();
-    };
-    const onEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('click', onDoc);
-    document.addEventListener('keydown', onEsc);
-    return () => {
-      document.removeEventListener('click', onDoc);
-      document.removeEventListener('keydown', onEsc);
-    };
-  }, [onClose]);
+  }, []);
 
   const suggestions = useMemo(() => {
     const q = input.trim().toLowerCase();
