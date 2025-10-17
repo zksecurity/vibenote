@@ -69,9 +69,8 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
     canEdit,
     canRead,
     canSync,
-    repoQueryStatus,
-    needsInstall,
     repoLinked,
+    repoErrorType,
     manageUrl,
 
     activeFile,
@@ -91,11 +90,16 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
   const showSidebar = canRead;
   const isReadOnly = !canEdit && canRead;
   const layoutClass = showSidebar ? '' : 'single';
-  const needsSessionRefresh = needsInstall && repoLinked;
+
   const activeIsMarkdown = activeFile !== undefined && isMarkdownFile(activeFile);
   const canShare =
     hasSession && route.kind === 'repo' && activePath !== undefined && canEdit && activeIsMarkdown;
   const shareDisabled = share.status === 'idle' || share.status === 'loading';
+
+  // error states that require user action (these trigger a custom full sized banner)
+  const needsSessionRefresh = repoLinked && repoErrorType === 'auth';
+  const needsInstall = hasSession && repoErrorType === 'not-found';
+  const needsUserAction = route.kind === 'repo' && (needsSessionRefresh || needsInstall);
 
   // Pure UI state: sidebar visibility and account menu.
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -331,7 +335,51 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
         )}
         <section className="workspace">
           <div className="workspace-body">
-            {route.kind === 'repo' && needsInstall ? (
+            {repoErrorType === 'network' && (
+              <div className="alert warning">
+                <span className="badge">Offline</span>
+                <span className="alert-text">
+                  Could not reach GitHub. {canEdit ? 'You can still edit notes offline.' : ''}
+                </span>
+              </div>
+            )}
+            {repoErrorType === 'rate-limited' && (
+              <div className="alert warning">
+                <span className="badge">Limited</span>
+                <span className="alert-text">
+                  GitHub rate limits temporarily prevent accessing the repository.
+                </span>
+              </div>
+            )}
+            {isReadOnly && (
+              <div className="alert">
+                <span className="badge">Read-only</span>
+                <span className="alert-text">You can view, but not edit files in this repository.</span>
+                {hasSession && (
+                  <button className="btn primary" onClick={actions.openRepoAccess}>
+                    Get Write Access
+                  </button>
+                )}
+              </div>
+            )}
+            {activeFile !== undefined ? (
+              <div className="workspace-panels">
+                {isMarkdownFile(activeFile) ? (
+                  <Editor
+                    key={activeFile.id}
+                    doc={activeFile}
+                    readOnly={!canEdit}
+                    slug={slug}
+                    loadAsset={loadAsset}
+                    onChange={(path, text) => {
+                      actions.saveFile(path, text);
+                    }}
+                  />
+                ) : isBinaryFile(activeFile) || isAssetUrlFile(activeFile) ? (
+                  <AssetViewer key={activeFile.id} file={activeFile} />
+                ) : null}
+              </div>
+            ) : needsUserAction ? (
               <div className="empty-state">
                 <h2>{needsSessionRefresh ? 'Refresh GitHub access' : "Can't access this repository"}</h2>
                 {needsSessionRefresh ? (
@@ -364,62 +412,14 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
                 )}
               </div>
             ) : (
-              <>
-                {repoQueryStatus === 'error' && (
-                  <div className="alert warning">
-                    <span className="badge">Offline</span>
-                    <span className="alert-text">
-                      Could not reach GitHub. You can still edit notes offline.
-                    </span>
-                  </div>
-                )}
-                {repoQueryStatus === 'rate-limited' && (
-                  <div className="alert warning">
-                    <span className="badge">Limited</span>
-                    <span className="alert-text">
-                      GitHub rate limits temporarily prevent accessing the repository.
-                    </span>
-                  </div>
-                )}
-                {isReadOnly && (
-                  <div className="alert">
-                    <span className="badge">Read-only</span>
-                    <span className="alert-text">You can view, but not edit files in this repository.</span>
-                    {hasSession && (
-                      <button className="btn primary" onClick={actions.openRepoAccess}>
-                        Get Write Access
-                      </button>
-                    )}
-                  </div>
-                )}
-                {activeFile !== undefined ? (
-                  <div className="workspace-panels">
-                    {isMarkdownFile(activeFile) ? (
-                      <Editor
-                        key={activeFile.id}
-                        doc={activeFile}
-                        readOnly={!canEdit}
-                        slug={slug}
-                        loadAsset={loadAsset}
-                        onChange={(path, text) => {
-                          actions.saveFile(path, text);
-                        }}
-                      />
-                    ) : isBinaryFile(activeFile) || isAssetUrlFile(activeFile) ? (
-                      <AssetViewer key={activeFile.id} file={activeFile} />
-                    ) : null}
-                  </div>
-                ) : (
-                  <div className="empty-state">
-                    <h2>Welcome to VibeNote</h2>
-                    <p>Select a note from the sidebar or create a new one to get started.</p>
-                    <p>
-                      To sync with GitHub, connect your account and link a repository. Once connected, use{' '}
-                      <strong>Sync now</strong> anytime to pull and push updates.
-                    </p>
-                  </div>
-                )}
-              </>
+              <div className="empty-state">
+                <h2>Welcome to VibeNote</h2>
+                <p>Select a note from the sidebar or create a new one to get started.</p>
+                <p>
+                  To sync with GitHub, connect your account and link a repository. Once connected, use{' '}
+                  <strong>Sync now</strong> anytime to pull and push updates.
+                </p>
+              </div>
             )}
           </div>
           {statusMessage !== undefined && (

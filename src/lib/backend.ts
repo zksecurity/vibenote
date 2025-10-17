@@ -14,12 +14,15 @@ export {
 
 const GITHUB_API_BASE = 'https://api.github.com';
 
+type RepoMetadataErrorKind = 'auth' | 'not-found' | 'forbidden' | 'network' | 'rate-limited' | 'unknown';
+
 type RepoMetadata = {
   isPrivate: boolean | null;
   installed: boolean;
   repoSelected: boolean;
   defaultBranch: string | null;
-  rateLimited?: boolean;
+  errorKind?: RepoMetadataErrorKind;
+  errorMessage?: string; // currently not used
   // Manage URL deep-links into the GitHub App installation settings when known.
   manageUrl?: string | null;
 };
@@ -42,23 +45,44 @@ async function getRepoMetadata(owner: string, repo: string): Promise<RepoMetadat
   let defaultBranch: string | null = null;
   let repoSelected = false;
   let installed = false;
-  let rateLimited = false;
   let userHasPush = false;
   let fetchedWithToken = false;
   let manageUrl: string | undefined;
+  let errorMessage: string | undefined = undefined;
+  let errorKind: RepoMetadataErrorKind | undefined = undefined;
+
+  // Track the first meaningful API failure so the UI can differentiate auth vs install issues.
+  const rememberError = (kind: RepoMetadataErrorKind, message?: string) => {
+    if (!errorKind) errorKind = kind;
+    if (message && !errorMessage) errorMessage = message;
+  };
+
+  const extractMessage = (payload: Record<string, unknown> | null) =>
+    typeof payload?.message === 'string' ? payload.message : undefined;
+  const extractErrorMessage = (err: unknown) => (err instanceof Error ? err.message : 'Unknown error');
+
+  // Wrap GitHub fetches so network errors bubble up as structured metadata instead of exceptions.
+  const fetchRepoWithToken = async (activeToken: string): Promise<Response | null> => {
+    try {
+      return await githubGet(activeToken, `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`);
+    } catch (err) {
+      rememberError('network', extractErrorMessage(err));
+      return null;
+    }
+  };
 
   if (token) {
     try {
-      let repoRes: Response | null = await githubGet(
-        token,
-        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`
-      );
-      if (repoRes.status === 401) {
+      let repoRes: Response | null = await fetchRepoWithToken(token);
+      if (repoRes && repoRes.status === 401) {
+        const unauthorizedBody = await safeJson(repoRes);
+        const unauthorizedMessage = extractMessage(unauthorizedBody) ?? 'GitHub authentication failed';
         const refreshed = await refreshAccessTokenNow();
         token = refreshed;
-        repoRes = refreshed
-          ? await githubGet(refreshed, `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`)
-          : null;
+        repoRes = refreshed ? await fetchRepoWithToken(refreshed) : null;
+        if (refreshed === null) {
+          rememberError('auth', unauthorizedMessage);
+        }
       }
       if (repoRes && repoRes.ok) {
         let json = (await repoRes.json()) as any;
@@ -67,15 +91,33 @@ async function getRepoMetadata(owner: string, repo: string): Promise<RepoMetadat
         let permissions = json && typeof json.permissions === 'object' ? json.permissions : null;
         userHasPush = Boolean(permissions && permissions.push === true);
         fetchedWithToken = true;
-      } else if (repoRes && repoRes.status === 403) {
+      } else if (repoRes) {
         let body = await safeJson(repoRes);
-        let message = body && typeof body.message === 'string' ? body.message.toLowerCase() : '';
-        if (message.includes('rate limit') || message.includes('abuse')) {
-          rateLimited = true;
+        let message = extractMessage(body);
+        switch (repoRes.status) {
+          case 401:
+            rememberError('auth', message ?? 'GitHub authentication failed');
+            break;
+          case 403: {
+            let lowered = (message ?? '').toLowerCase();
+            if (lowered.includes('rate limit') || lowered.includes('abuse')) {
+              rememberError('rate-limited', message ?? 'GitHub rate limited the request');
+            } else {
+              rememberError('forbidden', message ?? 'GitHub denied access to the repository');
+            }
+            break;
+          }
+          case 404:
+            rememberError('not-found', message ?? 'Repository not found for the current user');
+            break;
+          default:
+            rememberError('unknown', message);
+            break;
         }
       }
     } catch (err) {
       console.warn('vibenote: failed to fetch repo metadata with auth', err);
+      rememberError('network', extractErrorMessage(err));
     }
   }
 
@@ -90,6 +132,7 @@ async function getRepoMetadata(owner: string, repo: string): Promise<RepoMetadat
       }
     } catch (err) {
       console.warn('vibenote: failed to resolve installation access', err);
+      rememberError('network', extractErrorMessage(err));
     }
   }
 
@@ -103,12 +146,15 @@ async function getRepoMetadata(owner: string, repo: string): Promise<RepoMetadat
       if (publicInfo.isPrivate === true) isPrivate = true;
       if (publicInfo.notFound) {
         isPrivate = isPrivate ?? null;
+        rememberError('not-found', publicInfo.message ?? 'Repository not found');
       }
-      if (publicInfo.rateLimited) rateLimited = true;
+      if (publicInfo.rateLimited) {
+        rememberError('rate-limited', publicInfo.message ?? 'GitHub rate limited the request');
+      }
     }
   }
 
-  return { isPrivate, installed, repoSelected, defaultBranch, rateLimited, manageUrl };
+  return { isPrivate, installed, repoSelected, defaultBranch, manageUrl, errorMessage, errorKind };
 }
 
 async function getInstallUrl(owner: string, repo: string, returnTo: string): Promise<string> {

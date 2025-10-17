@@ -47,7 +47,14 @@ import { normalizePath } from './lib/util';
 import type { RepoRoute } from './ui/routing';
 
 export { useRepoData };
-export type { RepoAccessState, RepoDataInputs, RepoDataState, RepoDataActions, ShareState };
+export type {
+  RepoAccessState,
+  RepoDataInputs,
+  RepoDataState,
+  RepoDataActions,
+  ShareState,
+  RepoAccessErrorType,
+};
 
 const AUTO_SYNC_MIN_INTERVAL_MS = 60_000;
 const AUTO_SYNC_DEBOUNCE_MS = 10_000;
@@ -59,6 +66,9 @@ type ShareState = {
   error?: string;
 };
 
+// Compact set of error outcomes we surface to the UI for repo access.
+type RepoAccessErrorType = 'auth' | 'not-found' | 'forbidden' | 'network' | 'rate-limited' | 'unknown';
+
 type RepoDataState = {
   // session state
   hasSession: boolean;
@@ -69,10 +79,10 @@ type RepoDataState = {
   canRead: boolean;
   canSync: boolean;
   repoLinked: boolean;
-  needsInstall: boolean;
   repoQueryStatus: RepoQueryStatus;
   manageUrl: string | undefined;
   defaultBranch: string | undefined;
+  repoErrorType: RepoAccessErrorType | undefined;
 
   // repo content
   activeFile: RepoFile | undefined;
@@ -84,8 +94,10 @@ type RepoDataState = {
   autosync: boolean;
   syncing: boolean;
 
-  // general info
+  // note sharing state
   share: ShareState;
+
+  // general info
   statusMessage: string | undefined;
 };
 
@@ -167,8 +179,8 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   let { defaultBranch, manageUrl } = repoAccess;
   let repoOwner = route.kind === 'repo' ? route.owner : undefined;
   let repoName = route.kind === 'repo' ? route.repo : undefined;
-  let accessStatusReady =
-    repoAccess.status === 'ready' || repoAccess.status === 'rate-limited' || repoAccess.status === 'error';
+  let accessStatusReady = repoAccess.status === 'ready' || repoAccess.status === 'error';
+  let accessStatusUnknown = !accessStatusReady || repoAccess.errorType === 'network';
 
   let desiredPath = normalizePath(route.notePath);
 
@@ -186,7 +198,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   // note that we are optimistic about write access until the access check completes,
   // to avoid flickering the UI when revisiting a known writable repo
   let canEdit =
-    route.kind === 'new' || (hasSession && (repoAccess.level === 'write' || (!accessStatusReady && linked)));
+    route.kind === 'new' || (hasSession && (repoAccess.level === 'write' || (accessStatusUnknown && linked)));
 
   let canSync = canEdit && route.kind === 'repo' && linked;
 
@@ -598,8 +610,8 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     canSync,
     repoLinked: linked,
     repoQueryStatus: repoAccess.status,
-    needsInstall: repoAccess.needsInstall,
     manageUrl,
+    repoErrorType: repoAccess.errorType,
 
     activeFile,
     activePath,
@@ -652,28 +664,27 @@ function useLocalRepoSnapshot(slug: string) {
 }
 
 type RepoAccessLevel = 'none' | 'read' | 'write';
-type RepoQueryStatus = 'unknown' | 'ready' | 'rate-limited' | 'error';
+type RepoQueryStatus = 'unknown' | 'ready' | 'error';
 
 type RepoAccessState = {
   level: RepoAccessLevel;
   status: RepoQueryStatus;
   metadata?: RepoMetadata;
   defaultBranch?: string;
-  error?: string;
-  rateLimited: boolean;
-  needsInstall: boolean;
   manageUrl?: string;
   isPrivate?: boolean;
+  errorType?: RepoAccessErrorType;
+  errorMessage?: string;
 };
 
 const initialAccessState: RepoAccessState = {
   level: 'none',
   status: 'unknown',
   defaultBranch: undefined,
-  rateLimited: false,
-  needsInstall: false,
   manageUrl: undefined,
   isPrivate: undefined,
+  errorType: undefined,
+  errorMessage: undefined,
 };
 
 function useRepoAccess(params: { route: RepoRoute; sessionToken: string | undefined }): RepoAccessState {
@@ -702,7 +713,8 @@ function useRepoAccess(params: { route: RepoRoute; sessionToken: string | undefi
           ...initialAccessState,
           level: 'none',
           status: 'error',
-          error: message,
+          errorType: 'network',
+          errorMessage: message,
         };
         setState((prev) => (areAccessStatesEqual(prev, errorState) ? prev : errorState));
       }
@@ -724,26 +736,21 @@ function deriveAccessFromMetadata({
   hasSession: boolean;
 }): RepoAccessState {
   let level: RepoAccessLevel = 'none';
-  if (meta.repoSelected && hasSession) {
-    level = 'write';
-  } else if (meta.repoSelected) {
-    level = 'read';
-  } else if (meta.isPrivate === false) {
-    level = 'read';
-  } else {
-    level = 'none';
-  }
+  if (meta.repoSelected && hasSession) level = 'write';
+  else if (meta.repoSelected || meta.isPrivate === false) level = 'read';
+
+  let status: RepoQueryStatus = 'ready';
+  if (meta.errorKind !== undefined) status = 'error';
 
   return {
     level,
-    status: meta.rateLimited ? 'rate-limited' : 'ready',
+    status,
     metadata: meta,
     defaultBranch: meta.defaultBranch ?? undefined,
-    error: undefined,
-    rateLimited: meta.rateLimited === true,
-    needsInstall: hasSession && level === 'none',
     manageUrl: meta.manageUrl ?? undefined,
     isPrivate: meta.isPrivate ?? undefined,
+    errorType: meta.errorKind,
+    errorMessage: meta.errorMessage,
   };
 }
 
@@ -939,10 +946,9 @@ function areAccessStatesEqual(a: RepoAccessState, b: RepoAccessState): boolean {
     a.status === b.status &&
     a.metadata === b.metadata &&
     a.defaultBranch === b.defaultBranch &&
-    a.error === b.error &&
-    a.rateLimited === b.rateLimited &&
-    a.needsInstall === b.needsInstall &&
     a.manageUrl === b.manageUrl &&
-    a.isPrivate === b.isPrivate
+    a.isPrivate === b.isPrivate &&
+    a.errorType === b.errorType &&
+    a.errorMessage === b.errorMessage
   );
 }
