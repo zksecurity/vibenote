@@ -1,5 +1,9 @@
 // File tree sidebar for browsing, editing, and managing repo notes.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { File as FileIcon, Folder as FolderIcon, FolderOpen as FolderOpenIcon } from 'lucide-react';
+
+const treeIconSize = 16;
+const treeIconStrokeWidth = 1.8;
 
 export type FileEntry = {
   name: string; // filename including extension
@@ -647,9 +651,19 @@ function Icon({
   kind: 'file' | 'folder' | 'folder-open' | 'file-leaf' | 'file-md' | 'folder-closed' | 'folder';
   open?: boolean;
 }) {
-  const isFolder = kind === 'folder';
+  let isFolder = kind === 'folder';
+  let className = 'tree-icon';
+  let IconSvg = FileIcon;
+  if (isFolder) {
+    IconSvg = open ? FolderOpenIcon : FolderIcon;
+    className += open ? ' folder-open' : ' folder';
+  } else {
+    className += ' file';
+  }
   return (
-    <span className={`tree-icon ${isFolder ? (open ? 'folder-open' : 'folder') : 'file'}`} aria-hidden />
+    <span className={className} aria-hidden>
+      <IconSvg size={treeIconSize} strokeWidth={treeIconStrokeWidth} />
+    </span>
   );
 }
 
