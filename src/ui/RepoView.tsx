@@ -1,5 +1,5 @@
 // Primary workspace view combining repo chrome, file tree, and editor panels.
-import { useMemo, useState, useEffect, useCallback } from 'react';
+import { useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { FileTree, type FileEntry } from './FileTree';
 import { Editor } from './Editor';
 import { AssetViewer } from './AssetViewer';
@@ -20,6 +20,7 @@ import type { RepoRoute, Route } from './routing';
 import { normalizePath, pathsEqual } from '../lib/util';
 import { useRepoAssetLoader } from './useRepoAssetLoader';
 import { ShareDialog } from './ShareDialog';
+import { useOnClickOutside } from './useOnClickOutside';
 
 type RepoViewProps = {
   slug: string;
@@ -100,18 +101,10 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
-
-  // Close the account dropdown when clicking anywhere else on the page.
-  useEffect(() => {
-    const onDoc = (event: MouseEvent) => {
-      const target = event.target as HTMLElement;
-      if (!target.closest('.account-menu') && !target.closest('.account-btn')) {
-        setMenuOpen(false);
-      }
-    };
-    document.addEventListener('click', onDoc);
-    return () => document.removeEventListener('click', onDoc);
-  }, []);
+  const repoButtonRef = useRef<HTMLButtonElement | null>(null);
+  const shareButtonRef = useRef<HTMLButtonElement | null>(null);
+  const accountButtonRef = useRef<HTMLButtonElement | null>(null);
+  const accountMenuRef = useOnClickOutside(() => setMenuOpen(false), { trigger: accountButtonRef });
 
   useEffect(() => {
     if (!shareOpen) return;
@@ -192,8 +185,10 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
           {route.kind === 'repo' ? (
             <span className="repo-anchor align-workspace">
               <button
+                type="button"
                 className="btn ghost repo-btn"
-                onClick={() => setShowSwitcher(true)}
+                onClick={() => setShowSwitcher((v) => !v)}
+                ref={repoButtonRef}
                 title={repoButtonTitle}
               >
                 <GitHubIcon />
@@ -219,7 +214,8 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
                 <button
                   type="button"
                   className="btn ghost repo-btn repo-btn-empty"
-                  onClick={() => setShowSwitcher(true)}
+                  onClick={() => setShowSwitcher((v) => !v)}
+                  ref={repoButtonRef}
                   disabled={syncing}
                   title={repoButtonTitle}
                 >
@@ -243,6 +239,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
                 <button
                   className={`btn icon sync-btn${share.link ? ' sync-btn-active' : ''}`}
                   onClick={() => setShareOpen(true)}
+                  ref={shareButtonRef}
                   title={
                     share.link
                       ? 'Manage share link'
@@ -273,6 +270,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
                   className="btn ghost account-btn"
                   onClick={() => setMenuOpen((v) => !v)}
                   aria-label="Account menu"
+                  ref={accountButtonRef}
                 >
                   {userAvatarSrc ? (
                     <img src={userAvatarSrc} alt={user.login} />
@@ -435,7 +433,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
       {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
 
       {menuOpen && user !== undefined && (
-        <div className="account-menu">
+        <div className="account-menu" ref={accountMenuRef}>
           <div className="account-menu-header">
             <div className="account-menu-avatar" aria-hidden>
               {userAvatarSrc ? (
@@ -472,12 +470,14 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
           navigate={navigate}
           onRecordRecent={recordRecent}
           onClose={() => setShowSwitcher(false)}
+          triggerRef={repoButtonRef}
         />
       )}
       {shareOpen && (
         <ShareDialog
           share={share}
           notePath={activePath}
+          triggerRef={shareButtonRef}
           onClose={() => setShareOpen(false)}
           onCreate={actions.createShareLink}
           onRevoke={actions.revokeShareLink}

@@ -1,6 +1,7 @@
 // Modal that appears when the user clicks the "Share" icon in the file header.
-import { useState, useEffect, type FocusEvent, type MouseEvent } from 'react';
+import { useState, useEffect, type FocusEvent, type MouseEvent, type RefObject } from 'react';
 import { CloseIcon, CopyIcon, CopySuccessIcon, CopyErrorIcon } from './RepoIcons';
+import { useOnClickOutside } from './useOnClickOutside';
 import { type ShareState } from '../data';
 
 export { ShareDialog, type ShareDialogProps };
@@ -8,13 +9,22 @@ export { ShareDialog, type ShareDialogProps };
 type ShareDialogProps = {
   share: ShareState;
   notePath: string | undefined;
+  triggerRef: RefObject<HTMLElement | null>;
   onClose: () => void;
   onCreate: () => Promise<void>;
   onRevoke: () => Promise<void>;
   onRefresh: () => Promise<void>;
 };
 
-function ShareDialog({ share, notePath, onClose, onCreate, onRevoke, onRefresh }: ShareDialogProps) {
+function ShareDialog({
+  share,
+  notePath,
+  triggerRef,
+  onClose,
+  onCreate,
+  onRevoke,
+  onRefresh,
+}: ShareDialogProps) {
   let [lastVariant, setLastVariant] = useState<'unshared' | 'shared'>(share.link ? 'shared' : 'unshared');
   let [lastShareUrl, setLastShareUrl] = useState(share.link?.url ?? '');
   const shareUrl = share.link?.url ?? lastShareUrl;
@@ -43,6 +53,8 @@ function ShareDialog({ share, notePath, onClose, onCreate, onRevoke, onRefresh }
   useEffect(() => {
     setCopyState('idle');
   }, [shareUrl]);
+
+  const dialogRef = useOnClickOutside(onClose, { trigger: triggerRef });
 
   const copyLink = async () => {
     if (!shareUrl) return;
@@ -91,7 +103,11 @@ function ShareDialog({ share, notePath, onClose, onCreate, onRevoke, onRefresh }
     }
     const isLoading = share.status === 'loading';
     const activeVariant =
-      share.status === 'loading' || share.status === 'idle' ? lastVariant : share.link ? 'shared' : 'unshared';
+      share.status === 'loading' || share.status === 'idle'
+        ? lastVariant
+        : share.link
+        ? 'shared'
+        : 'unshared';
     let copyButtonIcon = <CopyIcon />;
     let copyButtonLabel = 'Copy link';
     if (copyState === 'copied') {
@@ -143,7 +159,7 @@ function ShareDialog({ share, notePath, onClose, onCreate, onRevoke, onRefresh }
 
   return (
     <div className="share-overlay" role="dialog" aria-modal="true" aria-label="Share note dialog">
-      <div className="share-dialog">
+      <div className="share-dialog" ref={dialogRef}>
         <div className="share-dialog-header">
           <h2 className="share-dialog-title">Share this note</h2>
           <button className="btn ghost icon" onClick={onClose} aria-label="Close share dialog">
