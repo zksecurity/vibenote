@@ -41,7 +41,6 @@ describe('getRepoMetadata auth fallbacks', () => {
       ok: false,
       isPrivate: true,
       defaultBranch: null,
-      rateLimited: false,
       notFound: false,
     });
 
@@ -66,7 +65,6 @@ describe('getRepoMetadata auth fallbacks', () => {
     expect(metadata.isPrivate).toBe(true);
     expect(metadata.defaultBranch).toBeNull();
     expect(metadata.manageUrl).toBeUndefined();
-    expect(metadata.rateLimited).toBe(false);
     expect(metadata.errorKind).toBe('auth');
   });
 });

@@ -94,8 +94,10 @@ type RepoDataState = {
   autosync: boolean;
   syncing: boolean;
 
-  // general info
+  // note sharing state
   share: ShareState;
+
+  // general info
   statusMessage: string | undefined;
 };
 
@@ -177,8 +179,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   let { defaultBranch, manageUrl } = repoAccess;
   let repoOwner = route.kind === 'repo' ? route.owner : undefined;
   let repoName = route.kind === 'repo' ? route.repo : undefined;
-  let accessStatusReady =
-    repoAccess.status === 'ready' || repoAccess.status === 'rate-limited' || repoAccess.status === 'error';
+  let accessStatusReady = repoAccess.status === 'ready' || repoAccess.status === 'error';
   let accessStatusUnknown = !accessStatusReady || repoAccess.errorType === 'network';
 
   let desiredPath = normalizePath(route.notePath);
@@ -663,14 +664,13 @@ function useLocalRepoSnapshot(slug: string) {
 }
 
 type RepoAccessLevel = 'none' | 'read' | 'write';
-type RepoQueryStatus = 'unknown' | 'ready' | 'rate-limited' | 'error';
+type RepoQueryStatus = 'unknown' | 'ready' | 'error';
 
 type RepoAccessState = {
   level: RepoAccessLevel;
   status: RepoQueryStatus;
   metadata?: RepoMetadata;
   defaultBranch?: string;
-  rateLimited: boolean;
   manageUrl?: string;
   isPrivate?: boolean;
   errorType?: RepoAccessErrorType;
@@ -681,7 +681,6 @@ const initialAccessState: RepoAccessState = {
   level: 'none',
   status: 'unknown',
   defaultBranch: undefined,
-  rateLimited: false,
   manageUrl: undefined,
   isPrivate: undefined,
   errorType: undefined,
@@ -741,15 +740,13 @@ function deriveAccessFromMetadata({
   else if (meta.repoSelected || meta.isPrivate === false) level = 'read';
 
   let status: RepoQueryStatus = 'ready';
-  if (meta.rateLimited) status = 'rate-limited';
-  else if (meta.errorKind !== undefined) status = 'error';
+  if (meta.errorKind !== undefined) status = 'error';
 
   return {
     level,
     status,
     metadata: meta,
     defaultBranch: meta.defaultBranch ?? undefined,
-    rateLimited: meta.rateLimited === true,
     manageUrl: meta.manageUrl ?? undefined,
     isPrivate: meta.isPrivate ?? undefined,
     errorType: meta.errorKind,
@@ -949,7 +946,6 @@ function areAccessStatesEqual(a: RepoAccessState, b: RepoAccessState): boolean {
     a.status === b.status &&
     a.metadata === b.metadata &&
     a.defaultBranch === b.defaultBranch &&
-    a.rateLimited === b.rateLimited &&
     a.manageUrl === b.manageUrl &&
     a.isPrivate === b.isPrivate &&
     a.errorType === b.errorType &&

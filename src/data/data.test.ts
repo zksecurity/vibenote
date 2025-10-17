@@ -108,7 +108,6 @@ const writableMeta: RepoMetadata = {
   repoSelected: true,
   defaultBranch: 'main',
   manageUrl: null,
-  rateLimited: false,
 };
 
 const readOnlyMeta: RepoMetadata = {
@@ -117,7 +116,6 @@ const readOnlyMeta: RepoMetadata = {
   repoSelected: false,
   defaultBranch: 'main',
   manageUrl: null,
-  rateLimited: false,
 };
 
 const baseShare: ShareLink = {
@@ -869,7 +867,6 @@ describe('useRepoData', () => {
       repoSelected: false,
       defaultBranch: null,
       manageUrl: null,
-      rateLimited: false,
       errorMessage: 'Bad credentials',
       errorKind: 'auth',
     };

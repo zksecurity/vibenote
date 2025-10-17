@@ -69,7 +69,6 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
     canEdit,
     canRead,
     canSync,
-    repoQueryStatus,
     repoLinked,
     repoErrorType,
     manageUrl,
@@ -344,7 +343,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
                 </span>
               </div>
             )}
-            {repoQueryStatus === 'rate-limited' && (
+            {repoErrorType === 'rate-limited' && (
               <div className="alert warning">
                 <span className="badge">Limited</span>
                 <span className="alert-text">

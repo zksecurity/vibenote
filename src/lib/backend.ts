@@ -21,11 +21,10 @@ type RepoMetadata = {
   installed: boolean;
   repoSelected: boolean;
   defaultBranch: string | null;
-  rateLimited?: boolean;
+  errorKind?: RepoMetadataErrorKind;
+  errorMessage?: string; // currently not used
   // Manage URL deep-links into the GitHub App installation settings when known.
   manageUrl?: string | null;
-  errorKind?: RepoMetadataErrorKind;
-  errorMessage?: string;
 };
 
 type ShareLink = {
@@ -46,7 +45,6 @@ async function getRepoMetadata(owner: string, repo: string): Promise<RepoMetadat
   let defaultBranch: string | null = null;
   let repoSelected = false;
   let installed = false;
-  let rateLimited = false;
   let userHasPush = false;
   let fetchedWithToken = false;
   let manageUrl: string | undefined;
@@ -103,7 +101,6 @@ async function getRepoMetadata(owner: string, repo: string): Promise<RepoMetadat
           case 403: {
             let lowered = (message ?? '').toLowerCase();
             if (lowered.includes('rate limit') || lowered.includes('abuse')) {
-              rateLimited = true;
               rememberError('rate-limited', message ?? 'GitHub rate limited the request');
             } else {
               rememberError('forbidden', message ?? 'GitHub denied access to the repository');
@@ -151,23 +148,13 @@ async function getRepoMetadata(owner: string, repo: string): Promise<RepoMetadat
         isPrivate = isPrivate ?? null;
         rememberError('not-found', publicInfo.message ?? 'Repository not found');
       }
-      if (publicInfo.rateLimited) rateLimited = true;
       if (publicInfo.rateLimited) {
         rememberError('rate-limited', publicInfo.message ?? 'GitHub rate limited the request');
       }
     }
   }
 
-  return {
-    isPrivate,
-    installed,
-    repoSelected,
-    defaultBranch,
-    rateLimited,
-    manageUrl,
-    errorMessage,
-    errorKind,
-  };
+  return { isPrivate, installed, repoSelected, defaultBranch, manageUrl, errorMessage, errorKind };
 }
 
 async function getInstallUrl(owner: string, repo: string, returnTo: string): Promise<string> {
