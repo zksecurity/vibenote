@@ -790,10 +790,11 @@ export function moveFilePath(slug: string, id: string, toPath: string) {
   mutateFile(slug, id, (doc) => {
     if (doc.path === normalizedPath) return null;
     let dir = extractDir(normalizedPath);
+    let title = stripExtension(basename(normalizedPath));
     let updatedAt = Date.now();
     return {
-      doc: { ...doc, path: normalizedPath, dir, updatedAt },
-      indexPatch: { path: normalizedPath, dir },
+      doc: { ...doc, path: normalizedPath, dir, title, updatedAt },
+      indexPatch: { path: normalizedPath, dir, title },
     };
   });
   rebuildFolderIndex(slug);
