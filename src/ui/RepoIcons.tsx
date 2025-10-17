@@ -28,9 +28,9 @@ function CloseIcon(): ReactElement {
   return <X aria-hidden size={16} strokeWidth={iconStrokeWidth} />;
 }
 
-function SyncIcon({ spinning }: { spinning: boolean }): ReactElement {
+function SyncIcon({ syncing }: { syncing: boolean }): ReactElement {
   let className = 'sync-icon';
-  if (spinning) className += ' spinning';
+  if (syncing) className += ' syncing';
   return <RefreshCw aria-hidden className={className} size={18} strokeWidth={iconStrokeWidth} />;
 }
 

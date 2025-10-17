@@ -92,7 +92,8 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
   const layoutClass = showSidebar ? '' : 'single';
   const needsSessionRefresh = needsInstall && repoLinked;
   const activeIsMarkdown = activeFile !== undefined && isMarkdownFile(activeFile);
-  const canShare = hasSession && route.kind === 'repo' && activePath !== undefined && canEdit && activeIsMarkdown;
+  const canShare =
+    hasSession && route.kind === 'repo' && activePath !== undefined && canEdit && activeIsMarkdown;
   const shareDisabled = share.status === 'idle' || share.status === 'loading';
 
   // Pure UI state: sidebar visibility and account menu.
@@ -240,7 +241,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
             <>
               {canShare && (
                 <button
-                  className={`btn icon sync-btn share-btn${share.link ? ' share-btn-active' : ''}`}
+                  className={`btn icon sync-btn${share.link ? ' sync-btn-active' : ''}`}
                   onClick={() => setShareOpen(true)}
                   title={
                     share.link
@@ -258,13 +259,13 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
               )}
               {canSync && (
                 <button
-                  className={`btn secondary sync-btn ${syncing ? 'is-syncing' : ''}`}
+                  className={`btn icon sync-btn ${syncing ? 'syncing' : ''}`}
                   onClick={actions.syncNow}
                   disabled={syncing}
                   aria-label={syncing ? 'Syncing' : 'Sync now'}
                   title={syncing ? 'Syncing…' : 'Sync now'}
                 >
-                  <SyncIcon spinning={syncing} />
+                  <SyncIcon syncing={syncing} />
                 </button>
               )}
               {user !== undefined && (
