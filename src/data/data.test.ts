@@ -872,8 +872,6 @@ describe('useRepoData', () => {
       defaultBranch: null,
       manageUrl: null,
       rateLimited: false,
-      authFailed: true,
-      errorStatus: 401,
       errorMessage: 'Bad credentials',
       errorKind: 'auth',
     };

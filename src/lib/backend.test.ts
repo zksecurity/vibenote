@@ -67,8 +67,6 @@ describe('getRepoMetadata auth fallbacks', () => {
     expect(metadata.defaultBranch).toBeNull();
     expect(metadata.manageUrl).toBeUndefined();
     expect(metadata.rateLimited).toBe(false);
-    expect(metadata.authFailed).toBe(true);
     expect(metadata.errorKind).toBe('auth');
-    expect(metadata.errorStatus).toBe(401);
   });
 });

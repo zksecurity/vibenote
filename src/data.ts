@@ -677,7 +677,6 @@ type RepoAccessState = {
   manageUrl?: string;
   isPrivate?: boolean;
   errorType?: RepoAccessErrorType;
-  errorStatus?: number;
   errorMessage?: string;
 };
 
@@ -690,7 +689,6 @@ const initialAccessState: RepoAccessState = {
   manageUrl: undefined,
   isPrivate: undefined,
   errorType: undefined,
-  errorStatus: undefined,
   errorMessage: undefined,
 };
 
@@ -755,26 +753,10 @@ function deriveAccessFromMetadata({
   }
 
   // Reduce GitHub metadata down to a single error label the UI can render.
-  const resolveErrorType = (): RepoAccessErrorType | undefined => {
-    if (meta.errorKind) return meta.errorKind;
-    if (meta.authFailed) return 'auth';
-    if (meta.notFound) return 'not-found';
-    if (meta.forbidden) return 'forbidden';
-    if (meta.rateLimited) return 'rate-limited';
-    if (meta.networkError) return 'network';
-    if (meta.errorStatus !== null && meta.errorStatus !== undefined) return 'unknown';
-    if (meta.errorMessage) return 'unknown';
-    return undefined;
-  };
-
-  const errorType = resolveErrorType();
 
   let status: RepoQueryStatus = 'ready';
-  if (meta.rateLimited) {
-    status = 'rate-limited';
-  } else if (errorType !== undefined) {
-    status = 'error';
-  }
+  if (meta.rateLimited) status = 'rate-limited';
+  else if (meta.errorKind !== undefined) status = 'error';
 
   return {
     level,
@@ -786,9 +768,8 @@ function deriveAccessFromMetadata({
     needsInstall: hasSession && level === 'none',
     manageUrl: meta.manageUrl ?? undefined,
     isPrivate: meta.isPrivate ?? undefined,
-    errorType,
-    errorStatus: meta.errorStatus ?? undefined,
-    errorMessage: meta.errorMessage ?? undefined,
+    errorType: meta.errorKind,
+    errorMessage: meta.errorMessage,
   };
 }
 
@@ -990,7 +971,6 @@ function areAccessStatesEqual(a: RepoAccessState, b: RepoAccessState): boolean {
     a.manageUrl === b.manageUrl &&
     a.isPrivate === b.isPrivate &&
     a.errorType === b.errorType &&
-    a.errorStatus === b.errorStatus &&
     a.errorMessage === b.errorMessage
   );
 }
