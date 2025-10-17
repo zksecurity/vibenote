@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { Route } from './routing';
 import { listRecentRepos, type RecentRepo } from '../storage/local';
 import { repoExists } from '../sync/git-sync';
