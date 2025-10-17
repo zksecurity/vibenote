@@ -1067,7 +1067,7 @@ textarea:focus-visible {
 .share-copy-btn {
   padding: 10px 14px;
   border-radius: 10px;
-  min-width: 116px;
+  min-width: 132px;
 }
 
 .share-copy-btn svg {
