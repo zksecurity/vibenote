@@ -15,9 +15,30 @@ type ShareDialogProps = {
 };
 
 function ShareDialog({ share, notePath, onClose, onCreate, onRevoke, onRefresh }: ShareDialogProps) {
-  const shareUrl = share.link?.url ?? '';
+  let [lastVariant, setLastVariant] = useState<'unshared' | 'shared'>(share.link ? 'shared' : 'unshared');
+  let [lastShareUrl, setLastShareUrl] = useState(share.link?.url ?? '');
+  const shareUrl = share.link?.url ?? lastShareUrl;
   const noteLabel = notePath ? notePath.split('/').pop() ?? notePath : 'note';
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
+
+  useEffect(() => {
+    if (share.status === 'ready') {
+      if (share.link) {
+        setLastVariant('shared');
+        setLastShareUrl(share.link.url);
+      } else {
+        setLastVariant('unshared');
+        setLastShareUrl('');
+      }
+    }
+  }, [share.status, share.link]);
+
+  useEffect(() => {
+    if (share.status === 'idle') {
+      setLastVariant('unshared');
+      setLastShareUrl('');
+    }
+  }, [share.status]);
 
   useEffect(() => {
     setCopyState('idle');
@@ -57,9 +78,6 @@ function ShareDialog({ share, notePath, onClose, onCreate, onRevoke, onRefresh }
   }
 
   const renderBody = () => {
-    if (share.status === 'loading') {
-      return <p className="share-status">Checking share status...</p>;
-    }
     if (share.status === 'error') {
       return (
         <div className="share-error">
@@ -71,18 +89,27 @@ function ShareDialog({ share, notePath, onClose, onCreate, onRevoke, onRefresh }
         </div>
       );
     }
-    if (share.link) {
-      let copyButtonIcon = <CopyIcon />;
-      let copyButtonLabel = 'Copy link';
-      if (copyState === 'copied') {
-        copyButtonIcon = <CopySuccessIcon />;
-        copyButtonLabel = 'Copied';
-      } else if (copyState === 'error') {
-        copyButtonIcon = <CopyErrorIcon />;
-        copyButtonLabel = 'Copy failed';
-      }
-      return (
-        <div className="share-success">
+    const isLoading = share.status === 'loading';
+    const activeVariant =
+      share.status === 'loading' || share.status === 'idle' ? lastVariant : share.link ? 'shared' : 'unshared';
+    let copyButtonIcon = <CopyIcon />;
+    let copyButtonLabel = 'Copy link';
+    if (copyState === 'copied') {
+      copyButtonIcon = <CopySuccessIcon />;
+      copyButtonLabel = 'Copied';
+    } else if (copyState === 'error') {
+      copyButtonIcon = <CopyErrorIcon />;
+      copyButtonLabel = 'Copy failed';
+    }
+    return (
+      <div className="share-flow" data-variant={activeVariant} data-busy={isLoading}>
+        <div className="share-panel share-create" data-active={activeVariant === 'unshared'}>
+          <button className="btn primary" onClick={onCreate} disabled={isLoading}>
+            {isLoading ? 'Loading...' : 'Create share link'}
+          </button>
+          <p className="share-hint">Links are unlisted and anyone with the URL can read the note.</p>
+        </div>
+        <div className="share-panel share-success" data-active={activeVariant === 'shared'}>
           <div className="share-url-row">
             <input
               className="share-url-input"
@@ -92,31 +119,24 @@ function ShareDialog({ share, notePath, onClose, onCreate, onRevoke, onRefresh }
               onFocus={handleShareUrlFocus}
               onClick={handleShareUrlClick}
               title={shareUrl}
+              placeholder={shareUrl === '' ? 'Loading link...' : undefined}
             />
             <button
               className="btn secondary share-copy-btn"
               data-state={copyState}
               onClick={copyLink}
               type="button"
-              disabled={!shareUrl}
+              disabled={!shareUrl || isLoading}
             >
               {copyButtonIcon}
               <span className="share-copy-btn-label">{copyButtonLabel}</span>
             </button>
           </div>
           <p className="share-hint">The link stays live until you revoke it.</p>
-          <button className="btn subtle share-revoke" onClick={onRevoke}>
+          <button className="btn subtle share-revoke" onClick={onRevoke} disabled={isLoading}>
             Revoke link
           </button>
         </div>
-      );
-    }
-    return (
-      <div className="share-create">
-        <button className="btn primary" onClick={onCreate}>
-          Create share link
-        </button>
-        <p className="share-hint">Links are unlisted and anyone with the URL can read the note.</p>
       </div>
     );
   };

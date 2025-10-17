@@ -1137,6 +1137,29 @@ textarea:focus-visible {
   color: #b42318;
 }
 
+.share-flow {
+  position: relative;
+  min-height: 152px;
+}
+
+.share-panel {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(10px);
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+
+.share-panel[data-active='true'] {
+  position: relative;
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+
 .share-success,
 .share-create {
   display: flex;
