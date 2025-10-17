@@ -57,16 +57,16 @@ async function getRepoMetadata(owner: string, repo: string): Promise<RepoMetadat
     if (message && !errorMessage) errorMessage = message;
   };
 
-  const extractMessage = (payload: Record<string, unknown> | null) => {
-    return typeof payload?.message === 'string' ? payload.message : undefined;
-  };
+  const extractMessage = (payload: Record<string, unknown> | null) =>
+    typeof payload?.message === 'string' ? payload.message : undefined;
+  const extractErrorMessage = (err: unknown) => (err instanceof Error ? err.message : 'Unknown error');
 
   // Wrap GitHub fetches so network errors bubble up as structured metadata instead of exceptions.
   const fetchRepoWithToken = async (activeToken: string): Promise<Response | null> => {
     try {
       return await githubGet(activeToken, `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`);
     } catch (err) {
-      rememberError('network', err instanceof Error ? err.message : String(err ?? 'unknown-error'));
+      rememberError('network', extractErrorMessage(err));
       return null;
     }
   };
@@ -117,7 +117,7 @@ async function getRepoMetadata(owner: string, repo: string): Promise<RepoMetadat
       }
     } catch (err) {
       console.warn('vibenote: failed to fetch repo metadata with auth', err);
-      rememberError('network', err instanceof Error ? err.message : String(err));
+      rememberError('network', extractErrorMessage(err));
     }
   }
 
@@ -132,7 +132,7 @@ async function getRepoMetadata(owner: string, repo: string): Promise<RepoMetadat
       }
     } catch (err) {
       console.warn('vibenote: failed to resolve installation access', err);
-      rememberError('network', err instanceof Error ? err.message : String(err));
+      rememberError('network', extractErrorMessage(err));
     }
   }
 
