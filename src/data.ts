@@ -247,6 +247,8 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   }, [canEdit, activeId]);
 
   // When the loaded doc changes path (e.g., rename or sync or restoring last active), push the route forward.
+  // TODO this can also fire also when desiredPath changes _more quickly_ than activePath, reverting the route change
+  // solved with a setTimeout hack below in `ensureActivePath()`
   useEffect(() => {
     if (activeFile?.path === undefined) return;
     if (pathsEqual(desiredPath, activeFile.path)) return;
@@ -378,7 +380,8 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
 
   const ensureActivePath = (nextPath: string | undefined, options?: { replace?: boolean }) => {
     if (pathsEqual(route.notePath, nextPath)) return;
-    setActivePath(nextPath, options);
+    // hack: we navigate on the next event loop task to give React state time to update active doc
+    setTimeout(() => setActivePath(nextPath, options), 0);
   };
 
   // "Connect GitHub" button in the header

@@ -42,24 +42,18 @@ export function RepoView(props: RepoViewProps) {
 }
 
 function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
-  const setActivePath = useCallback(
-    (nextPath: string | undefined, options?: { replace?: boolean }) => {
-      let replace = options?.replace === true;
-      if (route.kind === 'repo') {
-        if (pathsEqual(route.notePath, nextPath)) return;
-        navigate(
-          { kind: 'repo', owner: route.owner, repo: route.repo, notePath: nextPath },
-          { replace }
-        );
-        return;
-      }
-      if (route.kind === 'new') {
-        if (pathsEqual(route.notePath, nextPath)) return;
-        navigate({ kind: 'new', notePath: nextPath }, { replace });
-      }
-    },
-    [route, navigate]
-  );
+  const setActivePath = (nextPath: string | undefined, options?: { replace?: boolean }) => {
+    let replace = options?.replace === true;
+    if (route.kind === 'repo') {
+      if (pathsEqual(route.notePath, nextPath)) return;
+      navigate({ kind: 'repo', owner: route.owner, repo: route.repo, notePath: nextPath }, { replace });
+      return;
+    }
+    if (route.kind === 'new') {
+      if (pathsEqual(route.notePath, nextPath)) return;
+      navigate({ kind: 'new', notePath: nextPath }, { replace });
+    }
+  };
 
   // Data layer exposes repo-backed state and the high-level actions the UI needs.
   const { state, actions } = useRepoData({ slug, route, recordRecent, setActivePath });

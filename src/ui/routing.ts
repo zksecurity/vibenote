@@ -10,7 +10,9 @@ type Route =
   | { kind: 'start' }
   | { kind: 'repo'; owner: string; repo: string; notePath?: string };
 
-type RepoRoute = { kind: 'new'; notePath?: string } | { kind: 'repo'; owner: string; repo: string; notePath?: string };
+type RepoRoute =
+  | { kind: 'new'; notePath?: string }
+  | { kind: 'repo'; owner: string; repo: string; notePath?: string };
 
 const HOME_ROUTE: Route = { kind: 'home' };
 const NEW_ROUTE: Route = { kind: 'new' };
