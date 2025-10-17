@@ -156,7 +156,6 @@ describe('syncBidirectional', () => {
     expect(notes).toHaveLength(1);
     const doc = store.loadFileById(notes[0]?.id ?? '');
     expect(doc?.path).toBe('nested/Nested.md');
-    expect(doc?.dir).toBe('nested');
     expect(doc?.content).toBe('# nested');
   });
 
@@ -182,14 +181,17 @@ describe('syncBidirectional', () => {
     const interceptFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
       const url = new URL(request.url);
-      if (request.method.toUpperCase() === 'GET' && url.pathname === '/repos/user/repo/contents/assets/large.png') {
+      if (
+        request.method.toUpperCase() === 'GET' &&
+        url.pathname === '/repos/user/repo/contents/assets/large.png'
+      ) {
         const upstream = await originalFetch(input, init);
         const json = await upstream.json();
         capturedSha = typeof json?.sha === 'string' ? json.sha : null;
-        return new Response(
-          JSON.stringify({ ...json, content: '' }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } }
-        );
+        return new Response(JSON.stringify({ ...json, content: '' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
       }
       if (
         request.method.toUpperCase() === 'GET' &&

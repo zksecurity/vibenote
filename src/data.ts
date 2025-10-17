@@ -14,6 +14,7 @@ import {
   setLastActiveFileId,
   getRepoStore,
   computeSyncedHash,
+  extractDir,
 } from './storage/local';
 import {
   signInWithGitHubApp,
@@ -128,13 +129,7 @@ type RepoDataActions = {
 type RepoDataInputs = {
   slug: string;
   route: RepoRoute;
-  recordRecent: (entry: {
-    slug: string;
-    owner?: string;
-    repo?: string;
-    title?: string;
-    connected?: boolean;
-  }) => void;
+  recordRecent: (entry: { slug: string; owner?: string; repo?: string; connected?: boolean }) => void;
   setActivePath: (notePath: string | undefined, options?: { replace?: boolean }) => void;
 };
 
@@ -541,7 +536,10 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     if (!canEdit) return;
     let localStore = getRepoStore(slug);
     let files = localStore.listFiles();
-    let hasFiles = files.some((f) => f.dir === dir || f.dir.startsWith(dir + '/'));
+    let hasFiles = files.some((f) => {
+      let dirf = extractDir(f.path);
+      return dirf === dir || dirf.startsWith(dir + '/');
+    });
     if (hasFiles && !window.confirm('Delete folder and all contained files?')) return;
     localStore.deleteFolder(dir);
     if (activePath !== undefined && isPathInsideDir(activePath, dir)) {

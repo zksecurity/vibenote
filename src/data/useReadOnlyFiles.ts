@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FileKind, FileMeta, RepoFile } from '../storage/local';
 import { normalizePath } from '../lib/util';
-import { basename, extractDir, hashText, stripExtension } from '../storage/local';
+import { extractDir, hashText } from '../storage/local';
 import { logError } from '../lib/logging';
 import { buildRemoteConfig, listRepoFiles, pullRepoFile } from '../sync/git-sync';
 
@@ -48,8 +48,8 @@ function useReadOnlyFiles(params: {
   let folders = useMemo(() => {
     let set = new Set<string>();
     for (let note of files) {
-      if (note.dir === '') continue;
-      let current = note.dir.replace(/(^\/+|\/+?$)/g, '');
+      if (extractDir(note.path) === '') continue;
+      let current = extractDir(note.path).replace(/(^\/+|\/+?$)/g, '');
       while (current) {
         set.add(current);
         let idx = current.lastIndexOf('/');
@@ -84,8 +84,6 @@ function useReadOnlyFiles(params: {
       setActiveFile({
         id: entry.id,
         path: entry.path,
-        title: entry.title,
-        dir: entry.dir,
         content: remote.content,
         updatedAt: Date.now(),
         lastRemoteSha: remote.sha,
@@ -127,7 +125,5 @@ function useReadOnlyFiles(params: {
 }
 
 function toFile({ path, kind }: { path: string; kind: FileKind }): FileMeta {
-  let title = stripExtension(basename(path));
-  let dir = extractDir(path);
-  return { id: path, path, title, dir, updatedAt: 0, kind };
+  return { id: path, path, updatedAt: 0, kind };
 }

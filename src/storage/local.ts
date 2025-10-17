@@ -15,8 +15,6 @@ type FileKind = 'markdown' | 'binary' | 'asset-url';
 type StoredFileMeta = {
   id: string;
   path: string;
-  title: string;
-  dir: string;
   updatedAt: number;
   kind?: FileKind;
 };
@@ -33,8 +31,6 @@ type StoredFile = StoredFileMeta & {
 type FileMeta = {
   id: string;
   path: string;
-  title: string;
-  dir: string;
   updatedAt: number;
   kind: FileKind;
 };
@@ -308,9 +304,8 @@ export class LocalStore {
     let updatedAt = Date.now();
     let dir = extractDir(path);
     let safeName = ensureValidFileName(basename(path));
-    let title = stripExtension(safeName);
     path = joinPath(dir, safeName);
-    let meta: FileMeta = { id, path, title, dir, updatedAt, kind };
+    let meta: FileMeta = { id, path, updatedAt, kind };
     debugLog(this.slug, 'createFile', { id, path, kind });
     let doc: RepoFile = { ...meta, content };
     let idx = this.loadIndex();
@@ -318,7 +313,7 @@ export class LocalStore {
     localStorage.setItem(this.indexKey, serializeIndex(idx));
     localStorage.setItem(this.noteKey(meta.id), serializeFile(doc));
     this.index = idx;
-    ensureFolderForSlug(this.slug, meta.dir);
+    ensureFolderForSlug(this.slug, dir);
     emitRepoChange(this.slug);
     return id;
   }
@@ -339,20 +334,19 @@ export class LocalStore {
     let doc = this.loadFileById(meta.id);
     if (!doc) return undefined;
     let safeName = ensureValidFileName(newFileName);
-    let normDir = normalizeDir(doc.dir);
+    let normDir = normalizeDir(extractDir(doc.path));
     let toPath = joinPath(normDir, safeName);
     if (toPath === doc.path) return doc.path;
-    let nextTitle = stripExtension(safeName);
-    let next = this.applyRename(doc, { title: nextTitle, dir: normDir, path: toPath });
+    let next = this.applyRename(doc, toPath);
     return next.path;
   }
 
   // internal rename method that also supports moving files between folders
-  private applyRename(doc: RepoFile, target: { title: string; dir: string; path: string }): RepoFile {
+  private applyRename(doc: RepoFile, path: string): RepoFile {
     let fromPath = doc.path;
     let updatedAt = Date.now();
-    let next: RepoFile = { ...doc, title: target.title, dir: target.dir, path: target.path, updatedAt };
-    let pathChanged = fromPath !== target.path;
+    let next: RepoFile = { ...doc, path, updatedAt };
+    let pathChanged = fromPath !== path;
     if (pathChanged) {
       if (doc.kind === 'asset-url') {
         next.lastRemoteSha = doc.lastRemoteSha;
@@ -363,17 +357,17 @@ export class LocalStore {
       }
     }
     localStorage.setItem(this.noteKey(doc.id), serializeFile(next));
-    this.touchIndex(doc.id, { title: target.title, dir: target.dir, path: target.path, updatedAt });
-    ensureFolderForSlug(this.slug, target.dir);
+    this.touchIndex(doc.id, { path, updatedAt });
+    ensureFolderForSlug(this.slug, extractDir(path));
     if (pathChanged) {
       recordRenameTombstone(this.slug, {
         from: fromPath,
-        to: target.path,
+        to: path,
         lastRemoteSha: doc.lastRemoteSha,
         renamedAt: updatedAt,
       });
     }
-    debugLog(this.slug, 'applyRename', { id: doc.id, fromPath, toPath: target.path, pathChanged });
+    debugLog(this.slug, 'applyRename', { id: doc.id, fromPath, toPath: path, pathChanged });
     emitRepoChange(this.slug);
     return next;
   }
@@ -415,8 +409,7 @@ export class LocalStore {
       let id = crypto.randomUUID();
       let dir = extractDir(path);
       if (dir !== '') folderSet.add(dir);
-      let title = stripExtension(basename(path));
-      let meta: FileMeta = { id, path, title, dir, updatedAt: now, kind };
+      let meta: FileMeta = { id, path, updatedAt: now, kind };
       let doc: RepoFile = {
         ...meta,
         content,
@@ -484,7 +477,7 @@ export class LocalStore {
     // Update notes under moved folder
     let idx = this.loadIndex();
     for (let meta of idx) {
-      let dir = normalizeDir(meta.dir);
+      let dir = normalizeDir(extractDir(meta.path));
       if (dir === from || dir.startsWith(from + '/')) {
         let rest = dir.slice(from.length);
         let nextDir = normalizeDir(to + rest);
@@ -511,7 +504,7 @@ export class LocalStore {
     // Delete contained notes (record tombstones)
     let idx = this.loadIndex();
     for (let meta of idx.slice()) {
-      let dir = normalizeDir(meta.dir);
+      let dir = normalizeDir(extractDir(meta.path));
       if (dir === target || dir.startsWith(target + '/')) {
         this.deleteFileById(meta.id);
       }
@@ -527,9 +520,8 @@ export class LocalStore {
     let fileName = basename(doc.path);
     let safeFileName = ensureValidFileName(fileName);
     let nextPath = joinPath(normDir, safeFileName);
-    let nextTitle = stripExtension(safeFileName);
-    if (nextPath === doc.path && normDir === normalizeDir(doc.dir)) return;
-    this.applyRename(doc, { title: nextTitle, dir: normDir, path: nextPath });
+    if (nextPath === doc.path) return;
+    this.applyRename(doc, nextPath);
   }
 
   findMetaByPath(path: string): FileMeta | undefined {
@@ -557,8 +549,9 @@ export class LocalStore {
     let idx = this.loadIndex();
     let folderSet = new Set<string>(this.listFolders());
     for (let meta of idx) {
-      if (meta.dir !== '') {
-        folderSet.add(normalizeDir(meta.dir));
+      let dir = extractDir(meta.path);
+      if (dir !== '') {
+        folderSet.add(normalizeDir(dir));
       }
     }
     localStorage.setItem(this.foldersKey, JSON.stringify(Array.from(folderSet).sort()));
@@ -810,7 +803,7 @@ function rebuildFolderIndex(slug: string) {
   let idx = loadIndexForSlug(slug);
   let folderSet = new Set<string>();
   for (let note of idx) {
-    let dir = normalizeDir(note.dir);
+    let dir = normalizeDir(extractDir(note.path));
     if (dir === '') continue;
     for (let ancestor of ancestorsOf(dir)) folderSet.add(ancestor);
   }
@@ -907,21 +900,16 @@ function normalizeMeta(raw: unknown): FileMeta | null {
   if (typeof stored.id !== 'string') return null;
   if (typeof stored.path !== 'string') return null;
   let path = stored.path.replace(/^\/+/g, '').replace(/\/+$/g, '') || stored.path;
-  let dir = typeof stored.dir === 'string' ? normalizeDir(stored.dir) : extractDir(path);
   let updatedAt =
     typeof stored.updatedAt === 'number' && Number.isFinite(stored.updatedAt) ? stored.updatedAt : Date.now();
   let inferredKind = typeof stored.kind === 'string' ? stored.kind : 'markdown';
-  let rawTitle = typeof stored.title === 'string' ? stored.title.trim() : '';
-  let title = rawTitle;
-  return { id: stored.id, path, title, dir, updatedAt, kind: inferredKind };
+  return { id: stored.id, path, updatedAt, kind: inferredKind };
 }
 
 function toStoredFile(doc: RepoFile): StoredFile {
   return {
     id: doc.id,
     path: doc.path,
-    title: doc.title,
-    dir: doc.dir,
     updatedAt: doc.updatedAt,
     kind: doc.kind,
     text: doc.content,
@@ -942,7 +930,7 @@ function normalizeFile(raw: unknown): RepoFile | null {
 }
 
 function joinPath(dir: string, file: string) {
-  if (!dir) return file;
+  if (dir === '') return file;
   return `${dir.replace(/\/+$/, '')}/${file.replace(/^\/+/, '')}`;
 }
 
@@ -974,7 +962,6 @@ export type RecentRepo = {
   slug: string;
   owner?: string;
   repo?: string;
-  title?: string;
   connected?: boolean;
   lastOpenedAt: number;
 };
@@ -1019,7 +1006,6 @@ export function recordRecentRepo(entry: {
   slug: string;
   owner?: string;
   repo?: string;
-  title?: string;
   connected?: boolean;
 }) {
   let now = Date.now();

@@ -18,8 +18,6 @@ vi.mock('../sync/git-sync', () => {
 const BASE_FILE: BinaryFile = {
   id: 'asset-1',
   path: 'assets/logo.png',
-  title: 'logo.png',
-  dir: 'assets',
   updatedAt: 0,
   kind: 'binary',
   content: '',

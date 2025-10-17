@@ -160,8 +160,6 @@ describe('syncBidirectional multi-device', () => {
 
     expect(filePaths(storeTwo)).toEqual(['Draft Renamed.md']);
     expect(remotePaths(remote)).toEqual(['Draft Renamed.md']);
-    let renamedMeta = storeTwo.listFiles().find((file) => file.path === 'Draft Renamed.md');
-    expect(renamedMeta?.title).toBe('Draft Renamed');
   });
 
   test('renaming on device one with edits on device two does not keep the old path', async () => {
@@ -183,8 +181,6 @@ describe('syncBidirectional multi-device', () => {
 
     expect(filePaths(storeTwo)).toEqual(['Draft Renamed.md']);
     expect(remotePaths(remote)).toEqual(['Draft Renamed.md']);
-    let renamedAfterEdits = storeTwo.listFiles().find((file) => file.path === 'Draft Renamed.md');
-    expect(renamedAfterEdits?.title).toBe('Draft Renamed');
   });
 
   test('rename chooses the correct note when another note shares the same content', async () => {
@@ -208,7 +204,6 @@ describe('syncBidirectional multi-device', () => {
 
     let renamed = storeTwo.loadFileById(draftId);
     expect(renamed?.path).toBe('Draft Renamed.md');
-    expect(renamed?.title).toBe('Draft Renamed');
     expect(renamed?.content).toBe('shared body');
     expect(renamed?.id).toBe(draftId);
 

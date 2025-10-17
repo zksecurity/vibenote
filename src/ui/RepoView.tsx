@@ -1,5 +1,5 @@
 // Primary workspace view combining repo chrome, file tree, and editor panels.
-import { useMemo, useState, useEffect, useCallback, useRef } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import { FileTree, type FileEntry } from './FileTree';
 import { Editor } from './Editor';
 import { AssetViewer } from './AssetViewer';
@@ -15,6 +15,8 @@ import {
   isBinaryFile,
   isAssetUrlFile,
   basename,
+  extractDir,
+  stripExtension,
 } from '../storage/local';
 import type { RepoRoute, Route } from './routing';
 import { normalizePath, pathsEqual } from '../lib/util';
@@ -520,8 +522,8 @@ function FileSidebar(props: FileSidebarProps) {
       files.map((file) => ({
         name: basename(file.path),
         path: file.path,
-        dir: file.dir,
-        title: file.title,
+        dir: extractDir(file.path),
+        title: stripExtension(basename(file.path)),
         kind: file.kind,
       })),
     [files]
@@ -567,7 +569,8 @@ function FileSidebar(props: FileSidebarProps) {
     if (selection?.kind === 'folder') return selection.path;
     if (selection?.kind === 'file') {
       let normalized = normalizePath(selection.path);
-      return files.find((f) => normalizePath(f.path) === normalized)?.dir ?? '';
+      let f = files.find((f) => normalizePath(f.path) === normalized);
+      return f ? extractDir(f.path) : '';
     }
     return '';
   }

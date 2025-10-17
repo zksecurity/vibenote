@@ -144,13 +144,7 @@ function createDeferred<T>() {
   return { promise, resolve, reject } as const;
 }
 
-type RecordRecentFn = (entry: {
-  slug: string;
-  owner?: string;
-  repo?: string;
-  title?: string;
-  connected?: boolean;
-}) => void;
+type RecordRecentFn = (entry: { slug: string; owner?: string; repo?: string; connected?: boolean }) => void;
 
 type RenderRepoDataProps = { slug: string; route: RepoRoute; recordRecent: RecordRecentFn };
 
@@ -223,7 +217,7 @@ describe('useRepoData', () => {
     expect(result.current.state.canEdit).toBe(true);
     expect(result.current.state.canSync).toBe(false);
     expect(result.current.state.files).toHaveLength(1);
-    expect(result.current.state.files[0]?.title).toBe('README');
+    expect(result.current.state.files[0]?.path).toBe('README.md');
     const welcomePath = result.current.state.files[0]?.path;
     expect(welcomePath).toBeDefined();
 
@@ -240,7 +234,7 @@ describe('useRepoData', () => {
     const recordRecent = vi.fn<RecordRecentFn>();
     const store = new LocalStore('new');
     const alphaId = store.createFile('Alpha.md', 'alpha text');
-    const welcome = store.listFiles().find((note) => note.title === 'README');
+    const welcome = store.listFiles().find((note) => note.path === 'README.md');
     const alpha = store.loadFileById(alphaId);
     if (!alpha) throw new Error('Failed to seed alpha note');
     if (!welcome) throw new Error('Missing welcome note');
@@ -448,7 +442,7 @@ describe('useRepoData', () => {
 
     await waitFor(() => expect(result.current.state.files.length).not.toBe(0));
     expect(result.current.state.files).toEqual([
-      expect.objectContaining({ id: 'docs/alpha.md', title: 'alpha' }),
+      expect.objectContaining({ id: 'docs/alpha.md', path: 'docs/alpha.md' }),
     ]);
     expect(result.current.state.activePath).toBeUndefined();
     expect(result.current.state.activeFile).toBeUndefined();

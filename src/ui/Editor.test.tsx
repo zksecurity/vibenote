@@ -19,8 +19,6 @@ vi.mock('../sync/git-sync', () => {
 const BASE_DOC: MarkdownFile = {
   id: 'doc-1',
   path: 'docs/nested/guide.md',
-  title: 'guide',
-  dir: 'docs/nested',
   updatedAt: 0,
   kind: 'markdown',
   content: '',
@@ -60,8 +58,6 @@ describe('Editor markdown image resolution', () => {
       let asset: BinaryFile = {
         id: 'asset-1',
         path: 'docs/assets/logo.png',
-        title: 'logo',
-        dir: 'docs/assets',
         updatedAt: 0,
         kind: 'binary',
         content: btoa('image-payload'),
@@ -90,8 +86,6 @@ describe('Editor markdown image resolution', () => {
       let asset: BinaryFile = {
         id: 'asset-encoded',
         path: 'docs/assets/some image.png',
-        title: 'some image',
-        dir: 'docs/assets',
         updatedAt: 0,
         kind: 'binary',
         content: btoa('encoded-payload'),
@@ -115,8 +109,6 @@ describe('Editor markdown image resolution', () => {
       let asset: AssetUrlFile = {
         id: 'asset-2',
         path: 'docs/cover.png',
-        title: 'cover',
-        dir: 'docs',
         updatedAt: 0,
         kind: 'asset-url',
         content: 'gh-blob:user/repo#sha123',
@@ -124,12 +116,7 @@ describe('Editor markdown image resolution', () => {
       };
       return asset;
     });
-    let doc: MarkdownFile = {
-      ...BASE_DOC,
-      path: 'docs/page.md',
-      dir: 'docs',
-      content: '![Cover](./cover.png)',
-    };
+    let doc: MarkdownFile = { ...BASE_DOC, path: 'docs/page.md', content: '![Cover](./cover.png)' };
     render(<Editor doc={doc} onChange={(_path, _text) => {}} loadAsset={loadAsset} slug="user/repo" />);
     let image = await screen.findByRole('img', { name: 'Cover' });
     expect(fetchBlobMock).toHaveBeenCalledWith({ owner: 'user', repo: 'repo', branch: 'main' }, 'sha123');

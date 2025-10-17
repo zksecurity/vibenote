@@ -90,11 +90,7 @@ export function AssetViewer({ file }: AssetViewerProps) {
     };
   }, []);
 
-  const assetName = useMemo(() => (file.title ? file.title : basename(file.path)), [file.title, file.path]);
-  const sizeLabel = useMemo(
-    () => (file.kind === 'binary' ? formatFileSize(estimateBytes(cleanedBase64)) : null),
-    [file.kind, cleanedBase64]
-  );
+  const assetName = useMemo(() => basename(file.path), [file.path]);
 
   const downloadHref = useMemo(() => {
     if (!resolvedPreview) return undefined;
