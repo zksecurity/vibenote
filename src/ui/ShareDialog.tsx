@@ -1,6 +1,6 @@
 // Modal that appears when the user clicks the "Share" icon in the file header.
 import { useState, useEffect, type FocusEvent, type MouseEvent, type RefObject } from 'react';
-import { CloseIcon, CopyIcon, CopySuccessIcon, CopyErrorIcon } from './RepoIcons';
+import { CloseIcon, CopyIcon, CopySuccessIcon, CopyErrorIcon, ShareIcon } from './RepoIcons';
 import { useOnClickOutside } from './useOnClickOutside';
 import { type ShareState } from '../data';
 
@@ -118,10 +118,17 @@ function ShareDialog({
       copyButtonLabel = 'Copy failed';
     }
     return (
-      <div className="share-flow" data-variant={activeVariant} data-busy={isLoading}>
+      <div className="share-flow">
         <div className="share-panel share-create" data-active={activeVariant === 'unshared'}>
           <button className="btn primary" onClick={onCreate} disabled={isLoading}>
-            {isLoading ? 'Loading...' : 'Create share link'}
+            {isLoading ? (
+              'Loading...'
+            ) : (
+              <>
+                <ShareIcon />
+                Create share link
+              </>
+            )}
           </button>
           <p className="share-hint">Links are unlisted and anyone with the URL can read the note.</p>
         </div>
