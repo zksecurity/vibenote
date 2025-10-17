@@ -170,7 +170,7 @@ function ShareDialog({
           <p className="share-dialog-subtitle">
             {share.link
               ? 'Anyone with the link can view the latest version.'
-              : 'Generate a secret link to share the rendered Markdown with anyone.'}
+              : 'Generate a secret link to share the note with anyone.'}
           </p>
           <div className="share-note-summary">
             <span className="share-note-label">Note</span>

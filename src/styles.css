@@ -1142,7 +1142,13 @@ textarea:focus-visible {
 
 .share-flow {
   position: relative;
-  min-height: 152px;
+  min-height: 125px;
+}
+
+@media (max-width: 520px) {
+  .share-flow {
+    min-height: 178px;
+  }
 }
 
 .share-panel {
@@ -1168,6 +1174,10 @@ textarea:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.share-create .btn {
+  height: 44px;
 }
 
 .share-revoke {
