@@ -1,10 +1,15 @@
 // File tree sidebar for browsing, editing, and managing repo notes.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { File as FileIcon, Folder as FolderIcon, FolderOpen as FolderOpenIcon } from 'lucide-react';
+
+const treeIconSize = 16;
+const treeIconStrokeWidth = 1.8;
 
 export type FileEntry = {
-  name: string; // filename without directory
+  name: string; // filename including extension
   path: string; // dir + name
   dir: string; // '' for root
+  title: string; // extension-trimmed title for editing
 };
 
 type Selection = { kind: 'folder' | 'file'; path: string } | null;
@@ -35,7 +40,7 @@ type FolderNode = {
   name: string;
   children: (FolderNode | FileNode)[];
 };
-type FileNode = { kind: 'file'; name: string; dir: string; path: string };
+type FileNode = { kind: 'file'; name: string; dir: string; path: string; title: string };
 
 export function FileTree(props: FileTreeProps) {
   // Rebuild the nested node structure whenever the note list changes.
@@ -154,11 +159,11 @@ export function FileTree(props: FileTreeProps) {
         const f = props.files.find((x) => normalizePath(x.path) === normalizePath(selected.path));
         if (!f) return;
         setEditing({ kind: 'file', path: f.path });
-        setEditText(f.name);
+        setEditText(f.title);
       } else {
         const name = selected.path.slice(selected.path.lastIndexOf('/') + 1);
         setEditing(selected);
-        setEditText(name || '');
+        setEditText(name);
       }
     } else if (e.key === 'Delete') {
       e.preventDefault();
@@ -618,7 +623,7 @@ function Row(props: {
           <button
             className="btn small subtle"
             onClick={() => {
-              props.onStartEdit({ kind: 'file', path: node.path }, node.name);
+              props.onStartEdit({ kind: 'file', path: node.path }, node.title);
               props.onCloseMenu();
             }}
           >
@@ -646,9 +651,19 @@ function Icon({
   kind: 'file' | 'folder' | 'folder-open' | 'file-leaf' | 'file-md' | 'folder-closed' | 'folder';
   open?: boolean;
 }) {
-  const isFolder = kind === 'folder';
+  let isFolder = kind === 'folder';
+  let className = 'tree-icon';
+  let IconSvg = FileIcon;
+  if (isFolder) {
+    IconSvg = open ? FolderOpenIcon : FolderIcon;
+    className += open ? ' folder-open' : ' folder';
+  } else {
+    className += ' file';
+  }
   return (
-    <span className={`tree-icon ${isFolder ? (open ? 'folder-open' : 'folder') : 'file'}`} aria-hidden />
+    <span className={className} aria-hidden>
+      <IconSvg size={treeIconSize} strokeWidth={treeIconStrokeWidth} />
+    </span>
   );
 }
 
@@ -710,7 +725,7 @@ function buildTree(files: FileEntry[], folders: string[]): FolderNode {
   for (let d of folders) addFolder(d);
   for (let f of files) {
     const parent = addFolder(f.dir);
-    parent.children.push({ kind: 'file', name: f.name, dir: f.dir, path: f.path });
+    parent.children.push({ kind: 'file', name: f.name, dir: f.dir, path: f.path, title: f.title });
   }
   // Sort like GitHub: folders A→Z, then files A→Z
   const sortNode = (n: FolderNode) => {

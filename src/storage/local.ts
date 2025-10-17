@@ -1,20 +1,95 @@
+// Local storage persistence for repo files (markdown notes plus binary assets).
+import { normalizePath } from '../lib/util';
 import { logError } from '../lib/logging';
+import type { RemoteFile } from '../sync/git-sync';
 
-export type NoteMeta = {
+export type { FileKind, FileMeta, RepoFile, MarkdownFile, BinaryFile, AssetUrlFile, RepoStoreSnapshot };
+
+export { basename, stripExtension, extractDir, isMarkdownFile, isBinaryFile, isAssetUrlFile, debugLog };
+
+type FileKind = 'markdown' | 'binary' | 'asset-url';
+
+/**
+ * Backwards-compatible serialized format for file metadata
+ */
+type StoredFileMeta = {
   id: string;
   path: string;
   title: string;
   dir: string;
   updatedAt: number;
+  kind?: FileKind;
 };
 
-export type NoteDoc = NoteMeta & {
+/**
+ * Backwards-compatible serialized format for stored files.
+ */
+type StoredFile = StoredFileMeta & {
   text: string;
   lastRemoteSha?: string;
   lastSyncedHash?: string;
 };
 
-export { debugLog };
+type FileMeta = {
+  id: string;
+  path: string;
+  title: string;
+  dir: string;
+  updatedAt: number;
+  kind: FileKind;
+};
+
+type RepoFile = FileMeta & {
+  content: string; // markdown uses UTF-8 text, binary uses base64 payloads
+  lastRemoteSha?: string;
+  lastSyncedHash?: string;
+};
+
+type MarkdownFile = RepoFile & { kind: 'markdown' };
+type BinaryFile = RepoFile & { kind: 'binary' };
+type AssetUrlFile = RepoFile & { kind: 'asset-url' };
+
+function isMarkdownFile(doc: RepoFile): doc is MarkdownFile {
+  return doc.kind === 'markdown';
+}
+
+function isBinaryFile(doc: RepoFile): doc is BinaryFile {
+  return doc.kind === 'binary';
+}
+
+function isAssetUrlFile(doc: RepoFile): doc is AssetUrlFile {
+  return doc.kind === 'asset-url';
+}
+
+function serializeIndex(index: FileMeta[]): string {
+  // important: written metadata stays compatible with `StoredFileMeta`
+  return JSON.stringify(index satisfies StoredFileMeta[]);
+}
+function deserializeIndex(raw: string | null): FileMeta[] {
+  if (raw === null) return [];
+  try {
+    let parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(normalizeMeta).filter((m) => m !== null);
+  } catch {
+    return [];
+  }
+}
+
+function serializeFile(doc: RepoFile): string {
+  // important: written files stay compatible with `StoredFile`
+  return JSON.stringify(toStoredFile(doc) satisfies StoredFile);
+}
+function deserializeFile(raw: string | null): RepoFile | null {
+  if (raw === null) return null;
+  // important: read files stay compatible with `StoredFile`
+  try {
+    let parsed = JSON.parse(raw);
+    return normalizeFile(parsed);
+  } catch {
+    return null;
+  }
+}
 
 // --- Debug logging ---
 const DEBUG_ENABLED = false;
@@ -108,18 +183,18 @@ function emitRepoChange(slug: string) {
 }
 
 function readRepoSnapshot(slug: string): RepoStoreSnapshot {
-  const notes = loadIndexForSlug(slug)
+  const files = loadIndexForSlug(slug)
     .slice()
     .sort((a, b) => b.updatedAt - a.updatedAt);
   const folders = loadFoldersForSlug(slug);
   return {
-    notes: Object.freeze(notes) as NoteMeta[],
+    files: Object.freeze(files) as FileMeta[],
     folders: Object.freeze(folders) as string[],
   };
 }
 
-export type RepoStoreSnapshot = {
-  notes: NoteMeta[];
+type RepoStoreSnapshot = {
+  files: FileMeta[];
   folders: string[];
 };
 
@@ -162,7 +237,7 @@ function resetAllRepoStores() {
 
 export class LocalStore {
   slug: string;
-  private index: NoteMeta[];
+  private index: FileMeta[];
   private indexKey: string;
   private notePrefix: string;
   private foldersKey: string;
@@ -179,7 +254,7 @@ export class LocalStore {
     // that layout should be documented clearly in the form of types and zod schemas
     this.backfillFolders();
     if (slug === 'new' && this.index.length === 0) {
-      this.createNote('Welcome', WELCOME_NOTE);
+      this.createFile('Welcome.md', WELCOME_NOTE);
       this.index = this.loadIndex();
     }
     ensureRepoSubscribers(this.slug);
@@ -198,82 +273,122 @@ export class LocalStore {
     };
   }
 
-  listNotes(): NoteMeta[] {
-    // Defensive: refresh from storage to avoid returning stale data across tabs
-    // [VNDBG] This read is safe and avoids UI from showing entries that were removed elsewhere.
+  listFiles(): FileMeta[] {
     const snapshot = ensureRepoSubscribers(this.slug).snapshot;
-    this.index = snapshot.notes;
-    return snapshot.notes.slice();
+    this.index = snapshot.files;
+    return snapshot.files.slice();
   }
 
-  loadNote(id: string): NoteDoc | null {
+  loadFileById(id: string): RepoFile | null {
     let raw = localStorage.getItem(this.noteKey(id));
-    if (!raw) return null;
-    return JSON.parse(raw) as NoteDoc;
+    return deserializeFile(raw);
   }
 
-  saveNote(id: string, text: string) {
-    let doc = this.loadNote(id);
+  saveFile(path: string, content: string) {
+    let meta = this.findMetaByPath(path);
+    if (meta === undefined) return;
+    this.saveFileById(meta.id, content);
+  }
+
+  private saveFileById(id: string, content: string) {
+    let doc = this.loadFileById(id);
     if (!doc) return;
     let updatedAt = Date.now();
-    let next: NoteDoc = { ...doc, text, updatedAt };
-    localStorage.setItem(this.noteKey(id), JSON.stringify(next));
-    debugLog(this.slug, 'saveNote', { id, path: doc.path, updatedAt });
+    let next: RepoFile = { ...doc, content, updatedAt };
+    localStorage.setItem(this.noteKey(id), serializeFile(next));
     this.touchIndex(id, { updatedAt });
+    debugLog(this.slug, 'saveFile', { id, path: doc.path, updatedAt });
     emitRepoChange(this.slug);
   }
 
-  createNote(title = 'Untitled', text = '', dir: string = ''): string {
+  createFile(path: string, content: string, params: { kind?: FileKind } = {}): string {
     let id = crypto.randomUUID();
-    let safe = ensureValidTitle(title || 'Untitled');
-    let displayTitle = title.trim() || 'Untitled';
-    let normDir = normalizeDir(dir);
-    let path = joinPath(normDir, `${safe}.md`);
-    let meta: NoteMeta = { id, path, title: displayTitle, dir: normDir, updatedAt: Date.now() };
-    let doc: NoteDoc = { ...meta, text };
+    path = normalizePath(path);
+    let kind = params.kind ?? inferKindFromPath(path);
+    let updatedAt = Date.now();
+    let dir = extractDir(path);
+    let safeName = ensureValidFileName(basename(path));
+    let title = stripExtension(safeName);
+    path = joinPath(dir, safeName);
+    let meta: FileMeta = { id, path, title, dir, updatedAt, kind };
+    debugLog(this.slug, 'createFile', { id, path, kind });
+    let doc: RepoFile = { ...meta, content };
     let idx = this.loadIndex();
     idx.push(meta);
-    localStorage.setItem(this.indexKey, JSON.stringify(idx));
-    localStorage.setItem(this.noteKey(id), JSON.stringify(doc));
+    localStorage.setItem(this.indexKey, serializeIndex(idx));
+    localStorage.setItem(this.noteKey(meta.id), serializeFile(doc));
     this.index = idx;
-    this.addFolder(normDir);
-    debugLog(this.slug, 'createNote', { id, path, title: displayTitle });
+    ensureFolderForSlug(this.slug, meta.dir);
     emitRepoChange(this.slug);
     return id;
   }
 
-  renameNote(id: string, title: string) {
-    let doc = this.loadNote(id);
-    if (!doc) return;
-    let fromPath = doc.path;
-    let safe = ensureValidTitle(title || 'Untitled');
+  /**
+   * Renames a file, preserving its extension.
+   *
+   * `newName` must be the new file name EXCLUDING extension.
+   */
+  renameFile(path: string, newName: string): string | undefined {
+    let meta = this.findMetaByPath(path);
+    if (meta === undefined) return undefined;
+
+    // get previous extension from path, and determine new path
+    let ext = extractExtensionWithDot(basename(meta.path));
+    let newFileName = newName + ext;
+
+    let doc = this.loadFileById(meta.id);
+    if (!doc) return undefined;
+    let safeName = ensureValidFileName(newFileName);
     let normDir = normalizeDir(doc.dir);
-    let path = joinPath(normDir, `${safe}.md`);
+    let toPath = joinPath(normDir, safeName);
+    if (toPath === doc.path) return doc.path;
+    let nextTitle = stripExtension(safeName);
+    let next = this.applyRename(doc, { title: nextTitle, dir: normDir, path: toPath });
+    return next.path;
+  }
+
+  // internal rename method that also supports moving files between folders
+  private applyRename(doc: RepoFile, target: { title: string; dir: string; path: string }): RepoFile {
+    let fromPath = doc.path;
     let updatedAt = Date.now();
-    let next: NoteDoc = { ...doc, title: safe, path, dir: normDir, updatedAt };
-    let pathChanged = fromPath !== path;
+    let next: RepoFile = { ...doc, title: target.title, dir: target.dir, path: target.path, updatedAt };
+    let pathChanged = fromPath !== target.path;
     if (pathChanged) {
-      delete next.lastRemoteSha;
-      delete next.lastSyncedHash;
+      if (doc.kind === 'asset-url') {
+        next.lastRemoteSha = doc.lastRemoteSha;
+        next.lastSyncedHash = doc.lastSyncedHash;
+      } else {
+        delete next.lastRemoteSha;
+        delete next.lastSyncedHash;
+      }
     }
-    localStorage.setItem(this.noteKey(id), JSON.stringify(next));
-    this.touchIndex(id, { title: safe, path, dir: normDir, updatedAt });
+    localStorage.setItem(this.noteKey(doc.id), serializeFile(next));
+    this.touchIndex(doc.id, { title: target.title, dir: target.dir, path: target.path, updatedAt });
+    ensureFolderForSlug(this.slug, target.dir);
     if (pathChanged) {
       recordRenameTombstone(this.slug, {
         from: fromPath,
-        to: path,
+        to: target.path,
         lastRemoteSha: doc.lastRemoteSha,
         renamedAt: updatedAt,
       });
     }
-    debugLog(this.slug, 'renameNote', { id, fromPath, toPath: path, pathChanged });
+    debugLog(this.slug, 'applyRename', { id: doc.id, fromPath, toPath: target.path, pathChanged });
     emitRepoChange(this.slug);
+    return next;
   }
 
-  deleteNote(id: string) {
-    let doc = this.loadNote(id);
+  deleteFile(path: string): boolean {
+    let meta = this.findMetaByPath(path);
+    if (meta === undefined) return false;
+    this.deleteFileById(meta.id);
+    return true;
+  }
+
+  deleteFileById(id: string) {
+    let doc = this.loadFileById(id);
     let idx = this.loadIndex().filter((n) => n.id !== id);
-    localStorage.setItem(this.indexKey, JSON.stringify(idx));
+    localStorage.setItem(this.indexKey, serializeIndex(idx));
     if (doc) {
       recordDeleteTombstone(this.slug, {
         path: doc.path,
@@ -284,49 +399,34 @@ export class LocalStore {
     localStorage.removeItem(this.noteKey(id));
     this.index = idx;
     rebuildFolderIndex(this.slug);
-    debugLog(this.slug, 'deleteNote', { id, path: doc?.path });
+    debugLog(this.slug, 'deleteFileById', { id, path: doc?.path });
     emitRepoChange(this.slug);
   }
 
-  resetToWelcome(): string {
-    let toRemove: string[] = [];
-    let prefix = `${this.notePrefix}`;
-    for (let i = 0; i < localStorage.length; i++) {
-      let key = localStorage.key(i);
-      if (!key) continue;
-      if (key === this.indexKey || key.startsWith(prefix)) toRemove.push(key);
-    }
-    for (let key of toRemove) localStorage.removeItem(key);
-    let id = this.createNote('Welcome', WELCOME_NOTE);
-    this.index = this.loadIndex();
-    emitRepoChange(this.slug);
-    return id;
-  }
-
-  replaceWithRemote(files: { path: string; text: string; sha?: string }[]) {
+  replaceWithRemote(files: RemoteFile[]) {
     let previous = this.loadIndex();
     for (let note of previous) {
       localStorage.removeItem(this.noteKey(note.id));
     }
     let now = Date.now();
-    let index: NoteMeta[] = [];
+    let index: FileMeta[] = [];
     let folderSet = new Set<string>();
-    for (let file of files) {
+    for (let { path, kind, content, sha } of files) {
       let id = crypto.randomUUID();
-      let title = basename(file.path).replace(/\.md$/i, '');
-      let dir = extractDir(file.path);
+      let dir = extractDir(path);
       if (dir !== '') folderSet.add(dir);
-      let meta: NoteMeta = { id, path: file.path, title, dir, updatedAt: now };
-      let doc: NoteDoc = {
+      let title = stripExtension(basename(path));
+      let meta: FileMeta = { id, path, title, dir, updatedAt: now, kind };
+      let doc: RepoFile = {
         ...meta,
-        text: file.text,
-        lastRemoteSha: file.sha,
-        lastSyncedHash: hashText(file.text),
+        content,
+        lastRemoteSha: sha,
+        lastSyncedHash: computeSyncedHash(kind, content, sha),
       };
       index.push(meta);
-      localStorage.setItem(this.noteKey(id), JSON.stringify(doc));
+      localStorage.setItem(this.noteKey(id), serializeFile(doc));
     }
-    localStorage.setItem(this.indexKey, JSON.stringify(index));
+    localStorage.setItem(this.indexKey, serializeIndex(index));
     localStorage.setItem(this.foldersKey, JSON.stringify(Array.from(folderSet).sort()));
     this.index = index;
     debugLog(this.slug, 'replaceWithRemote', { count: files.length });
@@ -388,7 +488,7 @@ export class LocalStore {
       if (dir === from || dir.startsWith(from + '/')) {
         let rest = dir.slice(from.length);
         let nextDir = normalizeDir(to + rest);
-        this.moveNoteToDir(meta.id, nextDir);
+        this.moveFileToDir(meta.id, nextDir);
       }
     }
     localStorage.setItem(this.foldersKey, JSON.stringify(Array.from(updated).sort()));
@@ -413,54 +513,41 @@ export class LocalStore {
     for (let meta of idx.slice()) {
       let dir = normalizeDir(meta.dir);
       if (dir === target || dir.startsWith(target + '/')) {
-        this.deleteNote(meta.id);
+        this.deleteFileById(meta.id);
       }
     }
     debugLog(this.slug, 'folder:delete', { dir: target });
     emitRepoChange(this.slug);
   }
 
-  moveNoteToDir(id: string, dir: string) {
-    let doc = this.loadNote(id);
+  moveFileToDir(id: string, dir: string) {
+    let doc = this.loadFileById(id);
     if (!doc) return;
-    let fromPath = doc.path;
     let normDir = normalizeDir(dir);
-    let toPath = joinPath(normDir, `${ensureValidTitle(doc.title)}.md`);
-    if (toPath === fromPath) return;
-    let updatedAt = Date.now();
-    let next: NoteDoc = { ...doc, dir: normDir, path: toPath, updatedAt };
-    delete next.lastRemoteSha;
-    delete next.lastSyncedHash;
-    localStorage.setItem(this.noteKey(id), JSON.stringify(next));
-    this.touchIndex(id, { dir: normDir, path: toPath, updatedAt });
-    recordRenameTombstone(this.slug, {
-      from: fromPath,
-      to: toPath,
-      lastRemoteSha: doc.lastRemoteSha,
-      renamedAt: updatedAt,
-    });
-    // Ensure folder index contains target and ancestors
-    let folders = new Set(this.listFolders());
-    for (let a of ancestorsOf(normDir)) folders.add(a);
-    localStorage.setItem(this.foldersKey, JSON.stringify(Array.from(folders).sort()));
-    debugLog(this.slug, 'note:moveDir', { id, toDir: normDir });
+    let fileName = basename(doc.path);
+    let safeFileName = ensureValidFileName(fileName);
+    let nextPath = joinPath(normDir, safeFileName);
+    let nextTitle = stripExtension(safeFileName);
+    if (nextPath === doc.path && normDir === normalizeDir(doc.dir)) return;
+    this.applyRename(doc, { title: nextTitle, dir: normDir, path: nextPath });
   }
 
-  private loadIndex(): NoteMeta[] {
+  findMetaByPath(path: string): FileMeta | undefined {
+    let normalized = normalizePath(path);
+    let idx = this.loadIndex();
+    return idx.find((meta) => normalizePath(meta.path) === normalized);
+  }
+
+  private loadIndex(): FileMeta[] {
     let raw = localStorage.getItem(this.indexKey);
-    if (!raw) return [];
-    try {
-      return JSON.parse(raw) as NoteMeta[];
-    } catch {
-      return [];
-    }
+    return deserializeIndex(raw);
   }
 
-  private touchIndex(id: string, patch: Partial<NoteMeta>) {
+  private touchIndex(id: string, patch: Partial<FileMeta>) {
     let idx = this.loadIndex();
     let i = idx.findIndex((n) => n.id === id);
     if (i >= 0) idx[i] = { ...idx[i]!, ...patch };
-    localStorage.setItem(this.indexKey, JSON.stringify(idx));
+    localStorage.setItem(this.indexKey, serializeIndex(idx));
     this.index = idx;
     debugLog(this.slug, 'touchIndex', { id, patch });
   }
@@ -475,14 +562,6 @@ export class LocalStore {
       }
     }
     localStorage.setItem(this.foldersKey, JSON.stringify(Array.from(folderSet).sort()));
-  }
-
-  private addFolder(dir: string) {
-    let d = normalizeDir(dir);
-    if (d === '') return;
-    let set = new Set<string>(this.listFolders());
-    for (let a of ancestorsOf(d)) set.add(a);
-    localStorage.setItem(this.foldersKey, JSON.stringify(Array.from(set).sort()));
   }
 
   private noteKey(id: string): string {
@@ -531,14 +610,14 @@ function ancestorsOf(dir: string): string[] {
   return out;
 }
 
-export type DeleteTombstone = {
+type DeleteTombstone = {
   type: 'delete';
   path: string;
   lastRemoteSha?: string;
   deletedAt: number;
 };
 
-export type RenameTombstone = {
+type RenameTombstone = {
   type: 'rename';
   from: string;
   to: string;
@@ -546,7 +625,7 @@ export type RenameTombstone = {
   renamedAt: number;
 };
 
-export type Tombstone = DeleteTombstone | RenameTombstone;
+type Tombstone = DeleteTombstone | RenameTombstone;
 
 export function listTombstones(slug: string): Tombstone[] {
   let raw = localStorage.getItem(repoKey(slug, 'tombstones'));
@@ -588,6 +667,37 @@ export function recordRenameTombstone(
   }
 ) {
   let ts = listTombstones(slug);
+
+  let revertIndex = ts.findIndex(
+    (item) => item.type === 'rename' && item.from === t.to && item.to === t.from
+  );
+  if (revertIndex >= 0) {
+    let next = ts.filter((_, idx) => idx !== revertIndex);
+    saveTombstones(slug, next);
+    debugLog(slug, 'tombstone:rename:collapse-revert', { from: t.from, to: t.to });
+    return;
+  }
+
+  let chainIndex = ts.findIndex((item) => item.type === 'rename' && item.to === t.from);
+  if (chainIndex >= 0) {
+    let current = ts[chainIndex];
+    if (!current || current.type !== 'rename') {
+      // If the slot is unexpectedly missing or not a rename, fall back to regular append.
+      debugLog(slug, 'tombstone:rename:collapse-chain-skip', { from: t.from, to: t.to });
+    } else {
+      ts[chainIndex] = {
+        type: 'rename',
+        from: current.from,
+        to: t.to,
+        lastRemoteSha: current.lastRemoteSha,
+        renamedAt: t.renamedAt,
+      };
+      saveTombstones(slug, ts);
+      debugLog(slug, 'tombstone:rename:collapse-chain', { from: current.from, to: t.to });
+      return;
+    }
+  }
+
   ts.push({
     type: 'rename',
     from: t.from,
@@ -612,133 +722,86 @@ export function clearAllTombstones(slug: string) {
 
 export function markSynced(slug: string, id: string, patch: { remoteSha?: string; syncedHash?: string }) {
   let key = `${repoKey(slug, 'note')}:${id}`;
-  let docRaw = localStorage.getItem(key);
-  if (!docRaw) return;
-  let doc: NoteDoc;
-  try {
-    doc = JSON.parse(docRaw) as NoteDoc;
-  } catch {
-    return;
-  }
-  let next: NoteDoc = { ...doc };
-  if (patch.remoteSha !== undefined) next.lastRemoteSha = patch.remoteSha;
-  if (patch.syncedHash !== undefined) next.lastSyncedHash = patch.syncedHash;
-  localStorage.setItem(key, JSON.stringify(next));
+  let doc = loadFileForKey(slug, id);
+  if (!doc) return;
+  if (patch.remoteSha !== undefined) doc.lastRemoteSha = patch.remoteSha;
+  if (patch.syncedHash !== undefined) doc.lastSyncedHash = patch.syncedHash;
+  localStorage.setItem(key, serializeFile(doc));
   debugLog(slug, 'markSynced', { id, patch });
   emitRepoChange(slug);
 }
 
-export function updateNoteText(slug: string, id: string, text: string) {
-  let key = `${repoKey(slug, 'note')}:${id}`;
-  let docRaw = localStorage.getItem(key);
-  if (!docRaw) return;
-  let doc: NoteDoc;
-  try {
-    doc = JSON.parse(docRaw) as NoteDoc;
-  } catch {
-    return;
-  }
-  let updatedAt = Date.now();
-  let next: NoteDoc = { ...doc, text, updatedAt };
-  localStorage.setItem(key, JSON.stringify(next));
-  touchIndexUpdatedAt(slug, id, updatedAt);
-  debugLog(slug, 'updateNoteText', { id, updatedAt });
-  emitRepoChange(slug);
+export function updateFile(slug: string, id: string, content: string, kind?: FileKind) {
+  mutateFile(slug, id, (doc) => {
+    let updatedAt = Date.now();
+    let next: RepoFile = { ...doc, content, updatedAt };
+    if (kind !== undefined) {
+      next.kind = kind;
+    }
+    return { doc: next };
+  });
 }
 
-export function findByPath(slug: string, path: string): { id: string; doc: NoteDoc } | null {
-  let idxRaw = localStorage.getItem(repoKey(slug, 'index'));
-  if (!idxRaw) return null;
-  let idx: NoteMeta[];
-  try {
-    idx = JSON.parse(idxRaw) as NoteMeta[];
-  } catch {
-    return null;
-  }
-  for (let note of idx) {
-    if (note.path !== path) continue;
-    let dr = localStorage.getItem(`${repoKey(slug, 'note')}:${note.id}`);
-    if (!dr) continue;
-    try {
-      let doc = JSON.parse(dr) as NoteDoc;
-      return { id: note.id, doc };
-    } catch {
-      continue;
-    }
+export function findFileByPath(slug: string, path: string): { id: string; doc: RepoFile } | null {
+  let idx = loadIndexForSlug(slug);
+  for (let meta of idx) {
+    if (meta.path !== path) continue;
+    let doc = loadFileForKey(slug, meta.id);
+    if (!doc) continue;
+    return { id: meta.id, doc };
   }
   return null;
 }
 
-export function findByRemoteSha(slug: string, remoteSha: string | undefined): { id: string; doc: NoteDoc } | null {
+export function findByRemoteSha(
+  slug: string,
+  remoteSha: string | undefined
+): { id: string; doc: RepoFile } | null {
   if (!remoteSha) return null;
   let idx = loadIndexForSlug(slug);
-  for (let note of idx) {
-    let dr = localStorage.getItem(`${repoKey(slug, 'note')}:${note.id}`);
-    if (!dr) continue;
-    try {
-      let doc = JSON.parse(dr) as NoteDoc;
-      if (doc.lastRemoteSha === remoteSha) {
-        return { id: note.id, doc };
-      }
-    } catch {
-      continue;
+  for (let meta of idx) {
+    let doc = loadFileForKey(slug, meta.id);
+    if (!doc) continue;
+    if (doc.lastRemoteSha === remoteSha) {
+      return { id: meta.id, doc };
     }
   }
   return null;
 }
 
-export function findBySyncedHash(slug: string, syncedHash: string | undefined): { id: string; doc: NoteDoc } | null {
+export function findBySyncedHash(
+  slug: string,
+  syncedHash: string | undefined
+): { id: string; doc: RepoFile } | null {
   if (!syncedHash) return null;
   let idx = loadIndexForSlug(slug);
-  for (let note of idx) {
-    let dr = localStorage.getItem(`${repoKey(slug, 'note')}:${note.id}`);
-    if (!dr) continue;
-    try {
-      let doc = JSON.parse(dr) as NoteDoc;
-      if (doc.lastSyncedHash === syncedHash) {
-        return { id: note.id, doc };
-      }
-    } catch {
-      continue;
+  for (let meta of idx) {
+    let doc = loadFileForKey(slug, meta.id);
+    if (!doc) continue;
+    if (doc.lastSyncedHash === syncedHash) {
+      return { id: meta.id, doc };
     }
   }
   return null;
 }
 
-export function moveNotePath(slug: string, id: string, toPath: string) {
-  let key = `${repoKey(slug, 'note')}:${id}`;
-  let docRaw = localStorage.getItem(key);
-  if (!docRaw) return;
-  let doc: NoteDoc;
-  try {
-    doc = JSON.parse(docRaw);
-  } catch {
-    return;
-  }
-  let updatedAt = Date.now();
-  let nextDir = extractDir(toPath);
-  let next: NoteDoc = { ...doc, path: toPath, dir: nextDir, updatedAt };
-  localStorage.setItem(key, JSON.stringify(next));
-  let idx = loadIndexForSlug(slug);
-  let j = idx.findIndex((n) => n.id === id);
-  if (j >= 0) {
-    let old = idx[j]!;
-    idx[j] = { id: old.id, path: toPath, title: old.title, dir: nextDir, updatedAt };
-  }
-  localStorage.setItem(repoKey(slug, 'index'), JSON.stringify(idx));
+export function moveFilePath(slug: string, id: string, toPath: string) {
+  let normalizedPath = normalizePath(toPath);
+  mutateFile(slug, id, (doc) => {
+    if (doc.path === normalizedPath) return null;
+    let dir = extractDir(normalizedPath);
+    let updatedAt = Date.now();
+    return {
+      doc: { ...doc, path: normalizedPath, dir, updatedAt },
+      indexPatch: { path: normalizedPath, dir },
+    };
+  });
   rebuildFolderIndex(slug);
-  debugLog(slug, 'moveNotePath', { id, toPath });
-  emitRepoChange(slug);
 }
 
-function loadIndexForSlug(slug: string): NoteMeta[] {
+function loadIndexForSlug(slug: string): FileMeta[] {
   let raw = localStorage.getItem(repoKey(slug, 'index'));
-  if (!raw) return [];
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return [];
-  }
+  return deserializeIndex(raw);
 }
 
 function rebuildFolderIndex(slug: string) {
@@ -750,10 +813,7 @@ function rebuildFolderIndex(slug: string) {
     if (dir === '') continue;
     for (let ancestor of ancestorsOf(dir)) folderSet.add(ancestor);
   }
-  localStorage.setItem(
-    repoKey(slug, FOLDERS_SUFFIX),
-    JSON.stringify(Array.from(folderSet).sort())
-  );
+  localStorage.setItem(repoKey(slug, FOLDERS_SUFFIX), JSON.stringify(Array.from(folderSet).sort()));
 }
 
 function loadFoldersForSlug(slug: string): string[] {
@@ -768,11 +828,48 @@ function loadFoldersForSlug(slug: string): string[] {
   }
 }
 
-function touchIndexUpdatedAt(slug: string, id: string, updatedAt: number) {
+function touchIndexUpdatedAt(slug: string, id: string, updatedAt: number, patch?: Partial<FileMeta>) {
   let idx = loadIndexForSlug(slug);
   let i = idx.findIndex((n) => n.id === id);
-  if (i >= 0) idx[i] = { ...idx[i]!, updatedAt };
-  localStorage.setItem(repoKey(slug, 'index'), JSON.stringify(idx));
+  if (i >= 0) idx[i] = { ...idx[i]!, updatedAt, ...patch };
+  localStorage.setItem(repoKey(slug, 'index'), serializeIndex(idx));
+}
+
+type DocMutationResult = { doc: RepoFile; indexPatch?: Partial<FileMeta> } | null;
+
+// TODO this seems like a shit abstraction to me
+function mutateFile(slug: string, id: string, mutate: (doc: RepoFile) => DocMutationResult) {
+  let key = `${repoKey(slug, 'note')}:${id}`;
+  let current = loadFileForKey(slug, id);
+  if (!current) return;
+  let result = mutate(current);
+  if (!result) return;
+  let next = result.doc;
+  let updatedAt =
+    typeof next.updatedAt === 'number' && Number.isFinite(next.updatedAt) ? next.updatedAt : Date.now();
+  let indexPatch: Partial<FileMeta> = { kind: next.kind, ...result.indexPatch };
+  localStorage.setItem(key, serializeFile(next));
+  touchIndexUpdatedAt(slug, id, updatedAt, indexPatch);
+  debugLog(slug, 'updateFile', { id, updatedAt });
+  emitRepoChange(slug);
+}
+
+function loadFileForKey(slug: string, id: string): RepoFile | null {
+  let raw = localStorage.getItem(`${repoKey(slug, 'note')}:${id}`);
+  if (!raw) return null;
+  try {
+    return normalizeFile(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+function ensureFolderForSlug(slug: string, dir: string) {
+  let folders = new Set(loadFoldersForSlug(slug));
+  if (dir !== '') {
+    for (let ancestor of ancestorsOf(dir)) folders.add(ancestor);
+  }
+  localStorage.setItem(repoKey(slug, FOLDERS_SUFFIX), JSON.stringify(Array.from(folders).sort()));
 }
 
 function basename(p: string) {
@@ -780,14 +877,67 @@ function basename(p: string) {
   return i >= 0 ? p.slice(i + 1) : p;
 }
 
-function ensureValidTitle(title: string): string {
-  let t = title.trim();
-  if (!t) return 'Untitled';
-  if (t === '.' || t === '..') return 'Untitled';
-  if (/[\\/\0]/.test(t)) {
-    throw new Error('Invalid title: contains illegal characters');
-  }
-  return t;
+function ensureValidFileName(name: string): string {
+  let trimmed = name.trim();
+  if (!trimmed || trimmed === '.' || trimmed === '..') throw Error('Invalid file name');
+  if (/[\\/\0]/.test(trimmed)) throw Error('Invalid file name: contains illegal characters');
+  return trimmed;
+}
+
+function stripExtension(baseName: string): string {
+  let idx = baseName.lastIndexOf('.');
+  if (idx < 0) return baseName;
+  return baseName.slice(0, idx);
+}
+
+function extractExtensionWithDot(baseName: string): string {
+  let idx = baseName.lastIndexOf('.');
+  if (idx < 0) return '';
+  return baseName.slice(idx);
+}
+
+function inferKindFromPath(path: string): FileKind {
+  return /\.md$/i.test(path) ? 'markdown' : 'binary';
+}
+
+function normalizeMeta(raw: unknown): FileMeta | null {
+  if (!raw || typeof raw !== 'object') return null;
+  let stored = raw as Partial<StoredFileMeta>;
+  if (typeof stored.id !== 'string') return null;
+  if (typeof stored.path !== 'string') return null;
+  let path = stored.path.replace(/^\/+/g, '').replace(/\/+$/g, '') || stored.path;
+  let dir = typeof stored.dir === 'string' ? normalizeDir(stored.dir) : extractDir(path);
+  let updatedAt =
+    typeof stored.updatedAt === 'number' && Number.isFinite(stored.updatedAt) ? stored.updatedAt : Date.now();
+  let inferredKind = typeof stored.kind === 'string' ? stored.kind : 'markdown';
+  let rawTitle = typeof stored.title === 'string' ? stored.title.trim() : '';
+  let title = rawTitle;
+  return { id: stored.id, path, title, dir, updatedAt, kind: inferredKind };
+}
+
+function toStoredFile(doc: RepoFile): StoredFile {
+  return {
+    id: doc.id,
+    path: doc.path,
+    title: doc.title,
+    dir: doc.dir,
+    updatedAt: doc.updatedAt,
+    kind: doc.kind,
+    text: doc.content,
+    lastRemoteSha: doc.lastRemoteSha,
+    lastSyncedHash: doc.lastSyncedHash,
+  };
+}
+
+function normalizeFile(raw: unknown): RepoFile | null {
+  if (raw === null || typeof raw !== 'object') return null;
+  let stored = raw as StoredFile;
+  let meta = normalizeMeta(stored);
+  if (!meta) return null;
+  let lastRemoteSha = typeof stored.lastRemoteSha === 'string' ? stored.lastRemoteSha : undefined;
+  let lastSyncedHash = typeof stored.lastSyncedHash === 'string' ? stored.lastSyncedHash : undefined;
+  let content = typeof stored.text === 'string' ? stored.text : '';
+  return { ...meta, content, lastRemoteSha, lastSyncedHash };
 }
 
 function joinPath(dir: string, file: string) {
@@ -954,12 +1104,12 @@ export function recordAutoSyncRun(slug: string, at: number = Date.now()) {
   setRepoPrefs(slug, { lastAutoSyncAt: at });
 }
 
-export function getLastActiveNoteId(slug: string): string | undefined {
+export function getLastActiveFileId(slug: string): string | undefined {
   let prefs = getRepoPrefs(slug);
   return typeof prefs.lastActiveNoteId === 'string' ? prefs.lastActiveNoteId : undefined;
 }
 
-export function setLastActiveNoteId(slug: string, id: string | null) {
+export function setLastActiveFileId(slug: string, id: string | null) {
   setRepoPrefs(slug, { lastActiveNoteId: id ?? undefined });
 }
 
@@ -973,6 +1123,13 @@ export function setExpandedFolders(slug: string, dirs: string[]) {
   let unique = Array.from(new Set(dirs.filter((dir) => typeof dir === 'string' && dir !== '')));
   unique.sort();
   setRepoPrefs(slug, { expandedFolders: unique });
+}
+
+export function computeSyncedHash(kind: FileKind, content: string, remoteSha?: string): string {
+  if (kind === 'asset-url') {
+    return remoteSha ?? hashText(content);
+  }
+  return hashText(content);
 }
 
 export function hashText(text: string): string {

@@ -6,14 +6,14 @@ describe('LocalStore folder operations', () => {
     let store = new LocalStore('user/repo');
     store.createFolder('', 'a');
     store.createFolder('a', 'b');
-    let id1 = store.createNote('One', '1', 'a');
-    let id2 = store.createNote('Two', '2', 'a/b');
+    let id1 = store.createFile('a/One.md', '1');
+    let id2 = store.createFile('a/b/Two.md', '2');
     expect(store.listFolders().sort()).toEqual(['a', 'a/b']);
 
     // Rename folder a -> x
     store.renameFolder('a', 'x');
     let paths1 = store
-      .listNotes()
+      .listFiles()
       .map((n) => n.path)
       .sort();
     expect(paths1).toEqual(['x/One.md', 'x/b/Two.md']);
@@ -22,7 +22,7 @@ describe('LocalStore folder operations', () => {
     // Move folder x/b -> y
     store.moveFolder('x/b', 'y');
     let paths2 = store
-      .listNotes()
+      .listFiles()
       .map((n) => n.path)
       .sort();
     expect(paths2).toEqual(['x/One.md', 'y/Two.md']);
@@ -30,7 +30,7 @@ describe('LocalStore folder operations', () => {
 
     // Delete folder x removes contained note
     store.deleteFolder('x');
-    let ids = store.listNotes().map((n) => n.id);
+    let ids = store.listFiles().map((file) => file.id);
     expect(ids).toEqual([id2]);
   });
 });

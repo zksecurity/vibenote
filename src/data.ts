@@ -1,5 +1,5 @@
 // Data-layer hook that orchestrates repo auth, storage, and sync state for RepoView.
-import { useMemo, useState, useEffect, useRef, useSyncExternalStore } from 'react';
+import { useMemo, useState, useEffect, useRef, useSyncExternalStore, useCallback } from 'react';
 import {
   isRepoLinked,
   markRepoLinked,
@@ -7,13 +7,13 @@ import {
   setAutosyncEnabled,
   getLastAutoSyncAt,
   recordAutoSyncRun,
-  type NoteMeta,
-  type NoteDoc,
+  type FileMeta,
+  type RepoFile,
   clearAllLocalData,
-  getLastActiveNoteId,
-  setLastActiveNoteId,
-  hashText,
+  getLastActiveFileId,
+  setLastActiveFileId,
   getRepoStore,
+  computeSyncedHash,
 } from './storage/local';
 import {
   signInWithGitHubApp,
@@ -26,18 +26,23 @@ import {
 import {
   getRepoMetadata as apiGetRepoMetadata,
   getInstallUrl as apiGetInstallUrl,
+  getShareLinkForNote as apiGetShareLinkForNote,
+  createShareLink as apiCreateShareLink,
+  revokeShareLink as apiRevokeShareLink,
   type RepoMetadata,
+  type ShareLink,
 } from './lib/backend';
 import {
   buildRemoteConfig,
-  pullNote,
-  listNoteFiles,
   syncBidirectional,
   type RemoteConfig,
   type SyncSummary,
+  listRepoFiles,
+  pullRepoFile,
+  type RemoteFile,
 } from './sync/git-sync';
 import { logError } from './lib/logging';
-import { useReadOnlyNotes, type ReadOnlyNote } from './data/readonly-notes';
+import { useReadOnlyFiles } from './data/useReadOnlyFiles';
 import { normalizePath } from './lib/util';
 import type { RepoRoute } from './ui/routing';
 
@@ -47,8 +52,7 @@ export type {
   RepoDataInputs,
   RepoDataState,
   RepoDataActions,
-  RepoNoteListItem,
-  ReadOnlyNote,
+  ShareState,
   RepoAccessErrorType,
 };
 
@@ -56,7 +60,12 @@ const AUTO_SYNC_MIN_INTERVAL_MS = 60_000;
 const AUTO_SYNC_DEBOUNCE_MS = 10_000;
 const AUTO_SYNC_POLL_INTERVAL_MS = 180_000;
 
-type RepoNoteListItem = NoteMeta | ReadOnlyNote;
+type ShareState = {
+  status: 'idle' | 'loading' | 'ready' | 'error';
+  link?: ShareLink;
+  error?: string;
+};
+
 // Compact set of error outcomes we surface to the UI for repo access.
 type RepoAccessErrorType = 'auth' | 'not-found' | 'forbidden' | 'network' | 'rate-limited' | 'unknown';
 
@@ -73,12 +82,13 @@ type RepoDataState = {
   needsInstall: boolean;
   repoQueryStatus: RepoQueryStatus;
   manageUrl: string | undefined;
+  defaultBranch: string | undefined;
   repoErrorType: RepoAccessErrorType | undefined;
 
   // repo content
-  doc: NoteDoc | undefined;
+  activeFile: RepoFile | undefined;
   activePath: string | undefined;
-  notes: RepoNoteListItem[];
+  files: FileMeta[];
   folders: string[];
 
   // sync state
@@ -86,6 +96,7 @@ type RepoDataState = {
   syncing: boolean;
 
   // general info
+  share: ShareState;
   statusMessage: string | undefined;
 };
 
@@ -100,14 +111,17 @@ type RepoDataActions = {
   setAutosync: (enabled: boolean) => void;
 
   // edit notes/folders
-  selectNote: (path: string | undefined) => Promise<void>;
+  selectFile: (path: string | undefined) => Promise<void>;
   createNote: (dir: string, name: string) => string | undefined;
   createFolder: (parentDir: string, name: string) => void;
-  renameNote: (path: string, title: string) => void;
-  deleteNote: (path: string) => void;
+  renameFile: (path: string, name: string) => void;
+  deleteFile: (path: string) => void;
   renameFolder: (dir: string, newName: string) => void;
   deleteFolder: (dir: string) => void;
-  updateNoteText: (path: string, text: string) => void;
+  saveFile: (path: string, text: string) => void;
+  createShareLink: () => Promise<void>;
+  refreshShareLink: () => Promise<void>;
+  revokeShareLink: () => Promise<void>;
 };
 
 type RepoDataInputs = {
@@ -137,7 +151,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
 } {
   // ORIGINAL STATE AND MAIN HOOKS
   // Local storage wrapper
-  let { notes: localNotes, folders: localFolders } = useLocalRepoSnapshot(slug);
+  let { files: localFiles, folders: localFolders } = useLocalRepoSnapshot(slug);
 
   // Store the current GitHub App session token to toggle authenticated features instantly.
   let [sessionToken, setSessionToken] = useState<string | undefined>(() => getAppSessionToken() ?? undefined);
@@ -145,7 +159,10 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
 
   // Carry the latest sync status message shown across the workspace.
   // TODO make this disappear after a timeout
-  let [statusMessage, setSyncMessage] = useState<string | undefined>(undefined);
+  let [statusMessage, setStatusMessage] = useState<string | undefined>(undefined);
+
+  // Track share metadata for the active note.
+  let [shareState, setShareState] = useState<ShareState>({ status: 'idle' });
 
   // Track whether this repo slug has already been linked to GitHub sync.
   let [linked, setLinked] = useState(() => isRepoLinked(slug));
@@ -159,6 +176,8 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   // DERIVED STATE (and hooks that depend on it)
 
   let { defaultBranch, manageUrl } = repoAccess;
+  let repoOwner = route.kind === 'repo' ? route.owner : undefined;
+  let repoName = route.kind === 'repo' ? route.repo : undefined;
   let accessStatusReady =
     repoAccess.status === 'ready' || repoAccess.status === 'rate-limited' || repoAccess.status === 'error';
 
@@ -167,12 +186,12 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   // in readonly mode, we store nothing locally and just fetch content from github no demand
   let isReadOnly = repoAccess.level === 'read';
   let {
-    notes: readOnlyNotes,
-    doc: readOnlyDoc,
+    files: readOnlyFiles,
+    activeFile: activeReadOnlyFile,
     folders: readOnlyFolders,
-    selectDoc: selectReadOnlyDoc,
+    selectFile: selectReadOnlyFile,
     reset: resetReadOnlyState,
-  } = useReadOnlyNotes({ slug, isReadOnly, defaultBranch, desiredPath });
+  } = useReadOnlyFiles({ slug, isReadOnly, defaultBranch, desiredPath });
 
   // whether we treat the repo as locally writable
   // note that we are optimistic about write access until the access check completes,
@@ -188,49 +207,50 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     defaultBranch,
   });
 
-  // Derive the notes/folders from whichever source is powering the tree.
-  let notes: RepoNoteListItem[] = isReadOnly ? readOnlyNotes : localNotes;
+  // Derive the files/folders from whichever source is powering the tree.
+  let files = isReadOnly ? readOnlyFiles : localFiles;
   let folders = isReadOnly ? readOnlyFolders : localFolders;
 
   // determine the active note
-  let activeNote = useMemo(() => {
+  let activeFileMeta = useMemo(() => {
     // if specified in the route, that takes precedence
-    if (desiredPath !== undefined) return findByPath(notes, desiredPath);
+    if (desiredPath !== undefined) return findByPath(files, desiredPath);
     if (!canEdit) return undefined;
-    // otherwise try to restore last active note (if any)
-    let storedId = getLastActiveNoteId(slug);
+    // otherwise try to restore last active file (if any)
+    let storedId = getLastActiveFileId(slug);
     if (storedId !== undefined) {
-      return notes.find((note) => note.id === storedId);
+      return files.find((file) => file.id === storedId);
     }
-    // otherwise we don't show any note, that's fine
+    // otherwise we don't show any file, that's fine
     return undefined;
-  }, [notes, desiredPath]);
+  }, [canEdit, files, desiredPath]);
 
-  let activeId = activeNote?.id;
+  let activeId = activeFileMeta?.id;
 
-  let localDoc = useMemo(() => {
-    if (!canEdit || activeId === undefined) return undefined;
-    return getRepoStore(slug).loadNote(activeId) ?? undefined;
-  }, [canEdit, activeId, localNotes]);
+  let activeLocalFile = useMemo<RepoFile | undefined>(() => {
+    if (!canEdit) return undefined;
+    if (!activeId) return undefined;
+    return getRepoStore(slug).loadFileById(activeId) ?? undefined;
+  }, [canEdit, activeId]);
 
-  let doc = canEdit ? localDoc : readOnlyDoc;
-
-  let activePath = doc?.path ?? activeNote?.path ?? desiredPath;
+  let activeFile: RepoFile | undefined = canEdit ? activeLocalFile : activeReadOnlyFile;
+  let activePath = activeFile?.path;
+  let activeIsMarkdown = activeFile?.kind === 'markdown';
 
   // EFFECTS
   // please avoid adding more effects here, keep logic clean/separated
 
-  // Persist last active note id so writable repos can restore it later.
+  // Persist last active file id so writable repos can restore it later.
   useEffect(() => {
-    if (canEdit) setLastActiveNoteId(slug, activeId ?? null);
+    if (canEdit) setLastActiveFileId(slug, activeId ?? null);
   }, [canEdit, activeId]);
 
   // When the loaded doc changes path (e.g., rename or sync or restoring last active), push the route forward.
   useEffect(() => {
-    if (doc?.path === undefined) return;
-    if (pathsEqual(desiredPath, doc.path)) return;
-    setActivePath(doc.path);
-  }, [doc?.path, desiredPath]);
+    if (activeFile?.path === undefined) return;
+    if (pathsEqual(desiredPath, activeFile.path)) return;
+    setActivePath(activeFile.path);
+  }, [activeFile?.path, desiredPath]);
 
   // Remember recently opened repos once we know the current repo is reachable.
   // TODO this shouldn't a useEffect, the only place a repo ever becomes reachable is after
@@ -247,6 +267,30 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   }, [slug, route, linked, recordRecent, repoAccess.level]);
 
   let initialPullRef = useRef({ done: false });
+  let shareRequestRef = useRef<{ owner: string; repo: string; path: string } | null>(null);
+
+  const loadShareForTarget = useCallback(async (target: { owner: string; repo: string; path: string }) => {
+    shareRequestRef.current = target;
+    setShareState((prev) => {
+      if (prev.status === 'ready' && prev.link && shareMatchesTarget(prev.link, target)) {
+        return prev;
+      }
+      return { status: 'loading' };
+    });
+    try {
+      const link = await apiGetShareLinkForNote(target.owner, target.repo, target.path);
+      if (shareRequestRef.current && !shareTargetEquals(shareRequestRef.current, target)) return;
+      if (link) {
+        setShareState({ status: 'ready', link });
+      } else {
+        setShareState({ status: 'ready' });
+      }
+    } catch (error) {
+      if (shareRequestRef.current && !shareTargetEquals(shareRequestRef.current, target)) return;
+      logError(error);
+      setShareState({ status: 'error', error: formatError(error) });
+    }
+  }, []);
 
   // Kick off the one-time remote import when visiting a writable repo we have not linked yet.
   useEffect(() => {
@@ -258,18 +302,19 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       if (initialPullRef.current.done) return;
       try {
         let cfg: RemoteConfig = buildRemoteConfig(slug, repoAccess.defaultBranch);
-        let entries = await listNoteFiles(cfg);
-        let files: { path: string; text: string; sha?: string }[] = [];
+        let entries = await listRepoFiles(cfg);
+        let files: RemoteFile[] = [];
+        // TODO this should be done in parallel, or actually we shouldn't download all files
         for (let e of entries) {
-          let rf = await pullNote(cfg, e.path);
-          if (rf) files.push({ path: rf.path, text: rf.text, sha: rf.sha });
+          let rf = await pullRepoFile(cfg, e.path);
+          if (rf) files.push(rf);
         }
         let localStore = getRepoStore(slug);
         localStore.replaceWithRemote(files);
-        let synced = localStore.listNotes();
+        let synced = localStore.listFiles();
         // if we are not on a specific path yet and there's no stored active id, show README.md
         if (desiredPath === undefined) {
-          let storedId = getLastActiveNoteId(slug);
+          let storedId = getLastActiveFileId(slug);
           let storedPath =
             storedId !== undefined ? synced.find((note) => note.id === storedId)?.path : undefined;
           let readmePath = synced.find((note) => note.path.toLowerCase() === 'readme.md')?.path;
@@ -280,7 +325,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
         }
         markRepoLinked(slug);
         setLinked(true);
-        setSyncMessage('Loaded repository');
+        setStatusMessage('Loaded repository');
       } catch (error) {
         logError(error);
       } finally {
@@ -289,18 +334,50 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     })();
   }, [route, repoAccess.level, linked, slug, canEdit, defaultBranch, desiredPath]);
 
+  useEffect(() => {
+    if (!repoOwner || !repoName || !hasSession || !canEdit) {
+      shareRequestRef.current = null;
+      setShareState((prev) => (prev.status === 'idle' ? prev : { status: 'idle' }));
+      return;
+    }
+    if (activePath === undefined) {
+      shareRequestRef.current = null;
+      setShareState((prev) => (prev.status === 'idle' ? prev : { status: 'idle' }));
+      return;
+    }
+    if (!activeIsMarkdown) {
+      shareRequestRef.current = null;
+      setShareState((prev) => (prev.status === 'idle' ? prev : { status: 'idle' }));
+      return;
+    }
+    const target = { owner: repoOwner, repo: repoName, path: activePath };
+    const current = shareRequestRef.current;
+    const sameTarget = current !== null && current !== undefined && shareTargetEquals(current, target);
+    if (!sameTarget && shareState.status !== 'idle') {
+      shareRequestRef.current = null;
+      setShareState((prev) => (prev.status === 'idle' ? prev : { status: 'idle' }));
+      return;
+    }
+    if (shareState.status !== 'idle') {
+      return;
+    }
+    void loadShareForTarget(target);
+  }, [
+    repoOwner,
+    repoName,
+    activePath,
+    activeIsMarkdown,
+    hasSession,
+    canEdit,
+    shareState,
+    loadShareForTarget,
+  ]);
+
   // CLICK HANDLERS
 
   const ensureActivePath = (nextPath: string | undefined) => {
     if (pathsEqual(route.notePath, nextPath)) return;
     setActivePath(nextPath);
-  };
-
-  const resolveEditableNote = (path: string | undefined): NoteMeta | undefined => {
-    if (path === undefined) return undefined;
-    let normalized = normalizePath(path);
-    let list = getRepoStore(slug).listNotes();
-    return list.find((note) => normalizePath(note.path) === normalized);
   };
 
   // "Connect GitHub" button in the header
@@ -313,7 +390,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       }
     } catch (error) {
       logError(error);
-      setSyncMessage('Failed to sign in');
+      setStatusMessage('Failed to sign in');
     }
   };
 
@@ -329,7 +406,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       window.open(url, '_blank', 'noopener');
     } catch (error) {
       logError(error);
-      setSyncMessage('Failed to open GitHub');
+      setStatusMessage('Failed to open GitHub');
     }
   };
 
@@ -353,15 +430,15 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     ensureActivePath(undefined);
     initialPullRef.current.done = false;
 
-    setSyncMessage('Signed out');
+    setStatusMessage('Signed out');
   };
 
   // "Sync" button in the header
   const syncNow = async () => {
     try {
-      setSyncMessage(undefined);
+      setStatusMessage(undefined);
       if (!hasSession || !linked || slug === 'new' || !canEdit) {
-        setSyncMessage('Connect GitHub and configure repo first');
+        setStatusMessage('Connect GitHub and configure repo first');
         return;
       }
       let summary = await performSync();
@@ -371,32 +448,34 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       if (summary?.pushed) parts.push(`pushed ${summary.pushed}`);
       if (summary?.deletedRemote) parts.push(`deleted remote ${summary.deletedRemote}`);
       if (summary?.deletedLocal) parts.push(`deleted local ${summary.deletedLocal}`);
-      setSyncMessage(parts.length ? `Synced: ${parts.join(', ')}` : 'Up to date');
+      setStatusMessage(parts.length ? `Synced: ${parts.join(', ')}` : 'Up to date');
     } catch (error) {
       logError(error);
-      setSyncMessage('Sync failed');
+      setStatusMessage('Sync failed');
     }
   };
 
-  // click on a note in the sidebar
-  const selectNote = async (path: string | undefined) => {
-    await selectReadOnlyDoc(path);
+  // click on a file in the sidebar
+  const selectFile = async (path: string | undefined) => {
+    await selectReadOnlyFile(path);
     ensureActivePath(path);
   };
 
-  const updateNoteText = (path: string, text: string) => {
+  const saveFile = (path: string, content: string) => {
     if (!canEdit) return;
-    let meta = resolveEditableNote(path);
-    if (!meta) return;
-    getRepoStore(slug).saveNote(meta.id, text);
+    getRepoStore(slug).saveFile(path, content);
     scheduleAutoSync();
   };
 
+  // TODO: assumes markdown file. eventually we want to support creating other files as well,
+  // but that would mean some kind of user input on the file type.
   const createNote = (dir: string, name: string) => {
     if (!canEdit) return undefined;
     let store = getRepoStore(slug);
-    let id = store.createNote(name, '', dir);
-    let created = store.loadNote(id);
+    let trimmedDir = dir.trim();
+    let basePath = trimmedDir === '' ? `${name}.md` : `${trimmedDir}/${name}.md`;
+    let id = store.createFile(basePath, '');
+    let created = store.loadFileById(id);
     scheduleAutoSync();
     if (created) {
       ensureActivePath(created.path);
@@ -411,37 +490,35 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       getRepoStore(slug).createFolder(parentDir, name);
     } catch (error) {
       logError(error);
-      setSyncMessage('Invalid folder name.');
+      setStatusMessage('Invalid folder name.');
       return;
     }
     scheduleAutoSync();
   };
 
-  const renameNote = (path: string, title: string) => {
+  const renameFile = (path: string, name: string) => {
     if (!canEdit) return;
-    let meta = resolveEditableNote(path);
-    if (!meta) return;
     try {
       let store = getRepoStore(slug);
-      store.renameNote(meta.id, title);
-      let updated = store.loadNote(meta.id);
-      if (updated) ensureActivePath(updated.path);
+      let nextPath = store.renameFile(path, name);
+      if (nextPath && pathsEqual(activePath, path)) {
+        ensureActivePath(nextPath);
+      }
       scheduleAutoSync();
     } catch (error) {
       logError(error);
-      setSyncMessage('Invalid title. Avoid / and control characters.');
+      setStatusMessage('Invalid file name.');
     }
   };
 
-  const deleteNote = (path: string) => {
+  const deleteFile = (path: string) => {
     if (!canEdit) return;
-    let meta = resolveEditableNote(path);
-    if (!meta) return;
-    let store = getRepoStore(slug);
-    store.deleteNote(meta.id);
-    if (activePath !== undefined && pathsEqual(activePath, path)) {
-      ensureActivePath(undefined);
+    let removed = getRepoStore(slug).deleteFile(path);
+    if (!removed) {
+      setStatusMessage('Unable to delete file.');
+      return;
     }
+    if (pathsEqual(activePath, path)) ensureActivePath(undefined);
     scheduleAutoSync();
   };
 
@@ -452,24 +529,75 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       scheduleAutoSync();
     } catch (error) {
       logError(error);
-      setSyncMessage('Invalid folder name.');
+      setStatusMessage('Invalid folder name.');
     }
   };
 
   const deleteFolder = (dir: string) => {
     if (!canEdit) return;
     let localStore = getRepoStore(slug);
-    let notes = localStore.listNotes();
-    let hasNotes = notes.some((note) => {
-      let directory = note.dir ?? '';
-      return directory === dir || directory.startsWith(dir + '/');
-    });
-    if (hasNotes && !window.confirm('Delete folder and all contained notes?')) return;
+    let files = localStore.listFiles();
+    let hasFiles = files.some((f) => f.dir === dir || f.dir.startsWith(dir + '/'));
+    if (hasFiles && !window.confirm('Delete folder and all contained files?')) return;
     localStore.deleteFolder(dir);
     if (activePath !== undefined && isPathInsideDir(activePath, dir)) {
       ensureActivePath(undefined);
     }
     scheduleAutoSync();
+  };
+
+  const createShare = async () => {
+    if (!repoOwner || !repoName || !canEdit) return;
+    if (!hasSession) {
+      setShareState({ status: 'error', error: 'Sign in with GitHub to share notes.' });
+      return;
+    }
+    if (activePath === undefined) {
+      setShareState({ status: 'error', error: 'Select a note to share.' });
+      return;
+    }
+    const target = { owner: repoOwner, repo: repoName, path: activePath };
+    shareRequestRef.current = target;
+    setShareState({ status: 'loading' });
+    try {
+      const branch = defaultBranch ?? 'main';
+      const share = await apiCreateShareLink({
+        owner: target.owner,
+        repo: target.repo,
+        path: target.path,
+        branch,
+      });
+      if (!shareMatchesTarget(share, target)) {
+        return;
+      }
+      setShareState({ status: 'ready', link: share });
+    } catch (error) {
+      logError(error);
+      setShareState({ status: 'error', error: formatError(error) });
+      throw error;
+    }
+  };
+
+  const revokeShare = async () => {
+    const existing = shareState.link;
+    if (!existing) return;
+    setShareState({ status: 'loading' });
+    try {
+      await apiRevokeShareLink(existing.id);
+      setShareState({ status: 'ready' });
+    } catch (error) {
+      logError(error);
+      setShareState({ status: 'error', error: formatError(error) });
+      throw error;
+    }
+  };
+
+  const refreshShare = async () => {
+    if (!repoOwner || !repoName || !hasSession || activePath === undefined || !activeIsMarkdown) {
+      setShareState({ status: 'idle' });
+      return;
+    }
+    await loadShareForTarget({ owner: repoOwner, repo: repoName, path: activePath });
   };
 
   let state: RepoDataState = {
@@ -485,14 +613,16 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     manageUrl,
     repoErrorType: repoAccess.errorType,
 
-    doc,
+    activeFile,
     activePath,
-    notes,
+    files,
     folders,
 
     autosync,
     syncing,
+    share: shareState,
     statusMessage,
+    defaultBranch,
   };
 
   let actions: RepoDataActions = {
@@ -502,14 +632,17 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
 
     syncNow,
     setAutosync,
-    selectNote,
+    selectFile,
     createNote,
     createFolder,
-    renameNote,
-    deleteNote,
+    renameFile,
+    deleteFile,
     renameFolder,
     deleteFolder,
-    updateNoteText,
+    saveFile,
+    createShareLink: createShare,
+    refreshShareLink: refreshShare,
+    revokeShareLink: revokeShare,
   };
 
   return { state, actions };
@@ -764,24 +897,22 @@ function useSync(params: { slug: string; canSync: boolean; defaultBranch?: strin
         let cfg = buildRemoteConfig(slug, defaultBranch);
         let localStore = getRepoStore(slug);
         let pending = localStore
-          .listNotes()
-          .map((meta) => localStore.loadNote(meta.id))
-          .filter((note): note is NoteDoc => note !== null)
-          .filter((note) => note.lastSyncedHash !== hashText(note.text))
+          .listFiles()
+          .map((meta) => localStore.loadFileById(meta.id))
+          .filter((note) => note !== null)
+          .filter(
+            (note) => note.lastSyncedHash !== computeSyncedHash(note.kind, note.content, note.lastRemoteSha)
+          )
           .map((note) => ({
             path: note.path,
-            text: note.text,
+            text: note.content,
             baseSha: note.lastRemoteSha,
             message: 'vibenote: background sync',
           }));
         if (pending.length === 0) return;
         ctrl.postMessage({
           type: 'vibenote-flush',
-          payload: {
-            token: accessToken,
-            config: cfg,
-            files: pending,
-          },
+          payload: { token: accessToken, config: cfg, files: pending },
         });
       } catch (error) {
         console.warn('vibenote: background flush failed', error);
@@ -816,6 +947,30 @@ function isPathInsideDir(path: string, dir: string): boolean {
   let normalizedDir = normalizePath(dir);
   if (normalizedDir === '') return true;
   return normalizedPath.startsWith(normalizedDir + '/');
+}
+
+function shareMatchesTarget(link: ShareLink, target: { owner: string; repo: string; path: string }): boolean {
+  return (
+    link.owner.toLowerCase() === target.owner.toLowerCase() &&
+    link.repo.toLowerCase() === target.repo.toLowerCase() &&
+    normalizePath(link.path) === normalizePath(target.path)
+  );
+}
+
+function shareTargetEquals(
+  a: { owner: string; repo: string; path: string },
+  b: { owner: string; repo: string; path: string }
+): boolean {
+  return (
+    a.owner.toLowerCase() === b.owner.toLowerCase() &&
+    a.repo.toLowerCase() === b.repo.toLowerCase() &&
+    normalizePath(a.path) === normalizePath(b.path)
+  );
+}
+
+function formatError(error: unknown): string {
+  if (error instanceof Error && typeof error.message === 'string') return error.message;
+  return String(error);
 }
 
 function findByPath<T extends { id: string; path: string }>(notes: T[], targetPath: string): T | undefined {

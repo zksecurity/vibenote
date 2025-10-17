@@ -31,6 +31,7 @@
     "express": "^4.19.2",
     "jose": "^5.9.3",
     "katex": "^0.16.22",
+    "lucide-react": "^0.546.0",
     "marked": "^11.2.0",
     "react": "18.2.0",
     "react-dom": "18.2.0",
@@ -45,7 +46,7 @@
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
     "jsdom": "^27.0.0",
-    "typescript": "^5.5.4",
+    "typescript": "^5.9.3",
     "vite": "^5.4.0",
     "vitest": "^2.1.2"
   }

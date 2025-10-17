@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { getEnv } from './env.ts';
+import { env } from './env.ts';
 import {
   createAuthStartRedirect,
   handleAuthCallback,
@@ -8,10 +8,11 @@ import {
   buildSetupRedirect,
   refreshAccessToken,
   logoutSession,
-  verifyBearerSession,
   type SessionClaims,
 } from './api.ts';
 import { createSessionStore } from './session-store.ts';
+import { handleErrors, HttpError, requireSession } from './common.ts';
+import { sharingEndpoints } from './sharing.ts';
 
 declare module 'express-serve-static-core' {
   interface Request {
@@ -19,7 +20,6 @@ declare module 'express-serve-static-core' {
   }
 }
 
-const env = getEnv();
 const sessionStore = createSessionStore({
   filePath: env.SESSION_STORE_FILE,
   encryptionKey: env.SESSION_ENCRYPTION_KEY,
@@ -33,7 +33,7 @@ app.use(
     origin: (origin, cb) => {
       if (!origin) return cb(null, true);
       if (env.ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
-      return cb(new Error('CORS not allowed'));
+      return cb(Error('CORS not allowed'));
     },
     credentials: true,
   })
@@ -51,8 +51,9 @@ app.get('/v1/auth/github/start', async (req, res) => {
   res.redirect(redirect);
 });
 
-app.get('/v1/auth/github/callback', async (req, res) => {
-  try {
+app.get(
+  '/v1/auth/github/callback',
+  handleErrors(async (req, res) => {
     let code = String(req.query.code ?? '');
     let stateToken = String(req.query.state ?? '');
     let { html } = await handleAuthCallback(
@@ -64,59 +65,53 @@ app.get('/v1/auth/github/callback', async (req, res) => {
       requestOrigin(req)
     );
     res.status(200).type('html').send(html);
-  } catch (error: unknown) {
-    res.status(400).json({ error: getErrorMessage(error) });
-  }
-});
+  })
+);
 
-app.post('/v1/auth/github/refresh', requireSession, async (req, res) => {
-  try {
+app.post(
+  '/v1/auth/github/refresh',
+  requireSession,
+  handleErrors(async (req, res) => {
     let claims = req.sessionUser;
-    if (!claims) {
-      return res.status(401).json({ error: 'missing session' });
-    }
+    if (!claims) throw HttpError(401, 'missing session');
     let tokens = await refreshAccessToken(env, sessionStore, claims.sessionId);
     res.json({ accessToken: tokens.accessToken, accessTokenExpiresAt: tokens.accessTokenExpiresAt });
-  } catch (error: unknown) {
-    res.status(401).json({ error: getErrorMessage(error) });
-  }
-});
+  })
+);
 
-app.post('/v1/auth/github/logout', requireSession, async (req, res) => {
-  try {
+app.post(
+  '/v1/auth/github/logout',
+  requireSession,
+  handleErrors(async (req, res) => {
     let claims = req.sessionUser;
-    if (!claims) {
-      return res.status(401).json({ error: 'missing session' });
-    }
+    if (!claims) throw HttpError(401, 'missing session');
     await logoutSession(sessionStore, claims.sessionId);
     res.status(204).end();
-  } catch (error: unknown) {
-    res.status(400).json({ error: getErrorMessage(error) });
-  }
-});
+  })
+);
 
-app.get('/v1/app/install-url', async (req, res) => {
-  let owner = String(req.query.owner ?? '');
-  let repo = String(req.query.repo ?? '');
-  let returnTo = String(req.query.returnTo ?? '');
-  let sanitizedReturnTo = normalizeReturnTo(returnTo, env.ALLOWED_ORIGINS);
-  if (sanitizedReturnTo === null && returnTo.trim().length > 0) {
-    return res.status(400).json({ error: 'invalid returnTo origin' });
-  }
-  let url = await buildInstallUrl(env, owner, repo, sanitizedReturnTo ?? '');
-  res.json({ url });
-});
+app.get(
+  '/v1/app/install-url',
+  handleErrors(async (req, res) => {
+    let owner = String(req.query.owner ?? '');
+    let repo = String(req.query.repo ?? '');
+    let returnTo = String(req.query.returnTo ?? '');
+    let sanitizedReturnTo = normalizeReturnTo(returnTo, env.ALLOWED_ORIGINS);
+    if (sanitizedReturnTo === null && returnTo.trim().length > 0) throw Error('invalid returnTo origin');
+    let url = await buildInstallUrl(env, owner, repo, sanitizedReturnTo ?? '');
+    res.json({ url });
+  })
+);
 
-app.get('/v1/app/setup', async (req, res) => {
-  try {
+app.get(
+  '/v1/app/setup',
+  handleErrors(async (req, res) => {
     let installationId = req.query.installation_id ? String(req.query.installation_id) : null;
     let setupAction = req.query.setup_action ? String(req.query.setup_action) : null;
     let stateToken = String(req.query.state ?? '');
     let returnTo = String(req.query.returnTo ?? '');
     let sanitizedReturnTo = normalizeReturnTo(returnTo, env.ALLOWED_ORIGINS);
-    if (sanitizedReturnTo === null && returnTo.trim().length > 0) {
-      return res.status(400).json({ error: 'invalid returnTo origin' });
-    }
+    if (sanitizedReturnTo === null && returnTo.trim().length > 0) throw Error('invalid returnTo origin');
     let target = await buildSetupRedirect(
       env,
       stateToken,
@@ -126,14 +121,14 @@ app.get('/v1/app/setup', async (req, res) => {
       requestOrigin(req)
     );
     res.redirect(target);
-  } catch (error: unknown) {
-    res.status(400).json({ error: getErrorMessage(error) });
-  }
-});
+  })
+);
 
 app.post('/v1/webhooks/github', (_req, res) => {
   res.status(204).end();
 });
+
+sharingEndpoints(app);
 
 const server = app.listen(env.PORT, () => {
   console.log(`[vibenote] api listening on :${env.PORT}`);
@@ -177,11 +172,6 @@ function getHost(req: express.Request): string {
   return req.header('x-forwarded-host') ?? req.get('host') ?? 'localhost';
 }
 
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message) return error.message;
-  return String(error);
-}
-
 function normalizeReturnTo(value: string, allowedOrigins: string[]): string | null {
   // Ensure callbacks only ever return control to trusted frontend origins.
   let trimmed = value.trim();
@@ -202,18 +192,4 @@ function normalizeReturnTo(value: string, allowedOrigins: string[]): string | nu
     return null;
   }
   return parsed.toString();
-}
-
-function requireSession(req: express.Request, res: express.Response, next: express.NextFunction) {
-  let header = req.header('authorization') || req.header('Authorization');
-  if (!header || !header.toLowerCase().startsWith('bearer ')) {
-    return res.status(401).json({ error: 'missing auth' });
-  }
-  let token = header.slice(7).trim();
-  verifyBearerSession(token, env)
-    .then((claims) => {
-      req.sessionUser = claims;
-      next();
-    })
-    .catch(() => res.status(401).json({ error: 'invalid session' }));
 }
