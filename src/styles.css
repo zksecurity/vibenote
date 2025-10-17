@@ -1036,10 +1036,11 @@ textarea:focus-visible {
 .share-url-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
-.share-url {
+.share-url-input {
   flex: 1 1 auto;
   max-width: 100%;
   padding: 10px 12px;
@@ -1048,8 +1049,65 @@ textarea:focus-visible {
   background: var(--surface-subtle);
   font-family: var(--code-font);
   font-size: 0.92rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  color: var(--text);
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.share-url-input:focus {
+  outline: none;
+}
+
+.share-url-input:focus-visible {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px rgba(9, 105, 218, 0.18);
+}
+
+.share-copy-btn {
+  padding: 10px 14px;
+  border-radius: 10px;
+  min-width: 116px;
+}
+
+.share-copy-btn svg {
+  pointer-events: none;
+}
+
+.share-copy-btn[data-state='copied'] {
+  background: rgba(31, 136, 61, 0.12);
+  border-color: var(--success-border);
+  color: var(--success);
+}
+
+.share-copy-btn[data-state='error'] {
+  background: rgba(180, 35, 24, 0.1);
+  border-color: rgba(180, 35, 24, 0.4);
+  color: #b42318;
+}
+
+.share-copy-btn[data-state='copied']:hover {
+  background: rgba(31, 136, 61, 0.16);
+}
+
+.share-copy-btn[data-state='error']:hover {
+  background: rgba(180, 35, 24, 0.16);
+}
+
+.share-copy-btn-label {
+  white-space: nowrap;
+}
+
+@media (max-width: 520px) {
+  .share-url-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .share-copy-btn {
+    width: 100%;
+    justify-content: center;
+  }
 }
 
 .share-hint {

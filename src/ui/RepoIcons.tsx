@@ -1,8 +1,18 @@
 // Centralized icon wrappers to keep Lucide usage consistent across the UI.
 import type { ReactElement } from 'react';
-import { ExternalLink, NotebookText, RefreshCw, Share2, X } from 'lucide-react';
+import { AlertCircle, Check, Copy, ExternalLink, NotebookText, RefreshCw, Share2, X } from 'lucide-react';
 
-export { GitHubIcon, ExternalLinkIcon, NotesIcon, CloseIcon, SyncIcon, ShareIcon };
+export {
+  GitHubIcon,
+  ExternalLinkIcon,
+  NotesIcon,
+  CloseIcon,
+  SyncIcon,
+  ShareIcon,
+  CopyIcon,
+  CopySuccessIcon,
+  CopyErrorIcon,
+};
 
 const iconStrokeWidth = 1.8;
 
@@ -36,4 +46,16 @@ function SyncIcon({ syncing }: { syncing: boolean }): ReactElement {
 
 function ShareIcon(): ReactElement {
   return <Share2 aria-hidden size={18} strokeWidth={iconStrokeWidth} />;
+}
+
+function CopyIcon(): ReactElement {
+  return <Copy aria-hidden size={18} strokeWidth={iconStrokeWidth} />;
+}
+
+function CopySuccessIcon(): ReactElement {
+  return <Check aria-hidden size={18} strokeWidth={iconStrokeWidth} />;
+}
+
+function CopyErrorIcon(): ReactElement {
+  return <AlertCircle aria-hidden size={18} strokeWidth={iconStrokeWidth} />;
 }
