@@ -223,8 +223,8 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   }, [canEdit, activeId]);
 
   let activeFile: RepoFile | undefined = canEdit ? activeLocalFile : activeReadOnlyFile;
-
-  let activePath = activeFile?.path ?? activeFileMeta?.path ?? desiredPath;
+  let activePath = activeFile?.path;
+  let activeIsMarkdown = activeFile?.kind === 'markdown';
 
   // EFFECTS
   // please avoid adding more effects here, keep logic clean/separated
@@ -334,6 +334,11 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       setShareState((prev) => (prev.status === 'idle' ? prev : { status: 'idle' }));
       return;
     }
+    if (!activeIsMarkdown) {
+      shareRequestRef.current = null;
+      setShareState((prev) => (prev.status === 'idle' ? prev : { status: 'idle' }));
+      return;
+    }
     const target = { owner: repoOwner, repo: repoName, path: activePath };
     const current = shareRequestRef.current;
     const sameTarget = current !== null && current !== undefined && shareTargetEquals(current, target);
@@ -346,7 +351,16 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       return;
     }
     void loadShareForTarget(target);
-  }, [repoOwner, repoName, activePath, hasSession, canEdit, shareState, loadShareForTarget]);
+  }, [
+    repoOwner,
+    repoName,
+    activePath,
+    activeIsMarkdown,
+    hasSession,
+    canEdit,
+    shareState,
+    loadShareForTarget,
+  ]);
 
   // CLICK HANDLERS
 
@@ -568,7 +582,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   };
 
   const refreshShare = async () => {
-    if (!repoOwner || !repoName || !hasSession || activePath === undefined) {
+    if (!repoOwner || !repoName || !hasSession || activePath === undefined || !activeIsMarkdown) {
       setShareState({ status: 'idle' });
       return;
     }
