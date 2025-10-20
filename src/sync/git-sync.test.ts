@@ -110,6 +110,38 @@ describe('syncBidirectional', () => {
     expectParity(store, remote);
   });
 
+  test('rename followed by local edit pushes updated content under new path', async () => {
+    store.createFile('Draft.md', 'initial body');
+    await syncBidirectional(store, 'user/repo');
+    expect([...remote.snapshot().keys()]).toEqual(['Draft.md']);
+
+    const nextPath = store.renameFile('Draft.md', 'Ready');
+    expect(nextPath).toBe('Ready.md');
+    store.saveFile('Ready.md', 'edited after rename');
+
+    await syncBidirectional(store, 'user/repo');
+
+    const remoteFiles = [...remote.snapshot().entries()];
+    expect(remoteFiles).toEqual([['Ready.md', 'edited after rename']]);
+    const readyMeta = store.listFiles().find((file) => file.path === 'Ready.md');
+    const readyDoc = readyMeta ? store.loadFileById(readyMeta.id) : null;
+    expect(readyDoc?.content).toBe('edited after rename');
+    expect(listTombstones(store.slug)).toHaveLength(0);
+  });
+
+  test('surface 422 when branch head advances during push', async () => {
+    store.createFile('Lonely.md', 'seed text');
+    await syncBidirectional(store, 'user/repo');
+
+    store.saveFile('Lonely.md', 'edited locally');
+    remote.advanceHeadOnNextUpdate();
+
+    await expect(syncBidirectional(store, 'user/repo')).rejects.toMatchObject({
+      status: 422,
+      path: expect.stringContaining('/git/refs/heads/'),
+    });
+  });
+
   test('pulls new remote notes', async () => {
     remote.setFile('Remote.md', '# remote');
     await syncBidirectional(store, 'user/repo');

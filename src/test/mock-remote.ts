@@ -33,6 +33,7 @@ class MockRemoteRepo {
   private treeRecords = new Map<string, TreeRecord>();
   private commitRecords = new Map<string, CommitRecord>();
   private installations = new Map<string, InstallationInfo>();
+  private pendingHeadAdvance = new Set<string>();
 
   configure(owner: string, repo: string) {
     this.owner = owner;
@@ -107,8 +108,25 @@ class MockRemoteRepo {
       const body = (await this.parseBody(request)) ?? {};
       const sha = typeof body?.sha === 'string' ? String(body.sha) : '';
       const branch = decodeURIComponent(refPatchMatch[3] ?? '');
+      const force = body?.force === true;
       if (!sha) {
         return this.makeResponse(422, { message: 'missing sha' });
+      }
+      if (this.pendingHeadAdvance.has(branch) && force !== true) {
+        this.pendingHeadAdvance.delete(branch);
+        this.createSyntheticCommit(branch);
+      }
+      const commit = this.commitRecords.get(sha);
+      if (!commit) {
+        return this.makeResponse(422, { message: 'unknown commit' });
+      }
+      const currentHead = this.headByBranch.get(branch);
+      if (currentHead && force !== true && !this.isDescendant(sha, currentHead)) {
+        return this.makeResponse(422, {
+          message: 'fast-forward required',
+          currentHead,
+          attempted: sha,
+        });
       }
       this.setHead(branch, sha);
       return this.makeResponse(200, {
@@ -189,10 +207,14 @@ class MockRemoteRepo {
       const body = (await this.parseBody(request)) ?? {};
       const ref = typeof body.ref === 'string' ? body.ref : '';
       const sha = typeof body.sha === 'string' ? body.sha : '';
-      if (!ref.startsWith('refs/heads/') || !this.commitRecords.has(sha)) {
+      const branch = ref.replace('refs/heads/', '');
+      if (
+        !ref.startsWith('refs/heads/') ||
+        !this.commitRecords.has(sha) ||
+        this.headByBranch.has(branch)
+      ) {
         return this.makeResponse(422, { message: 'invalid ref' });
       }
-      const branch = ref.replace('refs/heads/', '');
       this.setHead(branch, sha);
       return this.makeResponse(201, { ref, object: { sha, type: 'commit' } });
     }
@@ -200,40 +222,45 @@ class MockRemoteRepo {
     const createTreeMatch = url.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/git\/trees$/);
     if (createTreeMatch && method === 'POST') {
       const body = (await this.parseBody(request)) ?? {};
-    const entries: Array<{ path?: string; mode?: string; type?: string; content?: string; sha?: string | null }> =
-      Array.isArray(body.tree) ? body.tree : [];
-    const nextTree = new Map<string, RemoteFile>();
-    const deleted = new Set<string>();
-    let base = this.files;
-    if (typeof body.base_tree === 'string') {
-      const baseTree = this.treeRecords.get(body.base_tree);
-      if (baseTree) base = this.cloneFiles(baseTree);
-    }
-    for (const entry of entries) {
-      if (!entry.path) continue;
-      if (entry.sha === null) {
-        deleted.add(entry.path);
-        continue;
+      const entries: Array<{
+        path?: string;
+        mode?: string;
+        type?: string;
+        content?: string;
+        sha?: string | null;
+      }> = Array.isArray(body.tree) ? body.tree : [];
+      const nextTree = new Map<string, RemoteFile>();
+      const deleted = new Set<string>();
+      let base = this.files;
+      if (typeof body.base_tree === 'string') {
+        const baseTree = this.treeRecords.get(body.base_tree);
+        if (baseTree) base = this.cloneFiles(baseTree);
       }
-      if (entry.type === 'blob' && typeof entry.content === 'string') {
-        const text = entry.content;
-        const sha = this.computeSha(text);
-        nextTree.set(entry.path, { text, sha });
-        this.blobs.set(sha, text);
-      } else if (entry.sha) {
-        const blob = this.blobs.get(entry.sha);
-        if (blob !== undefined) {
-          nextTree.set(entry.path, { text: blob, sha: entry.sha });
+      for (const entry of entries) {
+        if (!entry.path) continue;
+        if (entry.sha === null) {
+          deleted.add(entry.path);
+          continue;
+        }
+        if (entry.type === 'blob' && typeof entry.content === 'string') {
+          const text = entry.content;
+          const sha = this.computeSha(text);
+          nextTree.set(entry.path, { text, sha });
+          this.blobs.set(sha, text);
+        } else if (entry.sha) {
+          const blob = this.blobs.get(entry.sha);
+          if (blob !== undefined) {
+            nextTree.set(entry.path, { text: blob, sha: entry.sha });
+          }
         }
       }
-    }
-    const combined = this.cloneFiles(base);
-    for (const [path, file] of nextTree.entries()) {
-      combined.set(path, file);
-    }
-    for (const path of deleted) {
-      combined.delete(path);
-    }
+      const combined = this.cloneFiles(base);
+      for (const [path, file] of nextTree.entries()) {
+        combined.set(path, file);
+      }
+      for (const path of deleted) {
+        combined.delete(path);
+      }
       const treeSha = this.nextTree();
       this.treeRecords.set(treeSha, combined);
       return this.makeResponse(201, { sha: treeSha, tree: this.formatTree(combined, true) });
@@ -253,16 +280,6 @@ class MockRemoteRepo {
         parents,
       });
       return this.makeResponse(201, { sha: commitSha });
-    }
-
-    const updateRefMatch = url.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/git\/refs\/heads\/([^/]+)$/);
-    if (updateRefMatch && method === 'PATCH') {
-      const branch = decodeURIComponent(updateRefMatch[3] ?? '');
-      const body = (await this.parseBody(request)) ?? {};
-      const sha = typeof body.sha === 'string' ? body.sha : '';
-      if (!sha) return this.makeResponse(422, { message: 'missing sha' });
-      this.setHead(branch, sha);
-      return this.makeResponse(200, { ref: `refs/heads/${branch}`, object: { sha, type: 'commit' } });
     }
 
     const contentGetMatch = url.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/contents\/(.+)$/);
@@ -299,6 +316,43 @@ class MockRemoteRepo {
     }
 
     return this.makeResponse(404, { message: 'not found' });
+  }
+
+  // Schedule a synthetic commit before the next ref update to simulate an external writer.
+  advanceHeadOnNextUpdate(branch: string = this.defaultBranch) {
+    this.pendingHeadAdvance.add(branch);
+  }
+
+  private createSyntheticCommit(branch: string) {
+    const snapshot = this.cloneFiles(this.files);
+    const treeSha = this.nextTree();
+    this.treeRecords.set(treeSha, this.cloneFiles(snapshot));
+    const parent = this.headByBranch.get(branch);
+    const commitSha = this.nextCommit();
+    this.commitRecords.set(commitSha, {
+      treeSha,
+      files: this.cloneFiles(snapshot),
+      parents: parent ? [parent] : [],
+    });
+    this.setHead(branch, commitSha);
+  }
+
+  private isDescendant(descendant: string, ancestor: string): boolean {
+    if (descendant === ancestor) return true;
+    const visited = new Set<string>();
+    const queue: string[] = [descendant];
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (!current || visited.has(current)) continue;
+      visited.add(current);
+      const commit = this.commitRecords.get(current);
+      if (!commit) continue;
+      for (const parent of commit.parents) {
+        if (parent === ancestor) return true;
+        queue.push(parent);
+      }
+    }
+    return false;
   }
 
   private ensureRequest(input: RequestInfo | URL, init?: RequestInit): Request {
