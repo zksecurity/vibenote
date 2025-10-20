@@ -34,6 +34,9 @@ class MockRemoteRepo {
   private commitRecords = new Map<string, CommitRecord>();
   private installations = new Map<string, InstallationInfo>();
   private pendingHeadAdvance = new Set<string>();
+  private simulateStale = false;
+  private staleWindowMs = 0;
+  private staleRefByBranch = new Map<string, { commit: string; until: number }>();
 
   configure(owner: string, repo: string) {
     this.owner = owner;
@@ -42,6 +45,12 @@ class MockRemoteRepo {
 
   allowToken(token: string) {
     this.installations.set(token, {});
+  }
+
+  enableStaleReads(options: { enabled: boolean; windowMs?: number } = { enabled: true }) {
+    this.simulateStale = options.enabled;
+    this.staleWindowMs = options.windowMs ?? 200;
+    this.staleRefByBranch.clear();
   }
 
   snapshot(): Map<string, string> {
@@ -97,9 +106,13 @@ class MockRemoteRepo {
       if (!head) {
         return this.makeResponse(404, { message: 'not found' });
       }
+      const stale = this.simulateStale ? this.staleRefByBranch.get(branch) : undefined;
+      const now = Date.now();
+      const shaToServe =
+        stale && stale.until > now && this.commitRecords.has(stale.commit) ? stale.commit : head;
       return this.makeResponse(200, {
         ref: `refs/heads/${branch}`,
-        object: { sha: head, type: 'commit' },
+        object: { sha: shaToServe, type: 'commit' },
       });
     }
 
@@ -129,6 +142,9 @@ class MockRemoteRepo {
         });
       }
       this.setHead(branch, sha);
+      if (this.simulateStale) {
+        this.staleRefByBranch.set(branch, { commit: currentHead ?? sha, until: Date.now() + this.staleWindowMs });
+      }
       return this.makeResponse(200, {
         ref: `refs/heads/${branch}`,
         object: { sha, type: 'commit' },
