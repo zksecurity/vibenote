@@ -413,6 +413,45 @@ describe('useRepoData', () => {
     expect(result.current.state.user).toEqual(expect.objectContaining({ login: 'hubot' }));
   });
 
+  test('sync surfaces detailed message when GitHub returns 422', async () => {
+    const slug = 'acme/docs';
+    const recordRecent = vi.fn<RecordRecentFn>();
+
+    mockGetSessionToken.mockReturnValue('session-token');
+    mockGetSessionUser.mockReturnValue({
+      login: 'hubot',
+      name: null,
+      avatarUrl: 'https://example.com/hubot.png',
+    });
+    markRepoLinked(slug);
+
+    const ghError = Object.assign(new Error('GitHub request failed (422)'), {
+      status: 422,
+      path: '/repos/acme/docs/git/refs/heads/main',
+      body: { message: 'Update is not a fast-forward' },
+      syncContexts: [{ operation: 'delete', paths: ['Ready.md'] }],
+    });
+    mockSyncBidirectional.mockRejectedValue(ghError);
+
+    const { result } = renderRepoData({
+      slug,
+      route: { kind: 'repo', owner: 'acme', repo: 'docs' },
+      recordRecent,
+    });
+
+    await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
+    await waitFor(() => expect(result.current.state.canSync).toBe(true));
+
+    await act(async () => {
+      await result.current.actions.syncNow();
+    });
+
+    expect(mockSyncBidirectional).toHaveBeenCalledWith(expect.any(LocalStore), slug);
+    expect(result.current.state.statusMessage).toBe(
+      'Sync failed: GitHub returned 422 while updating refs/heads/main for Ready.md (Update is not a fast-forward). Please report this bug.'
+    );
+  });
+
   // Read-only repos should list remote notes and refresh on selection.
   test('read-only repos surface notes and refresh on selection', async () => {
     const slug = 'octo/wiki';

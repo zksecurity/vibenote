@@ -450,7 +450,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       setStatusMessage(parts.length ? `Synced: ${parts.join(', ')}` : 'Up to date');
     } catch (error) {
       logError(error);
-      setStatusMessage('Sync failed');
+      setStatusMessage(formatSyncFailure(error));
     }
   };
 
@@ -934,6 +934,115 @@ function shareTargetEquals(
 function formatError(error: unknown): string {
   if (error instanceof Error && typeof error.message === 'string') return error.message;
   return String(error);
+}
+
+type GitHubRequestError = Error & {
+  status?: number;
+  path?: string;
+  body?: unknown;
+  text?: string | null;
+  syncContexts?: SyncRequestContext[];
+};
+
+function formatSyncFailure(error: unknown): string {
+  const fallback = 'Sync failed';
+  if (!error || typeof error !== 'object') return fallback;
+  const err = error as GitHubRequestError;
+  if (err.status === 422) {
+    const action = describeGitHubRequest(err.path);
+     const affected = describeAffectedPaths(err);
+    const reason = extractGitHubReason(err);
+    let message = `Sync failed: GitHub returned 422 while ${action}`;
+    if (affected) message += ` for ${affected}`;
+    if (reason) message += ` (${reason})`;
+    return `${message}. Please report this bug.`;
+  }
+  return fallback;
+}
+
+type SyncRequestContext = {
+  operation: 'put' | 'delete' | 'batch';
+  paths: string[];
+};
+
+function describeGitHubRequest(path: string | undefined): string {
+  if (!path) return 'processing the GitHub request';
+  let cleaned = stripRepoPrefix(path);
+  if (cleaned.startsWith('git/refs/heads/')) {
+    let branch = cleaned.slice('git/refs/heads/'.length);
+    branch = decodeGitPath(branch);
+    return `updating refs/heads/${branch}`;
+  }
+  if (cleaned.startsWith('git/commits')) return 'creating a commit on GitHub';
+  if (cleaned.startsWith('git/trees')) return 'creating a tree on GitHub';
+  if (cleaned.startsWith('contents/')) {
+    const resource = decodeGitPath(cleaned.slice('contents/'.length));
+    return `updating repository contents at ${resource}`;
+  }
+  return `calling ${cleaned}`;
+}
+
+function stripRepoPrefix(path: string): string {
+  const trimmed = path.replace(/^\/+/, '');
+  const repoPattern = /^repos\/[^/]+\/[^/]+\/(.+)$/;
+  const match = trimmed.match(repoPattern);
+  if (match && typeof match[1] === 'string') {
+    return match[1];
+  }
+  return trimmed;
+}
+
+function decodeGitPath(path: string): string {
+  return path
+    .split('/')
+    .map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        return segment;
+      }
+    })
+    .join('/');
+}
+
+function extractGitHubReason(err: GitHubRequestError): string | undefined {
+  const body = err.body as { message?: unknown; errors?: unknown } | undefined;
+  if (body) {
+    if (typeof body.message === 'string' && body.message.trim() !== '') {
+      return body.message.trim();
+    }
+    if (Array.isArray(body.errors)) {
+      const messages = body.errors
+        .map((entry: unknown) => {
+          if (typeof entry === 'string') return entry;
+          if (entry && typeof entry === 'object') {
+            const msg = (entry as { message?: unknown }).message;
+            if (typeof msg === 'string' && msg.trim() !== '') return msg.trim();
+          }
+          return undefined;
+        })
+        .filter((msg): msg is string => msg !== undefined && msg !== '');
+      if (messages.length > 0) return messages.join('; ');
+    }
+  }
+  if (typeof err.text === 'string' && err.text.trim() !== '') {
+    return err.text.trim();
+  }
+  return undefined;
+}
+
+function describeAffectedPaths(err: GitHubRequestError): string | undefined {
+  const contexts = Array.isArray(err.syncContexts) ? err.syncContexts : undefined;
+  if (!contexts || contexts.length === 0) return undefined;
+  const latest = contexts[contexts.length - 1];
+  if (!latest || !Array.isArray(latest.paths) || latest.paths.length === 0) return undefined;
+  const display = latest.paths.slice(0, 3);
+  const formatted = display.map((path) => path || '(unknown path)');
+  let suffix = '';
+  if (latest.paths.length > display.length) {
+    suffix = ` and ${latest.paths.length - display.length} more`;
+  }
+  return formatted.join(', ') + suffix;
 }
 
 function findByPath<T extends { id: string; path: string }>(notes: T[], targetPath: string): T | undefined {

@@ -128,6 +128,31 @@ type PutFilePayload = {
   blobSha?: string;
 };
 
+type SyncRequestContext = {
+  operation: 'put' | 'delete' | 'batch';
+  paths: string[];
+};
+
+type ErrorWithSyncContext = Error & { syncContexts?: SyncRequestContext[] };
+
+async function withGitHubContext<T>(context: SyncRequestContext, task: () => Promise<T>): Promise<T> {
+  try {
+    return await task();
+  } catch (error) {
+    attachSyncContext(error, context);
+    throw error;
+  }
+}
+
+function attachSyncContext(error: unknown, context: SyncRequestContext): void {
+  if (!error || typeof error !== 'object') return;
+  const err = error as ErrorWithSyncContext;
+  if (!Array.isArray(err.syncContexts)) {
+    err.syncContexts = [];
+  }
+  err.syncContexts.push(context);
+}
+
 function serializeContent(file: PutFilePayload) {
   if (file.blobSha) {
     return { path: file.path, blobSha: file.blobSha };
@@ -186,8 +211,13 @@ async function ensureBinaryContent(config: RemoteConfig, doc: RepoFile): Promise
 
 // Upsert a single file and return its new content sha
 export async function putFile(config: RemoteConfig, file: PutFilePayload, message: string): Promise<string> {
-  let res = await commitChanges(config, message, [serializeContent(file)]);
-  return extractBlobSha(res, file.path) ?? file.blobSha ?? res.commitSha;
+  return await withGitHubContext(
+    { operation: 'put', paths: [file.path] },
+    async () => {
+      let res = await commitChanges(config, message, [serializeContent(file)]);
+      return extractBlobSha(res, file.path) ?? file.blobSha ?? res.commitSha;
+    }
+  );
 }
 
 export async function commitBatch(
@@ -196,10 +226,15 @@ export async function commitBatch(
   message: string
 ): Promise<string | null> {
   if (files.length === 0) return null;
-  let res = await commitChanges(config, message, files.map(serializeContent));
-  // Return the first blob sha if available to align with caller expectations
-  const firstPath = files[0]?.path;
-  return firstPath ? extractBlobSha(res, firstPath) ?? files[0]?.blobSha ?? res.commitSha : res.commitSha;
+  return await withGitHubContext(
+    { operation: 'batch', paths: files.map((file) => file.path) },
+    async () => {
+      let res = await commitChanges(config, message, files.map(serializeContent));
+      // Return the first blob sha if available to align with caller expectations
+      const firstPath = files[0]?.path;
+      return firstPath ? extractBlobSha(res, firstPath) ?? files[0]?.blobSha ?? res.commitSha : res.commitSha;
+    }
+  );
 }
 
 export async function listRepoFiles(config: RemoteConfig): Promise<RepoFileEntry[]> {
@@ -253,12 +288,17 @@ export async function deleteFiles(
   message: string
 ): Promise<string | null> {
   if (files.length === 0) return null;
-  let res = await commitChanges(
-    config,
-    message,
-    files.map((f) => ({ path: f.path, delete: true }))
+  return await withGitHubContext(
+    { operation: 'delete', paths: files.map((file) => file.path) },
+    async () => {
+      let res = await commitChanges(
+        config,
+        message,
+        files.map((f) => ({ path: f.path, delete: true }))
+      );
+      return res.commitSha || null;
+    }
   );
-  return res.commitSha || null;
 }
 
 function fromBase64(b64: string): string {
