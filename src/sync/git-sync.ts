@@ -378,7 +378,8 @@ async function commitChanges(
   let repoEncoded = encodeURIComponent(config.repo);
   let branch = config.branch ? config.branch.trim() : '';
   if (!branch) branch = 'main';
-  let refPath = `/repos/${ownerEncoded}/${repoEncoded}/git/ref/heads/${encodeURIComponent(branch)}`;
+  let refPathBase = `/repos/${ownerEncoded}/${repoEncoded}/git/ref/heads/${encodeURIComponent(branch)}`;
+  let refPath = `${refPathBase}?cache_bust=${Date.now()}`;
 
   let headSha: string | null = null;
   let baseTreeSha: string | null = null;
@@ -408,7 +409,7 @@ async function commitChanges(
   } else if (refRes.status === 404) {
     isInitialCommit = true;
   } else {
-    await throwGitHubError(refRes, refPath);
+    await throwGitHubError(refRes, refPathBase);
   }
 
   let treeItems: Array<{
@@ -705,6 +706,66 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
 
   // TODO why does this not use a default branch??
   const config = buildRemoteConfig(slug);
+
+  type PendingUpload = {
+    payload: PutFilePayload;
+    onApplied: (newSha: string) => void;
+  };
+  type PendingDelete = {
+    path: string;
+    onApplied: () => void;
+  };
+
+  const pendingUploads: PendingUpload[] = [];
+  const pendingDeletes: PendingDelete[] = [];
+
+  const queueUpload = (
+    payload: PutFilePayload,
+    options: { onPending?: () => void; onApplied: (newSha: string) => void }
+  ) => {
+    options.onPending?.();
+    pendingUploads.push({ payload, onApplied: options.onApplied });
+  };
+
+  const queueDelete = (
+    path: string,
+    options: { onPending?: () => void; onApplied: () => void }
+  ) => {
+    options.onPending?.();
+    pendingDeletes.push({ path, onApplied: options.onApplied });
+  };
+
+  const flushPendingChanges = async () => {
+    if (pendingUploads.length === 0 && pendingDeletes.length === 0) return;
+    const serializedDeletes = pendingDeletes.map((entry) => ({ path: entry.path, delete: true }));
+    const serializedUploads = pendingUploads.map((entry) => serializeContent(entry.payload));
+    const pathsForContext = [
+      ...pendingUploads.map((entry) => entry.payload.path),
+      ...pendingDeletes.map((entry) => entry.path),
+    ];
+    const message = 'vibenote: sync changes';
+    let res: CommitResponse | null = null;
+    res = await withGitHubContext({ operation: 'batch', paths: pathsForContext }, async () => {
+      return await commitChanges(config, message, [
+        ...serializedDeletes,
+        ...serializedUploads,
+      ]);
+    });
+    const commitResult = res ?? { commitSha: '', blobShas: {} };
+    for (const entry of pendingUploads) {
+      const newSha =
+        extractBlobSha(commitResult, entry.payload.path) ??
+        entry.payload.blobSha ??
+        commitResult.commitSha;
+      entry.onApplied(newSha);
+    }
+    for (const entry of pendingDeletes) {
+      entry.onApplied();
+    }
+    pendingUploads.length = 0;
+    pendingDeletes.length = 0;
+  };
+
   const storeSlug = store.slug;
   const entries = await listRepoFiles(config);
   const remoteMap = new Map<string, string>(entries.map((e) => [e.path, e.sha] as const));
@@ -759,9 +820,15 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
           debugLog(slug, 'sync:push:skip-missing-content', { path: doc.path });
           continue;
         }
-        const newSha = await putFile(config, payload, 'vibenote: update notes');
-        markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: syncedHashForDoc(doc, newSha) });
-        remoteMap.set(doc.path, newSha);
+        queueUpload(payload, {
+          onPending: () => {
+            remoteMap.set(doc.path, doc.lastRemoteSha ?? 'pending');
+          },
+          onApplied: (newSha) => {
+            markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: syncedHashForDoc(doc, newSha) });
+            remoteMap.set(doc.path, newSha);
+          },
+        });
         pushed++;
         debugLog(slug, 'sync:push:unchanged-remote', { path: doc.path });
       }
@@ -795,9 +862,15 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
           debugLog(slug, 'sync:push:skip-missing-content', { path: doc.path });
           continue;
         }
-        const newSha = await putFile(config, payload, 'vibenote: update notes');
-        markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: syncedHashForDoc(doc, newSha) });
-        remoteMap.set(doc.path, newSha);
+        queueUpload(payload, {
+          onPending: () => {
+            remoteMap.set(doc.path, doc.lastRemoteSha ?? 'pending');
+          },
+          onApplied: (newSha) => {
+            markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: syncedHashForDoc(doc, newSha) });
+            remoteMap.set(doc.path, newSha);
+          },
+        });
         pushed++;
         debugLog(slug, 'sync:push:remote-rename-only', { path: doc.path });
         continue;
@@ -810,13 +883,18 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
           if (mergedText !== doc.content) {
             updateFile(storeSlug, id, mergedText, 'markdown');
           }
-          const newSha = await putFile(
-            config,
+          queueUpload(
             { path: doc.path, content: mergedText, baseSha: rf.sha, kind: 'markdown' },
-            'vibenote: merge notes'
+            {
+              onPending: () => {
+                remoteMap.set(doc.path, doc.lastRemoteSha ?? 'pending');
+              },
+              onApplied: (newSha) => {
+                markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: hashText(mergedText) });
+                remoteMap.set(doc.path, newSha);
+              },
+            }
           );
-          markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: hashText(mergedText) });
-          remoteMap.set(doc.path, newSha);
           merged++;
           pushed++;
           debugLog(slug, 'sync:merge', { path: doc.path });
@@ -858,9 +936,15 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
           debugLog(slug, 'sync:restore-skip-missing-content', { path: doc.path });
           continue;
         }
-        const newSha = await putFile(config, payload, 'vibenote: restore note');
-        markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: syncedHashForDoc(doc, newSha) });
-        remoteMap.set(doc.path, newSha);
+        queueUpload(payload, {
+          onPending: () => {
+            remoteMap.set(doc.path, doc.lastRemoteSha ?? 'pending');
+          },
+          onApplied: (newSha) => {
+            markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: syncedHashForDoc(doc, newSha) });
+            remoteMap.set(doc.path, newSha);
+          },
+        });
         pushed++;
         debugLog(slug, 'sync:restore-remote-missing', { path: doc.path });
       } else {
@@ -888,12 +972,16 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       }
       if (!t.lastRemoteSha || t.lastRemoteSha === sha) {
         // safe to delete remotely
-        await deleteFiles(config, [{ path: t.path, sha }], 'vibenote: delete removed notes');
+        queueDelete(t.path, {
+          onApplied: () => {
+            remoteMap.delete(t.path);
+            removeTombstones(
+              storeSlug,
+              (x) => x.type === 'delete' && x.path === t.path && x.deletedAt === t.deletedAt
+            );
+          },
+        });
         deletedRemote++;
-        removeTombstones(
-          storeSlug,
-          (x) => x.type === 'delete' && x.path === t.path && x.deletedAt === t.deletedAt
-        );
         debugLog(slug, 'sync:tombstone:delete:remote-deleted', { path: t.path });
       } else {
         // remote changed since we deleted locally → keep remote (no action), clear tombstone
@@ -908,11 +996,41 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       const remoteTargetSha = remoteMap.get(t.to);
       if (targetLocal && !remoteTargetSha) {
         const { id, doc } = targetLocal;
-        const payload = await buildUploadPayload(config, doc);
+        let payload: PutFilePayload | null = null;
+        if (t.lastRemoteSha) {
+          try {
+            const base = await fetchBlob(config, t.lastRemoteSha);
+            if (base) {
+              if (doc.kind === 'markdown') {
+                const remoteText = fromBase64(base);
+                if (remoteText === doc.content) {
+                  payload = { path: doc.path, kind: 'markdown', blobSha: t.lastRemoteSha };
+                }
+              } else if (doc.kind === 'binary') {
+                if (base === doc.content) {
+                  payload = { path: doc.path, kind: 'binary', blobSha: t.lastRemoteSha };
+                }
+              } else if (doc.kind === 'asset-url') {
+                payload = { path: doc.path, kind: 'binary', blobSha: t.lastRemoteSha };
+              }
+            }
+          } catch {
+            // fall back to rebuilding payload below
+          }
+        }
+        if (!payload) {
+          payload = await buildUploadPayload(config, doc);
+        }
         if (payload) {
-          const nextSha = await putFile(config, payload, 'vibenote: update notes');
-          markSynced(storeSlug, id, { remoteSha: nextSha, syncedHash: syncedHashForDoc(doc, nextSha) });
-          remoteMap.set(t.to, nextSha);
+          queueUpload(payload, {
+            onPending: () => {
+              remoteMap.set(t.to, doc.lastRemoteSha ?? 'pending');
+            },
+            onApplied: (nextSha) => {
+              markSynced(storeSlug, id, { remoteSha: nextSha, syncedHash: syncedHashForDoc(doc, nextSha) });
+              remoteMap.set(t.to, nextSha);
+            },
+          });
           pushed++;
           debugLog(slug, 'sync:tombstone:rename:ensure-target', { to: t.to });
         } else {
@@ -944,17 +1062,16 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         remoteMap.set(t.from, shaToDelete);
       }
       if (!t.lastRemoteSha || t.lastRemoteSha === shaToDelete) {
-        await deleteFiles(
-          config,
-          [{ path: t.from, sha: shaToDelete }],
-          'vibenote: delete old path after rename'
-        );
+        queueDelete(t.from, {
+          onApplied: () => {
+            remoteMap.delete(t.from);
+            removeTombstones(
+              storeSlug,
+              (x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt
+            );
+          },
+        });
         deletedRemote++;
-        remoteMap.delete(t.from);
-        removeTombstones(
-          storeSlug,
-          (x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt
-        );
         debugLog(slug, 'sync:tombstone:rename:remote-deleted', { from: t.from, to: t.to });
         continue;
       }
@@ -987,6 +1104,8 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       );
     }
   }
+
+  await flushPendingChanges();
 
   const summary = { pulled, pushed, deletedRemote, deletedLocal, merged };
   return summary;

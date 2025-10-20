@@ -106,7 +106,11 @@ class MockRemoteRepo {
       if (!head) {
         return this.makeResponse(404, { message: 'not found' });
       }
-      const stale = this.simulateStale ? this.staleRefByBranch.get(branch) : undefined;
+      const bypassCache = this.simulateStale && url.searchParams.has('cache_bust');
+      if (bypassCache) {
+        this.staleRefByBranch.delete(branch);
+      }
+      const stale = this.simulateStale && !bypassCache ? this.staleRefByBranch.get(branch) : undefined;
       const now = Date.now();
       const shaToServe =
         stale && stale.until > now && this.commitRecords.has(stale.commit) ? stale.commit : head;
