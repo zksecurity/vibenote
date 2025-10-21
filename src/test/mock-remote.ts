@@ -239,6 +239,24 @@ class MockRemoteRepo {
       return this.makeResponse(201, { ref, object: { sha, type: 'commit' } });
     }
 
+    const createBlobMatch = url.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/git\/blobs$/);
+    if (createBlobMatch && method === 'POST') {
+      const owner = createBlobMatch[1] ?? '';
+      const repo = createBlobMatch[2] ?? '';
+      if (!this.matchesRepo(owner, repo)) {
+        return this.makeResponse(404, { message: 'not found' });
+      }
+      const body = (await this.parseBody(request)) ?? {};
+      const encoding = typeof body?.encoding === 'string' ? body.encoding : '';
+      const content = typeof body?.content === 'string' ? body.content : '';
+      if (encoding !== 'base64' || !content) {
+        return this.makeResponse(422, { message: 'invalid blob payload' });
+      }
+      const sha = this.computeSha(content);
+      this.blobs.set(sha, content);
+      return this.makeResponse(201, { sha });
+    }
+
     const createTreeMatch = url.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/git\/trees$/);
     if (createTreeMatch && method === 'POST') {
       const body = (await this.parseBody(request)) ?? {};

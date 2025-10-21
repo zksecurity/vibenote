@@ -404,6 +404,8 @@ async function commitChanges(
     await throwGitHubError(refRes, refPathBase);
   }
 
+  const blobShaCache = new Map<string, string>();
+
   let treeItems: Array<{
     path?: string;
     mode?: '100644' | '100755' | '040000' | '160000' | '120000';
@@ -426,12 +428,21 @@ async function commitChanges(
     let normalized = normalizeBase64(change.contentBase64 ?? '');
     let encoding = change.encoding ?? 'utf-8';
     if (encoding === 'base64') {
+      let blobSha = blobShaCache.get(normalized);
+      if (!blobSha) {
+        blobSha = await createBlob({
+          token,
+          ownerEncoded,
+          repoEncoded,
+          contentBase64: normalized,
+        });
+        blobShaCache.set(normalized, blobSha);
+      }
       treeItems.push({
         path: change.path,
         mode: '100644',
         type: 'blob',
-        content: normalized,
-        encoding: 'base64',
+        sha: blobSha,
       });
     } else {
       let decoded = '';
@@ -512,6 +523,27 @@ async function commitChanges(
   }
 
   return { commitSha: newCommitSha, blobShas };
+}
+
+async function createBlob(params: {
+  token: string;
+  ownerEncoded: string;
+  repoEncoded: string;
+  contentBase64: string;
+}): Promise<string> {
+  let { token, ownerEncoded, repoEncoded, contentBase64 } = params;
+  let blobPath = `/repos/${ownerEncoded}/${repoEncoded}/git/blobs`;
+  let res = await githubRequest(token, 'POST', blobPath, {
+    content: contentBase64,
+    encoding: 'base64',
+  });
+  if (!res.ok) {
+    await throwGitHubError(res, blobPath);
+  }
+  let json = await res.json();
+  let sha = typeof json?.sha === 'string' ? String(json.sha) : '';
+  if (!sha) throw new Error('GitHub blob response missing sha');
+  return sha;
 }
 
 async function requireAccessToken(): Promise<string> {

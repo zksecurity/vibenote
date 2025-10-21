@@ -105,3 +105,6 @@ Markdown notes already render relative image links by resolving repo assets thro
 - [x] Add automated tests across UI/data/sync layers.
 - [ ] Validate on desktop + mobile browsers.
 - [ ] Update documentation and mark feature complete.
+
+## Follow Ups
+- Skip the Markdown base64 round-trip in the sync queue so text uploads stay in raw UTF-8.
