@@ -27,7 +27,7 @@ The editor provides live Markdown preview with code highlighting and KaTeX, work
 ## Privacy and control
 
 - Note content lives only in your repo and the browser’s local storage.
-- Access tokens stay on-device; the backend just issues short-lived GitHub App tokens.
+- Safe OAuth: VibeNote can only access repos you install it on, and only with each user's access level.
 - Revoke a share link anytime to cut off access immediately.
 
 ## 🚀 Try it
