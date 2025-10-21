@@ -13,7 +13,26 @@ const globalAny = globalThis as {
   fetch?: typeof fetch;
 };
 
-describe('syncBidirectional', () => {
+const remoteScenarios: Array<{
+  label: string;
+  configure(remote: MockRemoteRepo): void;
+}> = [
+  {
+    label: 'fresh remote responses',
+    configure(remote) {
+      remote.enableStaleReads({ enabled: false });
+    },
+  },
+  {
+    label: 'stale remote responses with random delay',
+    configure(remote) {
+      const windowMs = Math.floor(Math.random() * 901) + 100;
+      remote.enableStaleReads({ enabled: true, windowMs });
+    },
+  },
+];
+
+describe.each(remoteScenarios)('syncBidirectional: $label', ({ configure }) => {
   let store: LocalStore;
   let remote: MockRemoteRepo;
   let syncBidirectional: typeof import('./git-sync').syncBidirectional;
@@ -24,6 +43,7 @@ describe('syncBidirectional', () => {
     remote = new MockRemoteRepo();
     remote.configure('user', 'repo');
     remote.allowToken('test-token');
+    configure(remote);
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
       remote.handleFetch(input, init)
     );

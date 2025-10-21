@@ -31,6 +31,10 @@ type SyncMocks = {
   syncBidirectional: ReturnType<typeof vi.fn>;
 };
 
+type LoggingMocks = {
+  logError: ReturnType<typeof vi.fn>;
+};
+
 const authModule = vi.hoisted<AuthMocks>(() => ({
   signInWithGitHubApp: vi.fn(),
   getSessionToken: vi.fn(),
@@ -57,6 +61,10 @@ const syncModule = vi.hoisted<SyncMocks>(() => ({
   syncBidirectional: vi.fn(),
 }));
 
+const loggingModule = vi.hoisted<LoggingMocks>(() => ({
+  logError: vi.fn(),
+}));
+
 vi.mock('../auth/app-auth', () => ({
   signInWithGitHubApp: authModule.signInWithGitHubApp,
   getSessionToken: authModule.getSessionToken,
@@ -73,12 +81,20 @@ vi.mock('../lib/backend', () => ({
   revokeShareLink: backendModule.revokeShareLink,
 }));
 
-vi.mock('../sync/git-sync', () => ({
-  buildRemoteConfig: syncModule.buildRemoteConfig,
-  listRepoFiles: syncModule.listRepoFiles,
-  pullRepoFile: syncModule.pullRepoFile,
-  syncBidirectional: syncModule.syncBidirectional,
+vi.mock('../lib/logging', () => ({
+  logError: loggingModule.logError,
 }));
+
+vi.mock('../sync/git-sync', async () => {
+  const actual = await vi.importActual<typeof import('../sync/git-sync')>('../sync/git-sync');
+  return {
+    ...actual,
+    buildRemoteConfig: syncModule.buildRemoteConfig,
+    listRepoFiles: syncModule.listRepoFiles,
+    pullRepoFile: syncModule.pullRepoFile,
+    syncBidirectional: syncModule.syncBidirectional,
+  };
+});
 
 let useRepoData: typeof import('../data').useRepoData;
 
@@ -101,6 +117,7 @@ const mockBuildRemoteConfig = syncModule.buildRemoteConfig;
 const mockListRepoFiles = syncModule.listRepoFiles;
 const mockPullRepoFile = syncModule.pullRepoFile;
 const mockSyncBidirectional = syncModule.syncBidirectional;
+const mockLogError = loggingModule.logError;
 
 const writableMeta: RepoMetadata = {
   isPrivate: true,
@@ -189,6 +206,7 @@ describe('useRepoData', () => {
     mockListRepoFiles.mockReset();
     mockPullRepoFile.mockReset();
     mockSyncBidirectional.mockReset();
+    mockLogError.mockReset();
 
     mockGetSessionToken.mockReturnValue(null);
     mockGetSessionUser.mockReturnValue(null);
@@ -450,6 +468,7 @@ describe('useRepoData', () => {
     expect(result.current.state.statusMessage).toBe(
       'Sync failed: GitHub returned 422 while updating refs/heads/main for Ready.md (Update is not a fast-forward). Please report this bug.'
     );
+    expect(mockLogError).toHaveBeenCalledWith(ghError);
   });
 
   // Read-only repos should list remote notes and refresh on selection.
