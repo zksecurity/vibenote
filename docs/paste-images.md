@@ -56,6 +56,14 @@ Markdown notes already render relative image links by resolving repo assets thro
 - Use double newlines before and after when pasting into non-empty content so the Markdown stays readable.
 - After insertion, move the caret after the final closing parenthesis to let the user continue typing.
 
+### Image Compression Pipeline
+- Before persisting, inspect clipboard images for size. When an image exceeds 3 MB or either dimension passes 2 500 px:
+  - Render the blob into an offscreen `<canvas>`, scale it down proportionally so the longest edge is 2 500 px.
+  - Re-encode as JPEG (quality 0.85) unless the source is PNG with alpha; preserve PNG when transparency is needed.
+  - If compression still leaves the payload above 4 MB, switch to WebP (quality 0.8) for a final attempt.
+- Surface metrics (original vs. compressed size) in logs for future tuning. The repo asset keeps the compressed file only; the original is discarded.
+- This keeps localStorage use reasonable and avoids exceeding GitHub API upload limits during sync.
+
 ### Offline and Sync Considerations
 - Asset creation touches only local storage, so it works offline. Sync tombstones already cover binaries; no new schema needed.
 - `syncBidirectional` already treats `binary` files correctly, so no protocol changes.
@@ -72,26 +80,27 @@ Markdown notes already render relative image links by resolving repo assets thro
 - `src/data.ts`: expose `importPastedAssets` action, wire it into Repo actions, and keep type safety.
 - `src/storage/local.ts`: add a helper for writing binary assets (likely just reuse `createFile` with `kind: 'binary'`) and ensure folder metadata includes `assets/`.
 - `src/lib/pathing.ts` (new) or existing util: add `relativePath(from, to)` helper for Markdown references.
-- `src/lib/files.ts` (new) or similar: add `fileToBase64` utility shared between editor and tests.
+- `src/lib/files.ts` (new) or similar: add `fileToBase64` utility plus compression helpers shared between editor logic and tests.
+- `src/ui/__mocks__/image-canvas.ts` (new helper) to stub canvas-based resizing in tests.
 - `src/data/data.test.ts`: add coverage for `importPastedAssets` ensuring index updates and metadata correctness.
 - `src/sync/git-sync.test.ts`: add regression covering newly created assets syncing after paste.
-- `docs/images.md`: update roadmap to mark “paste support” in progress.
 - `docs/paste-images.md`: keep this RFC updated (progress section below).
 
 ## Testing Strategy
 - **Unit**: Editor paste handler (simulate DataTransfer with image blobs); path helper; filename generator uniqueness.
-- **Data layer**: Verify `importPastedAssets` writes binary files, updates folders, and returns expected paths.
+- **Data layer**: Verify `importPastedAssets` writes binary files, updates folders, applies compression when thresholds are exceeded, and returns expected paths.
 - **Integration**: Git sync regression ensuring pasted assets publish on next sync and Markdown references remain intact.
-- **Manual smoke**: Paste screenshot on desktop + mobile Safari/Chrome; confirm preview renders and sync commit includes asset + note.
+- **Manual smoke**: Paste screenshot on desktop + mobile Safari/Chrome; confirm preview renders, compression stays lossless enough, and sync commit includes asset + note.
 
 ## Risks & Open Questions
 - Clipboard API inconsistencies on iOS Safari—needs manual validation; fall back to letting the OS paste an `<img>` tag if detection fails.
-- Large images could inflate localStorage quickly; follow-up work may need quotas or warnings.
+- Large images could still skirt compression thresholds; keep monitoring real-world telemetry and revisit max dimensions if repos with high-res assets start failing sync.
 - Handling name collisions: plan uses timestamp + random suffix; probability of conflict is negligible but we should log and retry if needed.
 
 ## Progress Tracker
 - [ ] Align on filename and folder conventions.
 - [ ] Ship core clipboard handler in the editor.
+- [ ] Implement compression/downscaling pipeline for oversized assets.
 - [ ] Implement repo action + storage plumbing.
 - [ ] Add automated tests across UI/data/sync layers.
 - [ ] Validate on desktop + mobile browsers.

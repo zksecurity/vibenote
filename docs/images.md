@@ -2,6 +2,8 @@
 
 # Image Support Roadmap
 
+> Status: This roadmap was completed on 2025-10-10 and is now archived here for reference only.
+
 ## Current Objectives
 
 - **Step 1 – Sync Foundations**
