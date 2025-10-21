@@ -791,6 +791,7 @@ export function moveFilePath(slug: string, id: string, toPath: string) {
     };
   });
   rebuildFolderIndex(slug);
+  emitRepoChange(slug);
 }
 
 function loadIndexForSlug(slug: string): FileMeta[] {

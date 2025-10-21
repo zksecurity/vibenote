@@ -41,6 +41,7 @@ import {
   listRepoFiles,
   pullRepoFile,
   type RemoteFile,
+  formatSyncFailure,
 } from './sync/git-sync';
 import { logError } from './lib/logging';
 import { useReadOnlyFiles } from './data/useReadOnlyFiles';
@@ -450,10 +451,9 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       setStatusMessage(parts.length ? `Synced: ${parts.join(', ')}` : 'Up to date');
     } catch (error) {
       logError(error);
-      setStatusMessage('Sync failed');
+      setStatusMessage(formatSyncFailure(error));
     }
   };
-
   // click on a file in the sidebar
   const selectFile = async (path: string | undefined) => {
     await selectReadOnlyFile(path);

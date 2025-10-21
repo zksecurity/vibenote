@@ -26,6 +26,7 @@ import { mergeMarkdown } from '../merge/merge';
 import { readCachedBlob, writeCachedBlob } from '../storage/blob-cache';
 
 export type { RemoteConfig, RemoteFile };
+export { formatSyncFailure };
 
 type RemoteConfig = { owner: string; repo: string; branch: string };
 
@@ -128,6 +129,31 @@ type PutFilePayload = {
   blobSha?: string;
 };
 
+type SyncRequestContext = {
+  operation: 'put' | 'delete' | 'batch';
+  paths: string[];
+};
+
+type ErrorWithSyncContext = Error & { syncContexts?: SyncRequestContext[] };
+
+async function withGitHubContext<T>(context: SyncRequestContext, task: () => Promise<T>): Promise<T> {
+  try {
+    return await task();
+  } catch (error) {
+    attachSyncContext(error, context);
+    throw error;
+  }
+}
+
+function attachSyncContext(error: unknown, context: SyncRequestContext): void {
+  if (!error || typeof error !== 'object') return;
+  const err = error as ErrorWithSyncContext;
+  if (!Array.isArray(err.syncContexts)) {
+    err.syncContexts = [];
+  }
+  err.syncContexts.push(context);
+}
+
 function serializeContent(file: PutFilePayload) {
   if (file.blobSha) {
     return { path: file.path, blobSha: file.blobSha };
@@ -186,8 +212,10 @@ async function ensureBinaryContent(config: RemoteConfig, doc: RepoFile): Promise
 
 // Upsert a single file and return its new content sha
 export async function putFile(config: RemoteConfig, file: PutFilePayload, message: string): Promise<string> {
-  let res = await commitChanges(config, message, [serializeContent(file)]);
-  return extractBlobSha(res, file.path) ?? file.blobSha ?? res.commitSha;
+  return await withGitHubContext({ operation: 'put', paths: [file.path] }, async () => {
+    let res = await commitChanges(config, message, [serializeContent(file)]);
+    return extractBlobSha(res, file.path) ?? file.blobSha ?? res.commitSha;
+  });
 }
 
 export async function commitBatch(
@@ -196,10 +224,12 @@ export async function commitBatch(
   message: string
 ): Promise<string | null> {
   if (files.length === 0) return null;
-  let res = await commitChanges(config, message, files.map(serializeContent));
-  // Return the first blob sha if available to align with caller expectations
-  const firstPath = files[0]?.path;
-  return firstPath ? extractBlobSha(res, firstPath) ?? files[0]?.blobSha ?? res.commitSha : res.commitSha;
+  return await withGitHubContext({ operation: 'batch', paths: files.map((file) => file.path) }, async () => {
+    let res = await commitChanges(config, message, files.map(serializeContent));
+    // Return the first blob sha if available to align with caller expectations
+    const firstPath = files[0]?.path;
+    return firstPath ? extractBlobSha(res, firstPath) ?? files[0]?.blobSha ?? res.commitSha : res.commitSha;
+  });
 }
 
 export async function listRepoFiles(config: RemoteConfig): Promise<RepoFileEntry[]> {
@@ -253,12 +283,14 @@ export async function deleteFiles(
   message: string
 ): Promise<string | null> {
   if (files.length === 0) return null;
-  let res = await commitChanges(
-    config,
-    message,
-    files.map((f) => ({ path: f.path, delete: true }))
-  );
-  return res.commitSha || null;
+  return await withGitHubContext({ operation: 'delete', paths: files.map((file) => file.path) }, async () => {
+    let res = await commitChanges(
+      config,
+      message,
+      files.map((f) => ({ path: f.path, delete: true }))
+    );
+    return res.commitSha || null;
+  });
 }
 
 function fromBase64(b64: string): string {
@@ -338,7 +370,8 @@ async function commitChanges(
   let repoEncoded = encodeURIComponent(config.repo);
   let branch = config.branch ? config.branch.trim() : '';
   if (!branch) branch = 'main';
-  let refPath = `/repos/${ownerEncoded}/${repoEncoded}/git/ref/heads/${encodeURIComponent(branch)}`;
+  let refPathBase = `/repos/${ownerEncoded}/${repoEncoded}/git/ref/heads/${encodeURIComponent(branch)}`;
+  let refPath = `${refPathBase}?cache_bust=${Date.now()}`;
 
   let headSha: string | null = null;
   let baseTreeSha: string | null = null;
@@ -368,7 +401,7 @@ async function commitChanges(
   } else if (refRes.status === 404) {
     isInitialCommit = true;
   } else {
-    await throwGitHubError(refRes, refPath);
+    await throwGitHubError(refRes, refPathBase);
   }
 
   let treeItems: Array<{
@@ -665,6 +698,58 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
 
   // TODO why does this not use a default branch??
   const config = buildRemoteConfig(slug);
+
+  type PendingUpload = {
+    payload: PutFilePayload;
+    onApplied: (newSha: string) => void;
+  };
+  type PendingDelete = {
+    path: string;
+    onApplied: () => void;
+  };
+
+  const pendingUploads: PendingUpload[] = [];
+  const pendingDeletes: PendingDelete[] = [];
+
+  const queueUpload = (
+    payload: PutFilePayload,
+    options: { onPending?: () => void; onApplied: (newSha: string) => void }
+  ) => {
+    options.onPending?.();
+    pendingUploads.push({ payload, onApplied: options.onApplied });
+  };
+
+  const queueDelete = (path: string, options: { onPending?: () => void; onApplied: () => void }) => {
+    options.onPending?.();
+    pendingDeletes.push({ path, onApplied: options.onApplied });
+  };
+
+  const flushPendingChanges = async () => {
+    if (pendingUploads.length === 0 && pendingDeletes.length === 0) return;
+    const serializedDeletes = pendingDeletes.map((entry) => ({ path: entry.path, delete: true }));
+    const serializedUploads = pendingUploads.map((entry) => serializeContent(entry.payload));
+    const pathsForContext = [
+      ...pendingUploads.map((entry) => entry.payload.path),
+      ...pendingDeletes.map((entry) => entry.path),
+    ];
+    const message = 'vibenote: sync changes';
+    let res: CommitResponse | null = null;
+    res = await withGitHubContext({ operation: 'batch', paths: pathsForContext }, async () => {
+      return await commitChanges(config, message, [...serializedDeletes, ...serializedUploads]);
+    });
+    const commitResult = res ?? { commitSha: '', blobShas: {} };
+    for (const entry of pendingUploads) {
+      const newSha =
+        extractBlobSha(commitResult, entry.payload.path) ?? entry.payload.blobSha ?? commitResult.commitSha;
+      entry.onApplied(newSha);
+    }
+    for (const entry of pendingDeletes) {
+      entry.onApplied();
+    }
+    pendingUploads.length = 0;
+    pendingDeletes.length = 0;
+  };
+
   const storeSlug = store.slug;
   const entries = await listRepoFiles(config);
   const remoteMap = new Map<string, string>(entries.map((e) => [e.path, e.sha] as const));
@@ -719,9 +804,15 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
           debugLog(slug, 'sync:push:skip-missing-content', { path: doc.path });
           continue;
         }
-        const newSha = await putFile(config, payload, 'vibenote: update notes');
-        markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: syncedHashForDoc(doc, newSha) });
-        remoteMap.set(doc.path, newSha);
+        queueUpload(payload, {
+          onPending: () => {
+            remoteMap.set(doc.path, doc.lastRemoteSha ?? 'pending');
+          },
+          onApplied: (newSha) => {
+            markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: syncedHashForDoc(doc, newSha) });
+            remoteMap.set(doc.path, newSha);
+          },
+        });
         pushed++;
         debugLog(slug, 'sync:push:unchanged-remote', { path: doc.path });
       }
@@ -755,9 +846,15 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
           debugLog(slug, 'sync:push:skip-missing-content', { path: doc.path });
           continue;
         }
-        const newSha = await putFile(config, payload, 'vibenote: update notes');
-        markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: syncedHashForDoc(doc, newSha) });
-        remoteMap.set(doc.path, newSha);
+        queueUpload(payload, {
+          onPending: () => {
+            remoteMap.set(doc.path, doc.lastRemoteSha ?? 'pending');
+          },
+          onApplied: (newSha) => {
+            markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: syncedHashForDoc(doc, newSha) });
+            remoteMap.set(doc.path, newSha);
+          },
+        });
         pushed++;
         debugLog(slug, 'sync:push:remote-rename-only', { path: doc.path });
         continue;
@@ -770,13 +867,18 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
           if (mergedText !== doc.content) {
             updateFile(storeSlug, id, mergedText, 'markdown');
           }
-          const newSha = await putFile(
-            config,
+          queueUpload(
             { path: doc.path, content: mergedText, baseSha: rf.sha, kind: 'markdown' },
-            'vibenote: merge notes'
+            {
+              onPending: () => {
+                remoteMap.set(doc.path, doc.lastRemoteSha ?? 'pending');
+              },
+              onApplied: (newSha) => {
+                markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: hashText(mergedText) });
+                remoteMap.set(doc.path, newSha);
+              },
+            }
           );
-          markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: hashText(mergedText) });
-          remoteMap.set(doc.path, newSha);
           merged++;
           pushed++;
           debugLog(slug, 'sync:merge', { path: doc.path });
@@ -818,9 +920,15 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
           debugLog(slug, 'sync:restore-skip-missing-content', { path: doc.path });
           continue;
         }
-        const newSha = await putFile(config, payload, 'vibenote: restore note');
-        markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: syncedHashForDoc(doc, newSha) });
-        remoteMap.set(doc.path, newSha);
+        queueUpload(payload, {
+          onPending: () => {
+            remoteMap.set(doc.path, doc.lastRemoteSha ?? 'pending');
+          },
+          onApplied: (newSha) => {
+            markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: syncedHashForDoc(doc, newSha) });
+            remoteMap.set(doc.path, newSha);
+          },
+        });
         pushed++;
         debugLog(slug, 'sync:restore-remote-missing', { path: doc.path });
       } else {
@@ -848,12 +956,16 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       }
       if (!t.lastRemoteSha || t.lastRemoteSha === sha) {
         // safe to delete remotely
-        await deleteFiles(config, [{ path: t.path, sha }], 'vibenote: delete removed notes');
+        queueDelete(t.path, {
+          onApplied: () => {
+            remoteMap.delete(t.path);
+            removeTombstones(
+              storeSlug,
+              (x) => x.type === 'delete' && x.path === t.path && x.deletedAt === t.deletedAt
+            );
+          },
+        });
         deletedRemote++;
-        removeTombstones(
-          storeSlug,
-          (x) => x.type === 'delete' && x.path === t.path && x.deletedAt === t.deletedAt
-        );
         debugLog(slug, 'sync:tombstone:delete:remote-deleted', { path: t.path });
       } else {
         // remote changed since we deleted locally → keep remote (no action), clear tombstone
@@ -868,11 +980,41 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       const remoteTargetSha = remoteMap.get(t.to);
       if (targetLocal && !remoteTargetSha) {
         const { id, doc } = targetLocal;
-        const payload = await buildUploadPayload(config, doc);
+        let payload: PutFilePayload | null = null;
+        if (t.lastRemoteSha) {
+          try {
+            const base = await fetchBlob(config, t.lastRemoteSha);
+            if (base) {
+              if (doc.kind === 'markdown') {
+                const remoteText = fromBase64(base);
+                if (remoteText === doc.content) {
+                  payload = { path: doc.path, kind: 'markdown', blobSha: t.lastRemoteSha };
+                }
+              } else if (doc.kind === 'binary') {
+                if (base === doc.content) {
+                  payload = { path: doc.path, kind: 'binary', blobSha: t.lastRemoteSha };
+                }
+              } else if (doc.kind === 'asset-url') {
+                payload = { path: doc.path, kind: 'binary', blobSha: t.lastRemoteSha };
+              }
+            }
+          } catch {
+            // fall back to rebuilding payload below
+          }
+        }
+        if (!payload) {
+          payload = await buildUploadPayload(config, doc);
+        }
         if (payload) {
-          const nextSha = await putFile(config, payload, 'vibenote: update notes');
-          markSynced(storeSlug, id, { remoteSha: nextSha, syncedHash: syncedHashForDoc(doc, nextSha) });
-          remoteMap.set(t.to, nextSha);
+          queueUpload(payload, {
+            onPending: () => {
+              remoteMap.set(t.to, doc.lastRemoteSha ?? 'pending');
+            },
+            onApplied: (nextSha) => {
+              markSynced(storeSlug, id, { remoteSha: nextSha, syncedHash: syncedHashForDoc(doc, nextSha) });
+              remoteMap.set(t.to, nextSha);
+            },
+          });
           pushed++;
           debugLog(slug, 'sync:tombstone:rename:ensure-target', { to: t.to });
         } else {
@@ -904,17 +1046,16 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         remoteMap.set(t.from, shaToDelete);
       }
       if (!t.lastRemoteSha || t.lastRemoteSha === shaToDelete) {
-        await deleteFiles(
-          config,
-          [{ path: t.from, sha: shaToDelete }],
-          'vibenote: delete old path after rename'
-        );
+        queueDelete(t.from, {
+          onApplied: () => {
+            remoteMap.delete(t.from);
+            removeTombstones(
+              storeSlug,
+              (x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt
+            );
+          },
+        });
         deletedRemote++;
-        remoteMap.delete(t.from);
-        removeTombstones(
-          storeSlug,
-          (x) => x.type === 'rename' && x.from === t.from && x.to === t.to && x.renamedAt === t.renamedAt
-        );
         debugLog(slug, 'sync:tombstone:rename:remote-deleted', { from: t.from, to: t.to });
         continue;
       }
@@ -948,6 +1089,114 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
     }
   }
 
+  await flushPendingChanges();
+
   const summary = { pulled, pushed, deletedRemote, deletedLocal, merged };
   return summary;
+}
+
+// helpers to surface errors
+
+type GitHubRequestError = Error & {
+  status?: number;
+  path?: string;
+  body?: unknown;
+  text?: string | null;
+  syncContexts?: SyncRequestContext[];
+};
+
+function formatSyncFailure(error: unknown): string {
+  const fallback = 'Sync failed';
+  if (!error || typeof error !== 'object') return fallback;
+  const err = error as GitHubRequestError;
+  if (err.status === 422) {
+    const action = describeGitHubRequest(err.path);
+    const affected = describeAffectedPaths(err);
+    const reason = extractGitHubReason(err);
+    let message = `Sync failed: GitHub returned 422 while ${action}`;
+    if (affected) message += ` for ${affected}`;
+    if (reason) message += ` (${reason})`;
+    return `${message}. Please report this bug.`;
+  }
+  return fallback;
+}
+
+function describeGitHubRequest(path: string | undefined): string {
+  if (!path) return 'processing the GitHub request';
+  let cleaned = stripRepoPrefix(path);
+  if (cleaned.startsWith('git/refs/heads/')) {
+    let branch = cleaned.slice('git/refs/heads/'.length);
+    branch = decodeGitPath(branch);
+    return `updating refs/heads/${branch}`;
+  }
+  if (cleaned.startsWith('git/commits')) return 'creating a commit on GitHub';
+  if (cleaned.startsWith('git/trees')) return 'creating a tree on GitHub';
+  if (cleaned.startsWith('contents/')) {
+    const resource = decodeGitPath(cleaned.slice('contents/'.length));
+    return `updating repository contents at ${resource}`;
+  }
+  return `calling ${cleaned}`;
+}
+
+function stripRepoPrefix(path: string): string {
+  const trimmed = path.replace(/^\/+/, '');
+  const repoPattern = /^repos\/[^/]+\/[^/]+\/(.+)$/;
+  const match = trimmed.match(repoPattern);
+  if (match && typeof match[1] === 'string') {
+    return match[1];
+  }
+  return trimmed;
+}
+
+function decodeGitPath(path: string): string {
+  return path
+    .split('/')
+    .map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        return segment;
+      }
+    })
+    .join('/');
+}
+
+function extractGitHubReason(err: GitHubRequestError): string | undefined {
+  const body = err.body as { message?: unknown; errors?: unknown } | undefined;
+  if (body) {
+    if (typeof body.message === 'string' && body.message.trim() !== '') {
+      return body.message.trim();
+    }
+    if (Array.isArray(body.errors)) {
+      const messages = body.errors
+        .map((entry: unknown) => {
+          if (typeof entry === 'string') return entry;
+          if (entry && typeof entry === 'object') {
+            const msg = (entry as { message?: unknown }).message;
+            if (typeof msg === 'string' && msg.trim() !== '') return msg.trim();
+          }
+          return undefined;
+        })
+        .filter((msg): msg is string => msg !== undefined && msg !== '');
+      if (messages.length > 0) return messages.join('; ');
+    }
+  }
+  if (typeof err.text === 'string' && err.text.trim() !== '') {
+    return err.text.trim();
+  }
+  return undefined;
+}
+
+function describeAffectedPaths(err: GitHubRequestError): string | undefined {
+  const contexts = Array.isArray(err.syncContexts) ? err.syncContexts : undefined;
+  if (!contexts || contexts.length === 0) return undefined;
+  const latest = contexts[contexts.length - 1];
+  if (!latest || !Array.isArray(latest.paths) || latest.paths.length === 0) return undefined;
+  const display = latest.paths.slice(0, 3);
+  const formatted = display.map((path) => path || '(unknown path)');
+  let suffix = '';
+  if (latest.paths.length > display.length) {
+    suffix = ` and ${latest.paths.length - display.length} more`;
+  }
+  return formatted.join(', ') + suffix;
 }
