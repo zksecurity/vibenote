@@ -4,10 +4,10 @@ VibeNote is a git-native notes app for hackers who already live in Markdown. Kee
 
 ## Use cases
 
-- 📝 Personal notebook: keep your notes in a repo you own; install as a mobile PWA and take quick notes from anywhere.
-- 🧭 Team knowledge base without Notion: keep company docs in GitHub and review changes through Git history.
-- 🧪 Engineering notebooks: draft specs, paste snippets, and store diagrams beside the code.
+- 📝 Personal notebook: keep notes in a repo you own; install on mobile to take quick notes anywhere.
+- 🧭 Team knowledge base without Notion: keep company docs in GitHub, review changes through git history.
 - 📚 Quickly publish write-ups: Get a shareable link to any note, like Hackmd but while owning the content.
+- 🧪 Engineering notebooks: draft specs, paste snippets, and store diagrams beside the code.
 
 ## Why developers pick it
 
