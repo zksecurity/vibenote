@@ -98,10 +98,10 @@ Markdown notes already render relative image links by resolving repo assets thro
 - Handling name collisions: plan uses timestamp + random suffix; probability of conflict is negligible but we should log and retry if needed.
 
 ## Progress Tracker
-- [ ] Align on filename and folder conventions.
-- [ ] Ship core clipboard handler in the editor.
-- [ ] Implement compression/downscaling pipeline for oversized assets.
-- [ ] Implement repo action + storage plumbing.
-- [ ] Add automated tests across UI/data/sync layers.
+- [x] Align on filename and folder conventions.
+- [x] Ship core clipboard handler in the editor.
+- [x] Implement compression/downscaling pipeline for oversized assets.
+- [x] Implement repo action + storage plumbing.
+- [x] Add automated tests across UI/data/sync layers.
 - [ ] Validate on desktop + mobile browsers.
 - [ ] Update documentation and mark feature complete.

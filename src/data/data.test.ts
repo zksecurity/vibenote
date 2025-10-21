@@ -6,7 +6,7 @@ import type { RepoMetadata, ShareLink } from '../lib/backend';
 import type { RepoRoute } from '../ui/routing';
 import { LocalStore, markRepoLinked, recordAutoSyncRun, setLastActiveFileId } from '../storage/local';
 import type { RemoteFile } from '../sync/git-sync';
-import type { RepoDataState } from '../data';
+import type { RepoDataState, ImportedAsset } from '../data';
 
 type AuthMocks = {
   signInWithGitHubApp: ReturnType<typeof vi.fn>;
@@ -33,6 +33,10 @@ type SyncMocks = {
 
 type LoggingMocks = {
   logError: ReturnType<typeof vi.fn>;
+};
+
+type ImageMocks = {
+  prepareClipboardImage: ReturnType<typeof vi.fn>;
 };
 
 const authModule = vi.hoisted<AuthMocks>(() => ({
@@ -65,6 +69,10 @@ const loggingModule = vi.hoisted<LoggingMocks>(() => ({
   logError: vi.fn(),
 }));
 
+const imageModule = vi.hoisted<ImageMocks>(() => ({
+  prepareClipboardImage: vi.fn(),
+}));
+
 vi.mock('../auth/app-auth', () => ({
   signInWithGitHubApp: authModule.signInWithGitHubApp,
   getSessionToken: authModule.getSessionToken,
@@ -83,6 +91,10 @@ vi.mock('../lib/backend', () => ({
 
 vi.mock('../lib/logging', () => ({
   logError: loggingModule.logError,
+}));
+
+vi.mock('../lib/image-processing', () => ({
+  prepareClipboardImage: imageModule.prepareClipboardImage,
 }));
 
 vi.mock('../sync/git-sync', async () => {
@@ -118,6 +130,7 @@ const mockListRepoFiles = syncModule.listRepoFiles;
 const mockPullRepoFile = syncModule.pullRepoFile;
 const mockSyncBidirectional = syncModule.syncBidirectional;
 const mockLogError = loggingModule.logError;
+const mockPrepareClipboardImage = imageModule.prepareClipboardImage;
 
 const writableMeta: RepoMetadata = {
   isPrivate: true,
@@ -207,6 +220,7 @@ describe('useRepoData', () => {
     mockPullRepoFile.mockReset();
     mockSyncBidirectional.mockReset();
     mockLogError.mockReset();
+    mockPrepareClipboardImage.mockReset();
 
     mockGetSessionToken.mockReturnValue(null);
     mockGetSessionUser.mockReturnValue(null);
@@ -469,6 +483,92 @@ describe('useRepoData', () => {
       'Sync failed: GitHub returned 422 while updating refs/heads/main for Ready.md (Update is not a fast-forward). Please report this bug.'
     );
     expect(mockLogError).toHaveBeenCalledWith(ghError);
+  });
+
+  test('importPastedAssets creates binary assets and returns markdown-friendly paths', async () => {
+    const slug = 'acme/docs';
+    const recordRecent = vi.fn<RecordRecentFn>();
+
+    const uuidSpy = vi
+      .spyOn(globalThis.crypto, 'randomUUID')
+      .mockReturnValueOnce('00000000-0000-0000-0000-000000000101')
+      .mockReturnValueOnce('00000000-0000-0000-0000-000000000202')
+      .mockReturnValueOnce('00000000-0000-0000-0000-000000000303');
+
+    try {
+      const seedStore = new LocalStore(slug);
+      const noteId = seedStore.createFile('docs/nested/guide.md', '# guide');
+      const notePath = seedStore.loadFileById(noteId)?.path;
+      if (!notePath) throw new Error('Missing seeded note path');
+      markRepoLinked(slug);
+
+      mockGetSessionToken.mockReturnValue('session-token');
+      mockGetSessionUser.mockReturnValue({
+        login: 'mona',
+        name: 'Mona',
+        avatarUrl: 'https://example.com/mona.png',
+      });
+      setRepoMetadata(writableMeta);
+
+      mockPrepareClipboardImage.mockResolvedValue({
+        base64: Buffer.from('compressed-image').toString('base64'),
+        ext: 'png',
+        mimeType: 'image/png',
+        width: 1200,
+        height: 800,
+        wasCompressed: true,
+        sourceBytes: 6_000_000,
+        outputBytes: 1_200_000,
+        folder: 'assets',
+      });
+
+      const { result } = renderRepoData({
+        slug,
+        route: { kind: 'repo', owner: 'acme', repo: 'docs' },
+        recordRecent,
+      });
+
+      await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
+      await waitFor(() => expect(result.current.state.canEdit).toBe(true));
+
+      act(() => {
+        result.current.actions.selectFile(notePath);
+      });
+
+      await waitFor(() => expect(result.current.state.activeFile?.path).toBe(notePath));
+
+      let imported: ImportedAsset[] = [];
+
+      await act(async () => {
+        imported = await result.current.actions.importPastedAssets({
+          notePath,
+          files: [new File(['binary'], 'paste.png', { type: 'image/png' })],
+        });
+      });
+
+      expect(mockPrepareClipboardImage).toHaveBeenCalledTimes(1);
+      expect(imported).toHaveLength(1);
+      const entry = imported[0];
+      expect(entry).toBeDefined();
+      if (!entry) throw new Error('Missing imported asset metadata');
+      expect(entry.assetPath.startsWith('assets/pasted-image-')).toBe(true);
+      expect(entry.markdownPath.startsWith('../../assets/pasted-image-')).toBe(true);
+      expect(entry.altText.startsWith('Pasted image ')).toBe(true);
+
+      await waitFor(() =>
+        expect(result.current.state.files.some((meta) => meta.path === entry.assetPath && meta.kind === 'binary')).toBe(
+          true
+        )
+      );
+
+      let refreshedStore = new LocalStore(slug);
+      let createdMeta = refreshedStore.listFiles().find((meta) => meta.path === entry.assetPath);
+      expect(createdMeta?.kind).toBe('binary');
+      let createdDoc = createdMeta ? refreshedStore.loadFileById(createdMeta.id) : null;
+      expect(createdDoc?.content).toBe(Buffer.from('compressed-image').toString('base64'));
+    } finally {
+      uuidSpy.mockRestore();
+    }
   });
 
   // Read-only repos should list remote notes and refresh on selection.

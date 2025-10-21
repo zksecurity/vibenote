@@ -368,6 +368,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
                     readOnly={!canEdit}
                     slug={slug}
                     loadAsset={loadAsset}
+                    onImportAssets={actions.importPastedAssets}
                     onChange={(path, text) => {
                       actions.saveFile(path, text);
                     }}
