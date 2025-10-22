@@ -280,19 +280,28 @@ export class LocalStore {
     return deserializeFile(raw);
   }
 
-  saveFile(path: string, content: string) {
+  saveFile(path: string, content: string, kind?: FileKind) {
     let meta = this.findMetaByPath(path);
     if (meta === undefined) return;
-    this.saveFileById(meta.id, content);
+    this.saveFileById(meta.id, content, kind);
   }
 
-  private saveFileById(id: string, content: string) {
+  private saveFileById(id: string, content: string, kind?: FileKind) {
     let doc = this.loadFileById(id);
     if (!doc) return;
     let updatedAt = Date.now();
-    let next: RepoFile = { ...doc, content, updatedAt };
+    kind = kind ?? doc.kind;
+    // guard against invalid asset-url content we used to see in tests
+    if (
+      kind === 'asset-url' &&
+      !content.startsWith('gh-blob:') &&
+      !/^[a-z][a-z0-9+\-.]*:\/\//i.test(content)
+    ) {
+      throw Error('Invalid content for asset-url file');
+    }
+    let next: RepoFile = { ...doc, content, updatedAt, kind };
     localStorage.setItem(this.noteKey(id), serializeFile(next));
-    this.touchIndex(id, { updatedAt });
+    this.touchIndex(id, { updatedAt, kind });
     debugLog(this.slug, 'saveFile', { id, path: doc.path, updatedAt });
     emitRepoChange(this.slug);
   }
@@ -1115,7 +1124,8 @@ export function setExpandedFolders(slug: string, dirs: string[]) {
 
 export function computeSyncedHash(kind: FileKind, content: string, remoteSha?: string): string {
   if (kind === 'asset-url') {
-    return remoteSha ?? hashText(content);
+    if (!remoteSha) throw Error('Cannot compute synced hash for asset-url without remoteSha');
+    return remoteSha;
   }
   return hashText(content);
 }

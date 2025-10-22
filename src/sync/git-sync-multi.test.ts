@@ -284,7 +284,7 @@ describe('syncBidirectional multi-device', () => {
     let deviceTwo = createDevice('device-two', deviceOne.storage);
     let storeTwo = useDevice(deviceTwo);
     await syncBidirectional(storeTwo, REPO_SLUG);
-    storeTwo.saveFile('media/camera.png', Buffer.from('local-offline-edit').toString('base64'));
+    storeTwo.saveFile('media/camera.png', Buffer.from('local-offline-edit').toString('base64'), 'binary');
 
     storeOne = useDevice(deviceOne);
     storeOne.renameFile('media/camera.png', 'camera-updated');
@@ -401,7 +401,7 @@ describe('syncBidirectional multi-device', () => {
     let storeTwo = useDevice(deviceTwo);
     await syncBidirectional(storeTwo, REPO_SLUG);
 
-    storeTwo.saveFile('images/diagram.png', Buffer.from('local-edit').toString('base64'));
+    storeTwo.saveFile('images/diagram.png', Buffer.from('local-edit').toString('base64'), 'binary');
     remote.setFile('images/diagram.png', 'remote-edit');
 
     const summary = await syncBidirectional(storeTwo, REPO_SLUG);
