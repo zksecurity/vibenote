@@ -46,6 +46,8 @@ import {
 import { logError } from './lib/logging';
 import { useReadOnlyFiles } from './data/useReadOnlyFiles';
 import { normalizePath } from './lib/util';
+import { prepareClipboardImage } from './lib/image-processing';
+import { relativePathBetween, COMMON_ASSET_DIR } from './lib/pathing';
 import type { RepoRoute } from './ui/routing';
 
 export { useRepoData };
@@ -56,6 +58,7 @@ export type {
   RepoDataActions,
   ShareState,
   RepoAccessErrorType,
+  ImportedAsset,
 };
 
 const AUTO_SYNC_MIN_INTERVAL_MS = 60_000;
@@ -122,9 +125,15 @@ type RepoDataActions = {
   renameFolder: (dir: string, newName: string) => void;
   deleteFolder: (dir: string) => void;
   saveFile: (path: string, text: string) => void;
+  importPastedAssets: (params: { notePath: string; files: File[] }) => Promise<ImportedAsset[]>;
   createShareLink: () => Promise<void>;
   refreshShareLink: () => Promise<void>;
   revokeShareLink: () => Promise<void>;
+};
+type ImportedAsset = {
+  assetPath: string;
+  markdownPath: string;
+  altText: string;
 };
 
 type RepoDataInputs = {
@@ -548,6 +557,42 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     scheduleAutoSync();
   };
 
+  const importPastedAssets = useCallback(
+    async ({ notePath, files }: { notePath: string; files: File[] }) => {
+      if (!canEdit) return [];
+      let store = getRepoStore(slug);
+      let timestamp = buildTimestampString(new Date());
+      let altDate = timestamp.slice(0, 8);
+      let results: ImportedAsset[] = [];
+      let index = 0;
+      for (let file of files) {
+        try {
+          let prepared = await prepareClipboardImage(file);
+          if (!prepared) continue;
+          let baseName = buildAssetFileName({ timestamp, index, ext: prepared.ext });
+          let targetPath = `${COMMON_ASSET_DIR}/${baseName}`;
+          let id = store.createFile(targetPath, prepared.base64, { kind: 'binary' });
+          let created = store.loadFileById(id);
+          if (!created) continue;
+          let relative = relativePathBetween(notePath, created.path);
+          let ordinal = results.length + 1;
+          let altText = `Pasted image ${formatAltDate(altDate)}${ordinal > 1 ? ` ${ordinal}` : ''}`;
+          results.push({
+            assetPath: created.path,
+            markdownPath: relative,
+            altText,
+          });
+          index += 1;
+        } catch (error) {
+          logError(error);
+        }
+      }
+      if (results.length > 0) scheduleAutoSync();
+      return results;
+    },
+    [canEdit, scheduleAutoSync, slug]
+  );
+
   const createShare = async () => {
     if (!repoOwner || !repoName || !canEdit) return;
     if (!hasSession) {
@@ -641,6 +686,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     renameFolder,
     deleteFolder,
     saveFile,
+    importPastedAssets,
     createShareLink: createShare,
     refreshShareLink: refreshShare,
     revokeShareLink: revokeShare,
@@ -847,6 +893,8 @@ function useSync(params: { slug: string; canSync: boolean; defaultBranch?: strin
   };
 
   // Attempt a last-minute sync via the Service Worker so pending edits survive tab closure.
+  // FIXME: I don't think this works well, since it's not using our well-tested sync logic
+  // consider disabling for now, or fixing soon
   useEffect(() => {
     if (noSync || !('serviceWorker' in navigator)) return;
 
@@ -863,6 +911,8 @@ function useSync(params: { slug: string; canSync: boolean; defaultBranch?: strin
           .listFiles()
           .map((meta) => localStore.loadFileById(meta.id))
           .filter((note) => note !== null)
+          // binary files don't work, so don't try to flush them
+          .filter((note) => note.kind !== 'binary')
           .filter(
             (note) => note.lastSyncedHash !== computeSyncedHash(note.kind, note.content, note.lastRemoteSha)
           )
@@ -897,6 +947,37 @@ function useSync(params: { slug: string; canSync: boolean; defaultBranch?: strin
   }, [slug, noSync, defaultBranch]);
 
   return { autosync, setAutosync, scheduleAutoSync, performSync, syncing };
+}
+
+function buildTimestampString(date: Date): string {
+  let year = date.getFullYear();
+  let month = padTwo(date.getMonth() + 1);
+  let day = padTwo(date.getDate());
+  let hours = padTwo(date.getHours());
+  let minutes = padTwo(date.getMinutes());
+  let seconds = padTwo(date.getSeconds());
+  return `${year}${month}${day}-${hours}${minutes}${seconds}`;
+}
+
+function buildAssetFileName(params: { timestamp: string; index: number; ext: string }): string {
+  let { timestamp, index, ext } = params;
+  let sequence = index + 1;
+  let id = crypto.randomUUID().slice(0, 6);
+  return `pasted-image-${timestamp}-${sequence}-${id}.${ext}`;
+}
+
+function padTwo(value: number): string {
+  let text = `${value}`;
+  if (text.length >= 2) return text.slice(-2);
+  return `0${text}`;
+}
+
+function formatAltDate(compact: string): string {
+  if (compact.length < 8) return compact;
+  let year = compact.slice(0, 4);
+  let month = compact.slice(4, 6);
+  let day = compact.slice(6, 8);
+  return `${year}-${month}-${day}`;
 }
 
 function pathsEqual(a: string | undefined, b: string | undefined): boolean {

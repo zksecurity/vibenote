@@ -277,28 +277,35 @@ describe('syncBidirectional multi-device', () => {
     let deviceOne = createDevice('device-one');
     let storeOne = deviceOne.store;
     const initialPayload = Buffer.from('camera-v1').toString('base64');
-    storeOne.createFile('media/camera.png', initialPayload);
+    let id = storeOne.createFile('media/camera.png', initialPayload);
     await syncBidirectional(storeOne, REPO_SLUG);
     expect(remotePaths(remote)).toEqual(['media/camera.png']);
 
     let deviceTwo = createDevice('device-two', deviceOne.storage);
-    let storeTwo = useDevice(deviceTwo);
-    await syncBidirectional(storeTwo, REPO_SLUG);
-    storeTwo.saveFile('media/camera.png', Buffer.from('local-offline-edit').toString('base64'));
 
+    // rename on device one, sync
     storeOne = useDevice(deviceOne);
     storeOne.renameFile('media/camera.png', 'camera-updated');
     await syncBidirectional(storeOne, REPO_SLUG);
     expect(remotePaths(remote)).toEqual(['media/camera-updated.png']);
+    expect(remote.snapshot().get('media/camera-updated.png')).toBe(initialPayload);
 
-    storeTwo = useDevice(deviceTwo);
-    const summary = await syncBidirectional(storeTwo, REPO_SLUG);
-    expect(summary.pulled).toBeGreaterThan(0);
-    const updatedMeta = storeTwo.listFiles().find((f) => f.path === 'media/camera-updated.png');
-    const docTwo = storeTwo.loadFileById(updatedMeta?.id ?? '');
+    // edit on device two concurrently, sync
+    let storeTwo = useDevice(deviceTwo);
+    const payloadAfterEdit = Buffer.from('local-offline-edit').toString('base64');
+    // this changes the 'kind' back to 'binary'! but after sync it will be 'asset-url' again
+    storeTwo.saveFile('media/camera.png', payloadAfterEdit, 'binary');
+    await syncBidirectional(storeTwo, REPO_SLUG);
+
+    // device two has the renamed path, and an asset-url placeholder
+    let docTwo = storeTwo.loadFileById(id);
+    expect(docTwo?.path).toBe('media/camera-updated.png');
     expect(docTwo?.kind).toBe('asset-url');
     expect(docTwo?.content).toMatch(/^gh-blob:/);
-    expect(remote.snapshot().get('media/camera-updated.png')).toBe(initialPayload);
+
+    // changes are reconciled on the remote: both rename and edit are preserved
+    expect(remotePaths(remote)).toEqual(['media/camera-updated.png']);
+    expect(remote.snapshot().get('media/camera-updated.png')).toBe(payloadAfterEdit);
   });
 
   test('asset-url placeholders propagate between devices and support renames', async () => {
@@ -401,7 +408,7 @@ describe('syncBidirectional multi-device', () => {
     let storeTwo = useDevice(deviceTwo);
     await syncBidirectional(storeTwo, REPO_SLUG);
 
-    storeTwo.saveFile('images/diagram.png', Buffer.from('local-edit').toString('base64'));
+    storeTwo.saveFile('images/diagram.png', Buffer.from('local-edit').toString('base64'), 'binary');
     remote.setFile('images/diagram.png', 'remote-edit');
 
     const summary = await syncBidirectional(storeTwo, REPO_SLUG);
