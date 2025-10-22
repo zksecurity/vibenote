@@ -136,10 +136,7 @@ async function putFile(config, file, token) {
     },
     body: JSON.stringify({
       message: file.message || 'vibenote: background save',
-      content:
-        typeof file.binaryBase64 === 'string'
-          ? file.binaryBase64.replace(/\s+/g, '')
-          : btoa(unescape(encodeURIComponent(file.text || ''))),
+      content: btoa(unescape(encodeURIComponent(file.text || ''))),
       sha: file.baseSha || undefined,
       branch: config.branch || 'main',
     }),

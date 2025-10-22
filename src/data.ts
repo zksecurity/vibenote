@@ -893,6 +893,8 @@ function useSync(params: { slug: string; canSync: boolean; defaultBranch?: strin
   };
 
   // Attempt a last-minute sync via the Service Worker so pending edits survive tab closure.
+  // FIXME: I don't think this works well, since it's not using our well-tested sync logic
+  // consider disabling for now, or fixing soon
   useEffect(() => {
     if (noSync || !('serviceWorker' in navigator)) return;
 
@@ -909,6 +911,8 @@ function useSync(params: { slug: string; canSync: boolean; defaultBranch?: strin
           .listFiles()
           .map((meta) => localStore.loadFileById(meta.id))
           .filter((note) => note !== null)
+          // binary files don't work, so don't try to flush them
+          .filter((note) => note.kind !== 'binary')
           .filter(
             (note) => note.lastSyncedHash !== computeSyncedHash(note.kind, note.content, note.lastRemoteSha)
           )

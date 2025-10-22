@@ -120,7 +120,7 @@ Markdown notes already render relative image links by resolving repo assets thro
 - [x] Implement repo action + storage plumbing.
 - [x] Add automated tests across UI/data/sync layers.
 - [x] Validate on desktop + mobile browsers.
-- [ ] Fix unplanned issue: background sync messes up asset uploads.
+- [x] Fix unplanned issue: background sync messes up asset uploads, because it doesn't use blob API.
 - [ ] Update documentation and mark feature complete.
 
 ## Follow Ups
