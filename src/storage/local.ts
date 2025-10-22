@@ -5,7 +5,16 @@ import type { RemoteFile } from '../sync/git-sync';
 
 export type { FileKind, FileMeta, RepoFile, MarkdownFile, BinaryFile, AssetUrlFile, RepoStoreSnapshot };
 
-export { basename, stripExtension, extractDir, isMarkdownFile, isBinaryFile, isAssetUrlFile, debugLog };
+export {
+  basename,
+  stripExtension,
+  extractDir,
+  isMarkdownFile,
+  isBinaryFile,
+  isAssetUrlFile,
+  debugLog,
+  setDebugEnabled,
+};
 
 type FileKind = 'markdown' | 'binary' | 'asset-url';
 
@@ -88,7 +97,7 @@ function deserializeFile(raw: string | null): RepoFile | null {
 }
 
 // --- Debug logging ---
-const DEBUG_ENABLED = false;
+let DEBUG_ENABLED = false;
 
 const NS = 'vibenote';
 const REPO_PREFIX = `${NS}:repo`;
@@ -956,10 +965,14 @@ function linkKey(slug: string): string {
   return `${LINK_PREFIX}:${encodeSlug(slug)}`;
 }
 
-function debugLog(slug: string, op: string, data: object) {
+function setDebugEnabled(enabled: boolean) {
+  DEBUG_ENABLED = enabled;
+}
+
+function debugLog(op: string, slug: string, data: object) {
   if (!DEBUG_ENABLED) return;
-  console.debug('[VNDBG]', { slug, op, ...data });
-  console.trace('[VNDBG trace]', op);
+  console.debug(op, slug, data);
+  console.trace(op);
 }
 
 function normalizeSlug(slug: string): string {
