@@ -405,6 +405,7 @@ async function commitChanges(
   }
 
   const blobShaCache = new Map<string, string>();
+  let blobShas: Record<string, string> = {};
 
   let treeItems: Array<{
     path?: string;
@@ -437,6 +438,11 @@ async function commitChanges(
           contentBase64: normalized,
         });
         blobShaCache.set(normalized, blobSha);
+        // set known correct blob sha
+        // TODO this is a hack around the incomplete tree response below
+        // doesn't apply to non-binary files
+        // it's more important for binary files though, since those will get the blob sha stored in placeholder URL
+        blobShas[change.path] = blobSha;
       }
       treeItems.push({
         path: change.path,
@@ -465,9 +471,7 @@ async function commitChanges(
   let treePayload: {
     base_tree?: string;
     tree: typeof treeItems;
-  } = {
-    tree: treeItems,
-  };
+  } = { tree: treeItems };
   if (baseTreeSha) treePayload.base_tree = baseTreeSha;
 
   let treePath = `/repos/${ownerEncoded}/${repoEncoded}/git/trees`;
@@ -475,8 +479,10 @@ async function commitChanges(
   if (!treeRes.ok) {
     await throwGitHubError(treeRes, treePath);
   }
+  // FIXME: the returned payload is a shallow tree, so it will NOT contain blobs for nested files
+  // => the blob sha map we are creating here does not necessarily include blob shas of files we just added
+  // => for these files we will use the _commit sha_ for `lastRemoteSha`
   let treeJson = await treeRes.json();
-  let blobShas: Record<string, string> = {};
   if (Array.isArray(treeJson?.tree)) {
     for (let entry of treeJson.tree) {
       if (!entry || entry.type !== 'blob') continue;
@@ -733,7 +739,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
 
   type PendingUpload = {
     payload: PutFilePayload;
-    onApplied: (newSha: string) => void;
+    onApplied: (newCommitSha: string, newBlobSha?: string) => void;
   };
   type PendingDelete = {
     path: string;
@@ -745,25 +751,33 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
 
   const queueUpload = (
     payload: PutFilePayload,
-    options: { onPending?: () => void; onApplied: (newSha: string) => void }
+    options: { onPending?: () => void; onApplied: (newCommitSha: string, newBlobSha?: string) => void }
   ) => {
+    // TODO why does this exist?? why not call onPending directly?
     options.onPending?.();
     pendingUploads.push({ payload, onApplied: options.onApplied });
   };
 
-  const applyUploadResult = (params: { doc: RepoFile; id: string; newSha: string }): string => {
-    let { doc, id, newSha } = params;
-    if (doc.kind === 'binary' || doc.kind === 'asset-url') {
-      const placeholder = buildBlobPlaceholder(config, newSha);
+  const applyUploadResult = (params: {
+    doc: RepoFile;
+    id: string;
+    newCommitSha: string;
+    newBlobSha?: string;
+  }): string => {
+    let { doc, id, newCommitSha, newBlobSha } = params;
+    if (newBlobSha && (doc.kind === 'binary' || doc.kind === 'asset-url')) {
+      const placeholder = buildBlobPlaceholder(config, newBlobSha);
       if (doc.kind !== 'asset-url' || doc.content !== placeholder) {
         updateFile(storeSlug, id, placeholder, 'asset-url');
       }
-      return computeSyncedHash('asset-url', placeholder, newSha);
+      return computeSyncedHash('asset-url', placeholder, newBlobSha);
     }
-    return syncedHashForDoc(doc, newSha);
+    // TODO is it ok to simply pass the commitSha here?
+    return syncedHashForDoc(doc, newBlobSha ?? newCommitSha);
   };
 
   const queueDelete = (path: string, options: { onPending?: () => void; onApplied: () => void }) => {
+    // why does this exist?? why not call onPending directly?
     options.onPending?.();
     pendingDeletes.push({ path, onApplied: options.onApplied });
   };
@@ -783,9 +797,9 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
     });
     const commitResult = res ?? { commitSha: '', blobShas: {} };
     for (const entry of pendingUploads) {
-      const newSha =
-        extractBlobSha(commitResult, entry.payload.path) ?? entry.payload.blobSha ?? commitResult.commitSha;
-      entry.onApplied(newSha);
+      const newBlobSha = extractBlobSha(commitResult, entry.payload.path) ?? entry.payload.blobSha;
+      const newCommitSha = commitResult.commitSha;
+      entry.onApplied(newCommitSha, newBlobSha);
     }
     for (const entry of pendingDeletes) {
       entry.onApplied();
@@ -852,8 +866,10 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
           onPending: () => {
             remoteMap.set(doc.path, doc.lastRemoteSha ?? 'pending');
           },
-          onApplied: (newSha) => {
-            const syncedHash = applyUploadResult({ doc, id, newSha });
+          onApplied: (newCommitSha, newBlobSha) => {
+            const syncedHash = applyUploadResult({ doc, id, newCommitSha, newBlobSha });
+            // TODO is it ok to simply use the commitSha for `remoteSha`?
+            let newSha = newBlobSha ?? newCommitSha;
             markSynced(storeSlug, id, { remoteSha: newSha, syncedHash });
             remoteMap.set(doc.path, newSha);
           },
@@ -895,8 +911,10 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
           onPending: () => {
             remoteMap.set(doc.path, doc.lastRemoteSha ?? 'pending');
           },
-          onApplied: (newSha) => {
-            const syncedHash = applyUploadResult({ doc, id, newSha });
+          onApplied: (newCommitSha, newBlobSha) => {
+            const syncedHash = applyUploadResult({ doc, id, newCommitSha, newBlobSha });
+            // TODO is it ok to simply use the commitSha for `remoteSha`?
+            let newSha = newBlobSha ?? newCommitSha;
             markSynced(storeSlug, id, { remoteSha: newSha, syncedHash });
             remoteMap.set(doc.path, newSha);
           },
@@ -919,7 +937,9 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
               onPending: () => {
                 remoteMap.set(doc.path, doc.lastRemoteSha ?? 'pending');
               },
-              onApplied: (newSha) => {
+              onApplied: (newCommitSha, newBlobSha) => {
+                // TODO is it ok to simply use the commitSha for `remoteSha`?
+                const newSha = newBlobSha ?? newCommitSha;
                 markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: hashText(mergedText) });
                 remoteMap.set(doc.path, newSha);
               },
@@ -970,8 +990,10 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
           onPending: () => {
             remoteMap.set(doc.path, doc.lastRemoteSha ?? 'pending');
           },
-          onApplied: (newSha) => {
-            const syncedHash = applyUploadResult({ doc, id, newSha });
+          onApplied: (newCommitSha, newBlobSha) => {
+            const syncedHash = applyUploadResult({ doc, id, newCommitSha, newBlobSha });
+            // TODO is it ok to simply use the commitSha for `remoteSha`?
+            let newSha = newBlobSha ?? newCommitSha;
             markSynced(storeSlug, id, { remoteSha: newSha, syncedHash });
             remoteMap.set(doc.path, newSha);
           },
@@ -1057,10 +1079,12 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
             onPending: () => {
               remoteMap.set(t.to, doc.lastRemoteSha ?? 'pending');
             },
-            onApplied: (nextSha) => {
-              const syncedHash = applyUploadResult({ doc, id, newSha: nextSha });
-              markSynced(storeSlug, id, { remoteSha: nextSha, syncedHash });
-              remoteMap.set(t.to, nextSha);
+            onApplied: (newCommitSha, newBlobSha) => {
+              const syncedHash = applyUploadResult({ doc, id, newCommitSha, newBlobSha });
+              // TODO is it ok to simply use the commitSha for `remoteSha`?
+              let newSha = newBlobSha ?? newCommitSha;
+              markSynced(storeSlug, id, { remoteSha: newSha, syncedHash });
+              remoteMap.set(t.to, newSha);
             },
           });
           pushed++;

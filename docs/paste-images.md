@@ -121,11 +121,13 @@ Markdown notes already render relative image links by resolving repo assets thro
 - [x] Add automated tests across UI/data/sync layers.
 - [x] Validate on desktop + mobile browsers.
 - [x] Fix unplanned issue: background sync messes up asset uploads, because it doesn't use blob API.
+- [x] Fix unplanned issue: local asset-url placeholder doesn't render after first sync (but gets replaced with a working one on the second sync).
 - [x] Update documentation and mark feature complete.
 
 ## Follow Ups
 
 - Skip the Markdown base64 round-trip in the sync queue so text uploads stay in raw UTF-8.
+- Understand where we can/should use the commitSha vs. blobSha in sync tracking. Fix behavior mismatch between nested files and top-level files because of how we currently use partial /tree responses. See git-sync.ts TODOs and FIXMEs.
 
 ## Status
 
