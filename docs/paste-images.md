@@ -121,8 +121,12 @@ Markdown notes already render relative image links by resolving repo assets thro
 - [x] Add automated tests across UI/data/sync layers.
 - [x] Validate on desktop + mobile browsers.
 - [x] Fix unplanned issue: background sync messes up asset uploads, because it doesn't use blob API.
-- [ ] Update documentation and mark feature complete.
+- [x] Update documentation and mark feature complete.
 
 ## Follow Ups
 
 - Skip the Markdown base64 round-trip in the sync queue so text uploads stay in raw UTF-8.
+
+## Status
+
+Feature shipped in October 2025. Documentation updated and progress tracker closed out. Continuous usage feedback will guide any follow-up tweaks (e.g., drag-and-drop support or smarter asset deduping).
