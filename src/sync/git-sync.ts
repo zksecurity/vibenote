@@ -881,6 +881,9 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
       // Remote changed; fetch remote content
       const rf = remoteFile ?? (await pullRepoFile(config, e.path));
       if (!rf) continue;
+      // FIXME: if `lastRemoteSha` here is NOT the blob sha (but a commit sha), `baseContent` will be empty
+      // in the happy case where the remote didn't change, this will (incorrectly) end up in the rename-detected branch (without bad consequences)
+      // in the real merge case, the merge will be broken; empty base implies content will be added twice
       const baseRaw = lastRemoteSha ? await fetchBlob(config, lastRemoteSha) : '';
       const baseContent = doc.kind === 'markdown' ? fromBase64(baseRaw ?? '') : baseRaw ?? '';
       const remoteHash = computeRemoteHash(rf);

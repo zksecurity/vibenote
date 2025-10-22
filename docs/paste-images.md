@@ -128,6 +128,11 @@ Markdown notes already render relative image links by resolving repo assets thro
 
 - Skip the Markdown base64 round-trip in the sync queue so text uploads stay in raw UTF-8.
 - Understand where we can/should use the commitSha vs. blobSha in sync tracking. Fix behavior mismatch between nested files and top-level files because of how we currently use partial /tree responses. See git-sync.ts TODOs and FIXMEs.
+  - Empirically: Causes the sync pipeline to _always_ think nested files changed remotely.
+  - So nested files will always end up in the more complicated "merge" path instead of the "remote unchanged"/simple upload path.
+  - Also, fetchBlob fails (since it tries to use commit sha in the blob URL) => baseContent becomes ""
+  - In the easiest case, we end up in `remoteMatchesBase && localChangedFromBase`, which leads to "rename detected"
+  - In a harder case of actual remote changes, the markdown merge would be completely messed up because baseContent is "".
 
 ## Status
 
