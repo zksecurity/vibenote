@@ -224,6 +224,22 @@ describe.each(remoteScenarios)('syncBidirectional: $label', ({ configure }) => {
     expectParity(store, remote);
   });
 
+  test('locally created binary assets convert to blob placeholders after the subsequent sync', async () => {
+    const base64 = Buffer.from('clipboard-image').toString('base64');
+    const id = store.createFile('assets/paste.png', base64);
+
+    await syncBidirectional(store, 'user/repo');
+    const afterFirstSync = store.loadFileById(id);
+    expect(afterFirstSync?.kind).toBe('asset-url');
+    expect(afterFirstSync?.content).toMatch(/^gh-blob:/);
+    const firstPlaceholder = afterFirstSync?.content;
+
+    await syncBidirectional(store, 'user/repo');
+    const afterSecondSync = store.loadFileById(id);
+    expect(afterSecondSync?.kind).toBe('asset-url');
+    expect(afterSecondSync?.content).toBe(firstPlaceholder);
+  });
+
   test('pulls binary assets via blob fallback when contents payload is empty', async () => {
     const payload = 'high-res-image';
     const expectedBase64 = Buffer.from(payload, 'utf8').toString('base64');

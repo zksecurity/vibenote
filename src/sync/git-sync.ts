@@ -751,6 +751,18 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
     pendingUploads.push({ payload, onApplied: options.onApplied });
   };
 
+  const applyUploadResult = (params: { doc: RepoFile; id: string; newSha: string }): string => {
+    let { doc, id, newSha } = params;
+    if (doc.kind === 'binary' || doc.kind === 'asset-url') {
+      const placeholder = buildBlobPlaceholder(config, newSha);
+      if (doc.kind !== 'asset-url' || doc.content !== placeholder) {
+        updateFile(storeSlug, id, placeholder, 'asset-url');
+      }
+      return computeSyncedHash('asset-url', placeholder, newSha);
+    }
+    return syncedHashForDoc(doc, newSha);
+  };
+
   const queueDelete = (path: string, options: { onPending?: () => void; onApplied: () => void }) => {
     options.onPending?.();
     pendingDeletes.push({ path, onApplied: options.onApplied });
@@ -841,7 +853,8 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
             remoteMap.set(doc.path, doc.lastRemoteSha ?? 'pending');
           },
           onApplied: (newSha) => {
-            markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: syncedHashForDoc(doc, newSha) });
+            const syncedHash = applyUploadResult({ doc, id, newSha });
+            markSynced(storeSlug, id, { remoteSha: newSha, syncedHash });
             remoteMap.set(doc.path, newSha);
           },
         });
@@ -883,7 +896,8 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
             remoteMap.set(doc.path, doc.lastRemoteSha ?? 'pending');
           },
           onApplied: (newSha) => {
-            markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: syncedHashForDoc(doc, newSha) });
+            const syncedHash = applyUploadResult({ doc, id, newSha });
+            markSynced(storeSlug, id, { remoteSha: newSha, syncedHash });
             remoteMap.set(doc.path, newSha);
           },
         });
@@ -957,7 +971,8 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
             remoteMap.set(doc.path, doc.lastRemoteSha ?? 'pending');
           },
           onApplied: (newSha) => {
-            markSynced(storeSlug, id, { remoteSha: newSha, syncedHash: syncedHashForDoc(doc, newSha) });
+            const syncedHash = applyUploadResult({ doc, id, newSha });
+            markSynced(storeSlug, id, { remoteSha: newSha, syncedHash });
             remoteMap.set(doc.path, newSha);
           },
         });
@@ -1043,7 +1058,8 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
               remoteMap.set(t.to, doc.lastRemoteSha ?? 'pending');
             },
             onApplied: (nextSha) => {
-              markSynced(storeSlug, id, { remoteSha: nextSha, syncedHash: syncedHashForDoc(doc, nextSha) });
+              const syncedHash = applyUploadResult({ doc, id, newSha: nextSha });
+              markSynced(storeSlug, id, { remoteSha: nextSha, syncedHash });
               remoteMap.set(t.to, nextSha);
             },
           });
