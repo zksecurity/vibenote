@@ -439,6 +439,7 @@ export function FileTree(props: FileTreeProps) {
           collapsed={props.collapsed}
           activePath={props.activePath}
           selected={selected}
+          onSetSelection={(sel) => setSelected(sel)}
           menuSel={menuSel}
           editing={editing}
           editText={editText}
@@ -477,6 +478,7 @@ function Row(props: {
   collapsed: Record<string, boolean>;
   activePath: string | undefined;
   selected: Selection;
+  onSetSelection: (sel: Selection) => void;
   menuSel: Selection;
   editing: Selection;
   editText: string;
@@ -506,6 +508,7 @@ function Row(props: {
 
   const startLongPress = (e: React.PointerEvent, sel: Selection) => {
     if (e.pointerType !== 'touch') return; // mobile gesture
+    props.onSetSelection(sel);
     let timer = window.setTimeout(() => {
       props.onRequestMenu(sel);
     }, 550);
@@ -548,8 +551,7 @@ function Row(props: {
     const isEditing =
       props.editing?.kind === 'folder' && normalizePath(props.editing.path) === normalizePath(node.dir);
     const isCut =
-      props.clipboard?.kind === 'folder' &&
-      normalizePath(props.clipboard.path) === normalizePath(node.dir);
+      props.clipboard?.kind === 'folder' && normalizePath(props.clipboard.path) === normalizePath(node.dir);
     let className = 'tree-row';
     if (isActive) className += ' is-active';
     if (isCut) className += ' is-cut';
@@ -561,6 +563,7 @@ function Row(props: {
           onClick={() => props.onSelectFolder(node.dir)}
           onContextMenu={(e) => {
             e.preventDefault();
+            props.onSetSelection({ kind: 'folder', path: node.dir });
             props.onRequestMenu({ kind: 'folder', path: node.dir });
           }}
           onPointerDown={(e) => startLongPress(e, { kind: 'folder', path: node.dir })}
@@ -674,6 +677,7 @@ function Row(props: {
               editText={props.editText}
               onSelectFolder={props.onSelectFolder}
               onSelectFile={props.onSelectFile}
+              onSetSelection={props.onSetSelection}
               onToggleFolder={props.onToggleFolder}
               onStartEdit={props.onStartEdit}
               onEditTextChange={props.onEditTextChange}
@@ -710,6 +714,7 @@ function Row(props: {
       onClick={() => props.onSelectFile(node.path)}
       onContextMenu={(e) => {
         e.preventDefault();
+        props.onSetSelection({ kind: 'file', path: node.path });
         props.onRequestMenu({ kind: 'file', path: node.path });
       }}
       onPointerDown={(e) => startLongPress(e, { kind: 'file', path: node.path })}
