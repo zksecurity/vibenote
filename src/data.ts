@@ -121,8 +121,10 @@ type RepoDataActions = {
   createNote: (dir: string, name: string) => string | undefined;
   createFolder: (parentDir: string, name: string) => void;
   renameFile: (path: string, name: string) => void;
+  moveFile: (path: string, targetDir: string) => string | undefined;
   deleteFile: (path: string) => void;
   renameFolder: (dir: string, newName: string) => void;
+  moveFolder: (dir: string, targetDir: string) => string | undefined;
   deleteFolder: (dir: string) => void;
   saveFile: (path: string, text: string) => void;
   importPastedAssets: (params: { notePath: string; files: File[] }) => Promise<ImportedAsset[]>;
@@ -498,6 +500,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       getRepoStore(slug).createFolder(parentDir, name);
     } catch (error) {
       logError(error);
+      // TODO it's weird to use the status message for this
       setStatusMessage('Invalid folder name.');
       return;
     }
@@ -515,7 +518,24 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       scheduleAutoSync();
     } catch (error) {
       logError(error);
+      // TODO it's weird to use the status message for this
       setStatusMessage('Invalid file name.');
+    }
+  };
+
+  const moveFile = (path: string, targetDir: string) => {
+    if (!canEdit) return undefined;
+    try {
+      let store = getRepoStore(slug);
+      let nextPath = store.moveFile(path, targetDir);
+      if (nextPath && pathsEqual(activePath, path)) {
+        ensureActivePath(nextPath, { replace: true });
+      }
+      if (nextPath) scheduleAutoSync();
+      return nextPath;
+    } catch (error) {
+      logError(error);
+      return undefined;
     }
   };
 
@@ -523,6 +543,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     if (!canEdit) return;
     let removed = getRepoStore(slug).deleteFile(path);
     if (!removed) {
+      // TODO it's weird to use the status message for this
       setStatusMessage('Unable to delete file.');
       return;
     }
@@ -533,11 +554,35 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   const renameFolder = (dir: string, newName: string) => {
     if (!canEdit) return;
     try {
-      getRepoStore(slug).renameFolder(dir, newName);
+      let nextDir = getRepoStore(slug).renameFolder(dir, newName);
+      if (nextDir !== undefined && activePath !== undefined) {
+        // Keep the active file route in sync when its parent folder moves.
+        let remapped = remapPathForMovedFolder(activePath, dir, nextDir);
+        if (remapped !== undefined) ensureActivePath(remapped, { replace: true });
+      }
       scheduleAutoSync();
     } catch (error) {
       logError(error);
+      // TODO it's weird to use the status message for this
       setStatusMessage('Invalid folder name.');
+    }
+  };
+
+  const moveFolder = (dir: string, targetDir: string) => {
+    if (!canEdit) return undefined;
+    try {
+      let nextDir = getRepoStore(slug).moveFolder(dir, targetDir);
+      if (nextDir !== undefined && activePath !== undefined) {
+        // Keep the active file route in sync when its parent folder moves.
+        let remapped = remapPathForMovedFolder(activePath, dir, nextDir);
+        if (remapped !== undefined) ensureActivePath(remapped, { replace: true });
+      }
+      scheduleAutoSync();
+      return nextDir;
+    } catch (error) {
+      logError(error);
+      // TODO it's weird to use the status message for this
+      setStatusMessage('Invalid folder move.');
     }
   };
 
@@ -682,8 +727,10 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     createNote,
     createFolder,
     renameFile,
+    moveFile,
     deleteFile,
     renameFolder,
+    moveFolder,
     deleteFolder,
     saveFile,
     importPastedAssets,
@@ -991,6 +1038,27 @@ function isPathInsideDir(path: string, dir: string): boolean {
   let normalizedDir = normalizePath(dir);
   if (normalizedDir === '') return true;
   return normalizedPath.startsWith(normalizedDir + '/');
+}
+
+// Adjusts a file path when its containing folder tree moves from `fromDir` to `toDir`.
+// Returns the remapped path or undefined if the original path is unaffected.
+function remapPathForMovedFolder(path: string, fromDir: string, toDir: string): string | undefined {
+  let normalizedPath = normalizePath(path);
+  let normalizedFrom = normalizePath(fromDir);
+  let normalizedTo = normalizePath(toDir);
+  if (
+    normalizedPath === undefined ||
+    normalizedFrom === undefined ||
+    normalizedTo === undefined ||
+    !normalizedPath.startsWith(normalizedFrom)
+  ) {
+    return undefined;
+  }
+  let suffix = normalizedPath.slice(normalizedFrom.length);
+  let remainder = suffix.startsWith('/') ? suffix.slice(1) : suffix;
+  if (normalizedTo === '') return remainder === '' ? undefined : remainder;
+  if (remainder === '') return normalizedTo;
+  return `${normalizedTo}/${remainder}`;
 }
 
 function shareMatchesTarget(link: ShareLink, target: { owner: string; repo: string; path: string }): boolean {

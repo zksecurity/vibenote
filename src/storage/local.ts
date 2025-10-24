@@ -359,6 +359,20 @@ export class LocalStore {
     return next.path;
   }
 
+  moveFile(path: string, targetDir: string): string | undefined {
+    let meta = this.findMetaByPath(path);
+    if (meta === undefined) return undefined;
+    let doc = this.loadFileById(meta.id);
+    if (!doc) return undefined;
+    let normDir = normalizeDir(targetDir);
+    let fileName = basename(doc.path);
+    let safeName = ensureValidFileName(fileName);
+    let toPath = joinPath(normDir, safeName);
+    if (toPath === doc.path) return doc.path;
+    let next = this.applyRename(doc, toPath);
+    return next.path;
+  }
+
   // internal rename method that also supports moving files between folders
   private applyRename(doc: RepoFile, path: string): RepoFile {
     let fromPath = doc.path;
@@ -465,22 +479,32 @@ export class LocalStore {
     emitRepoChange(this.slug);
   }
 
-  renameFolder(oldDir: string, newName: string) {
+  renameFolder(oldDir: string, newName: string): string | undefined {
     let from = normalizeDir(oldDir);
-    if (from === '') return;
+    if (from === '') return undefined;
     let parent = parentDirOf(from);
     let to = normalizeDir(joinPath(parent, ensureValidFolderName(newName)));
-    this.moveFolder(from, to);
+    return this.applyFolderRename(from, to);
   }
 
-  moveFolder(fromDir: string, toDir: string) {
+  moveFolder(dir: string, targetDir: string): string | undefined {
+    let from = normalizeDir(dir);
+    if (from === '') return undefined;
+    let parent = normalizeDir(targetDir);
+    let leaf = from.slice(from.lastIndexOf('/') + 1);
+    let destination = normalizeDir(joinPath(parent, leaf));
+    if (destination === '') return undefined;
+    return this.applyFolderRename(from, destination);
+  }
+
+  private applyFolderRename(fromDir: string, toDir: string): string | undefined {
     let from = normalizeDir(fromDir);
     let to = normalizeDir(toDir);
-    if (from === '' || to === '') return;
+    if (from === '' || to === '') return undefined;
     // Prevent moving into own subtree
-    if (to === from || to.startsWith(from + '/')) return;
+    if (to === from || to.startsWith(from + '/')) return undefined;
     let folders = new Set(this.listFolders());
-    if (!folders.has(from)) return;
+    if (!folders.has(from)) return undefined;
     // Move folder entries under from → to
     let updated = new Set<string>();
     for (let d of folders) {
@@ -492,6 +516,7 @@ export class LocalStore {
         updated.add(d);
       }
     }
+    for (let ancestor of ancestorsOf(to)) updated.add(ancestor);
     // Update notes under moved folder
     let idx = this.loadIndex();
     for (let meta of idx) {
@@ -505,6 +530,7 @@ export class LocalStore {
     localStorage.setItem(this.foldersKey, JSON.stringify(Array.from(updated).sort()));
     debugLog(this.slug, 'folder:move', { from, to });
     emitRepoChange(this.slug);
+    return to;
   }
 
   deleteFolder(dir: string) {
