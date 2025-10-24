@@ -57,8 +57,8 @@ export function FileTree(props: FileTreeProps) {
   let containerRef = useRef<HTMLDivElement | null>(null);
   // Tracks which row shows the inline action menu.
   let [menuSel, setMenuSel] = useState<Selection>(null);
-  // Remembers the item marked for moving with cut/paste.
-  let [clipboard, setClipboard] = useState<Selection>(null);
+  // Remembers the item marked for moving with cut/paste (in-memory fallback when clipboard API fails).
+  let [clipboardFallback, setClipboard] = useState<Selection>(null);
 
   // Keep the latest collapsed map available to effects without resubscribing.
   let collapsedMapRef = useRef(props.collapsed);
@@ -76,18 +76,6 @@ export function FileTree(props: FileTreeProps) {
       if (props.collapsed[dir] !== true) manual.delete(dir);
     }
   }, [props.collapsed]);
-
-  // Drop clipboard when the referenced item disappears (e.g., deleted elsewhere).
-  useEffect(() => {
-    if (!clipboard) return;
-    if (clipboard.kind === 'file') {
-      let exists = props.files.some((file) => normalizePath(file.path) === normalizePath(clipboard.path));
-      if (!exists) setClipboard(null);
-      return;
-    }
-    let exists = props.folders.some((dir) => normalizePath(dir) === normalizePath(clipboard.path));
-    if (!exists) setClipboard(null);
-  }, [clipboard, props.files, props.folders]);
 
   // Leaving edit mode always resets the clipboard so rename flows stay isolated.
   useEffect(() => {
@@ -164,26 +152,80 @@ export function FileTree(props: FileTreeProps) {
     return normalizedTarget.startsWith(`${normalizedParent}/`);
   };
 
-  const cutSelection = (sel: Selection | null) => {
-    if (!sel) return false;
+  const writeClipboard = async (payload: Selection | null) => {
+    if (!payload) return false;
+    if (
+      typeof navigator === 'undefined' ||
+      !navigator.clipboard ||
+      typeof navigator.clipboard.writeText !== 'function'
+    )
+      return false;
+    try {
+      await navigator.clipboard.writeText(
+        JSON.stringify({ vibenoteCut: { kind: payload.kind, path: payload.path } })
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const readClipboard = async () => {
+    if (
+      typeof navigator === 'undefined' ||
+      !navigator.clipboard ||
+      typeof navigator.clipboard.readText !== 'function'
+    )
+      return null;
+    try {
+      let text = await navigator.clipboard.readText();
+      let parsed = JSON.parse(text);
+      if (
+        parsed &&
+        typeof parsed === 'object' &&
+        parsed.vibenoteCut &&
+        (parsed.vibenoteCut.kind === 'file' || parsed.vibenoteCut.kind === 'folder') &&
+        typeof parsed.vibenoteCut.path === 'string'
+      ) {
+        return parsed.vibenoteCut as Selection;
+      }
+    } catch {}
+    return null;
+  };
+
+  const normalizeSelection = (sel: Selection | null): Selection | null => {
+    if (!sel) return null;
     if (sel.kind === 'file') {
       let file = findFileByPath(sel.path);
-      if (!file) {
-        setClipboard(null);
-        return false;
-      }
-      setClipboard({ kind: 'file', path: file.path });
-      return true;
+      if (!file) return null;
+      return { kind: 'file', path: file.path };
     }
     let normalized = normalizePath(sel.path);
-    if (normalized === '') return false;
+    if (normalized === '') return null;
     let exists = props.folders.some((dir) => normalizePath(dir) === normalized);
-    if (!exists) return false;
-    setClipboard({ kind: 'folder', path: normalized });
+    if (!exists) return null;
+    return { kind: 'folder', path: normalized };
+  };
+
+  const rememberCutSelection = (sel: Selection | null) => {
+    let normalized = normalizeSelection(sel);
+    if (!normalized) {
+      setClipboard(null);
+      return null;
+    }
+    setClipboard(normalized);
+    return normalized;
+  };
+
+  const cutSelection = async (sel: Selection | null) => {
+    let normalized = rememberCutSelection(sel);
+    if (!normalized) return false;
+    await writeClipboard(normalized);
     return true;
   };
 
-  const pasteIntoSelection = (sel: Selection | null) => {
+  const pasteIntoSelection = async (sel: Selection | null) => {
+    let clipboard = (await readClipboard()) ?? clipboardFallback;
     if (!clipboard) return false;
     let targetDir = resolvePasteTargetDir(sel ?? selected);
     if (clipboard.kind === 'file') {
@@ -210,7 +252,10 @@ export function FileTree(props: FileTreeProps) {
       return true;
     }
     let normalizedTarget = normalizePath(targetDir);
-    if (isDescendantDir(folderPath, normalizedTarget)) return true;
+    if (isDescendantDir(folderPath, normalizedTarget)) {
+      setClipboard(null);
+      return true;
+    }
     if (normalizedTarget === folderPath) {
       setClipboard(null);
       setSelected({ kind: 'folder', path: folderPath });
@@ -227,7 +272,7 @@ export function FileTree(props: FileTreeProps) {
     // When inline-editing, let inputs handle keys (Backspace, Enter, etc.)
     if (editing) return;
     if (e.key === 'Escape') {
-      if (clipboard) {
+      if (clipboardFallback) {
         e.preventDefault();
         setClipboard(null);
         return;
@@ -237,12 +282,13 @@ export function FileTree(props: FileTreeProps) {
     if (usesPrimaryModifier) {
       let key = e.key.toLowerCase();
       if (key === 'x') {
-        if (cutSelection(selected)) e.preventDefault();
+        e.preventDefault();
+        cutSelection(selected);
         return;
       }
       if (key === 'v') {
-        if (!clipboard) return;
-        if (pasteIntoSelection(selected)) e.preventDefault();
+        e.preventDefault();
+        pasteIntoSelection(selected);
         return;
       }
     }
@@ -411,6 +457,7 @@ export function FileTree(props: FileTreeProps) {
         }
         onKeyDown(e);
       }}
+      onBlur={() => setClipboard(null)}
     >
       {props.newEntry && props.newEntry.parentDir === '' && (
         <div className="tree-row is-new" style={{ paddingLeft: 6 }}>
@@ -451,7 +498,6 @@ export function FileTree(props: FileTreeProps) {
           onSetSelection={(sel) => setSelected(sel)}
           onCutSelection={cutSelection}
           onPasteSelection={pasteIntoSelection}
-          hasClipboard={clipboard !== null}
           menuSel={menuSel}
           editing={editing}
           editText={editText}
@@ -477,7 +523,7 @@ export function FileTree(props: FileTreeProps) {
           onCloseMenu={() => setMenuSel(null)}
           onDeleteFile={props.onDeleteFile}
           onDeleteFolder={props.onDeleteFolder}
-          clipboard={clipboard}
+          clipboard={clipboardFallback}
         />
       ))}
     </div>
@@ -491,9 +537,8 @@ function Row(props: {
   activePath: string | undefined;
   selected: Selection;
   onSetSelection: (sel: Selection) => void;
-  onCutSelection: (sel: Selection) => boolean;
-  onPasteSelection: (sel: Selection) => boolean;
-  hasClipboard: boolean;
+  onCutSelection: (sel: Selection) => Promise<boolean>;
+  onPasteSelection: (sel: Selection) => Promise<boolean>;
   menuSel: Selection;
   editing: Selection;
   editText: string;
@@ -526,11 +571,7 @@ function Row(props: {
     props.onSetSelection(sel);
     let timer = window.setTimeout(() => {
       let current = props.menuSel;
-      if (
-        current &&
-        current.kind === sel?.kind &&
-        normalizePath(current.path) === normalizePath(sel?.path)
-      ) {
+      if (current && current.kind === sel?.kind && normalizePath(current.path) === normalizePath(sel?.path)) {
         props.onCloseMenu();
       } else {
         props.onRequestMenu(sel);
@@ -650,7 +691,6 @@ function Row(props: {
                 },
                 {
                   label: 'Paste',
-                  disabled: !props.hasClipboard,
                   onSelect: () => props.onPasteSelection({ kind: 'folder', path: node.dir }),
                 },
                 {
@@ -730,7 +770,6 @@ function Row(props: {
               onSetSelection={props.onSetSelection}
               onCutSelection={props.onCutSelection}
               onPasteSelection={props.onPasteSelection}
-              hasClipboard={props.hasClipboard}
               onToggleFolder={props.onToggleFolder}
               onStartEdit={props.onStartEdit}
               onEditTextChange={props.onEditTextChange}
@@ -821,7 +860,6 @@ function Row(props: {
             },
             {
               label: 'Paste',
-              disabled: !props.hasClipboard,
               onSelect: () => props.onPasteSelection({ kind: 'file', path: node.path }),
             },
             {
@@ -852,7 +890,7 @@ function Row(props: {
 
 type MenuAction = {
   label: string;
-  onSelect: () => boolean;
+  onSelect: () => boolean | Promise<boolean>;
   disabled?: boolean;
   variant?: 'danger';
 };
@@ -870,8 +908,9 @@ function TreeMenu({ actions, onClose }: { actions: MenuAction[]; onClose: () => 
             disabled={action.disabled}
             onClick={() => {
               if (action.disabled) return;
-              let shouldClose = action.onSelect();
-              if (shouldClose !== false) onClose();
+              Promise.resolve(action.onSelect()).then((shouldClose) => {
+                if (shouldClose !== false) onClose();
+              });
             }}
           >
             {action.label}
