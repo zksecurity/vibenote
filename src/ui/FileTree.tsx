@@ -25,10 +25,12 @@ type FileTreeProps = {
   onSelectionChange?: (sel: Selection) => void;
   onSelectFile: (path: string) => void;
   onRenameFile: (path: string, newName: string) => void;
+  onMoveFile: (path: string, targetDir: string) => string | undefined;
   onDeleteFile: (path: string) => void;
   onCreateFile: (dir: string, name: string) => void;
   onCreateFolder: (parentDir: string, name: string) => void;
   onRenameFolder: (dir: string, newName: string) => void;
+  onMoveFolder: (dir: string, targetDir: string) => string | undefined;
   onDeleteFolder: (path: string) => void;
   newEntry?: NewEntry; // request inline create under parent dir
   onFinishCreate?: () => void;
@@ -55,6 +57,8 @@ export function FileTree(props: FileTreeProps) {
   let containerRef = useRef<HTMLDivElement | null>(null);
   // Tracks which row shows the inline action menu.
   let [menuSel, setMenuSel] = useState<Selection>(null);
+  // Remembers the item marked for moving with cut/paste.
+  let [clipboard, setClipboard] = useState<Selection>(null);
 
   // Keep the latest collapsed map available to effects without resubscribing.
   let collapsedMapRef = useRef(props.collapsed);
@@ -72,6 +76,23 @@ export function FileTree(props: FileTreeProps) {
       if (props.collapsed[dir] !== true) manual.delete(dir);
     }
   }, [props.collapsed]);
+
+  // Drop clipboard when the referenced item disappears (e.g., deleted elsewhere).
+  useEffect(() => {
+    if (!clipboard) return;
+    if (clipboard.kind === 'file') {
+      let exists = props.files.some((file) => normalizePath(file.path) === normalizePath(clipboard.path));
+      if (!exists) setClipboard(null);
+      return;
+    }
+    let exists = props.folders.some((dir) => normalizePath(dir) === normalizePath(clipboard.path));
+    if (!exists) setClipboard(null);
+  }, [clipboard, props.files, props.folders]);
+
+  // Leaving edit mode always resets the clipboard so rename flows stay isolated.
+  useEffect(() => {
+    if (editing) setClipboard(null);
+  }, [editing]);
 
   type FlatItem = { kind: 'folder' | 'file'; path: string; depth: number };
   // Flatten the tree into the list rendered on screen, respecting collapsed state.
@@ -122,10 +143,100 @@ export function FileTree(props: FileTreeProps) {
     }
   }, [props.newEntry?.key, props.collapsed, props.onCollapsedChange, props.newEntry?.parentDir]);
 
-  // Keyboard bindings
+  // Convenience helpers to resolve file metadata and paste destinations.
+  const findFileByPath = (path: string) =>
+    props.files.find((file) => normalizePath(file.path) === normalizePath(path));
+
+  const resolvePasteTargetDir = () => {
+    if (selected?.kind === 'folder') return selected.path;
+    if (selected?.kind === 'file') {
+      let file = findFileByPath(selected.path);
+      if (file) return file.dir;
+    }
+    return '';
+  };
+
+  // Guard against moving a folder into one of its own subdirectories.
+  const isDescendantDir = (parent: string, target: string) => {
+    let normalizedParent = normalizePath(parent);
+    let normalizedTarget = normalizePath(target);
+    if (normalizedParent === '' || normalizedTarget === '') return false;
+    return normalizedTarget.startsWith(`${normalizedParent}/`);
+  };
+
+  // Keyboard bindings handle navigation plus cut/paste moves using primary shortcuts.
   const onKeyDown = (e: React.KeyboardEvent) => {
     // When inline-editing, let inputs handle keys (Backspace, Enter, etc.)
     if (editing) return;
+    if (e.key === 'Escape') {
+      if (clipboard) {
+        e.preventDefault();
+        setClipboard(null);
+        return;
+      }
+    }
+    let usesPrimaryModifier = e.metaKey || e.ctrlKey;
+    if (usesPrimaryModifier) {
+      let key = e.key.toLowerCase();
+      if (key === 'x') {
+        if (!selected) return;
+        if (selected.kind === 'folder' && normalizePath(selected.path) === '') return;
+        if (selected.kind === 'file') {
+          let file = findFileByPath(selected.path);
+          if (!file) {
+            setClipboard(null);
+            return;
+          }
+          setClipboard({ kind: 'file', path: file.path });
+          e.preventDefault();
+          return;
+        }
+        let exists = props.folders.some((dir) => normalizePath(dir) === normalizePath(selected.path));
+        if (!exists) return;
+        setClipboard({ kind: 'folder', path: normalizePath(selected.path) });
+        e.preventDefault();
+        return;
+      }
+      if (key === 'v') {
+        if (!clipboard) return;
+        e.preventDefault();
+        let targetDir = resolvePasteTargetDir();
+        if (clipboard.kind === 'file') {
+          let file = findFileByPath(clipboard.path);
+          if (!file) {
+            setClipboard(null);
+            return;
+          }
+          let normalizedTarget = normalizePath(targetDir);
+          let normalizedCurrent = normalizePath(file.dir);
+          if (normalizedTarget === normalizedCurrent) {
+            setClipboard(null);
+            setSelected({ kind: 'file', path: file.path });
+            return;
+          }
+          let nextPath = props.onMoveFile(file.path, normalizedTarget);
+          setClipboard(null);
+          if (nextPath) setSelected({ kind: 'file', path: nextPath });
+          return;
+        }
+        let folderPath = normalizePath(clipboard.path);
+        if (folderPath === '') {
+          setClipboard(null);
+          return;
+        }
+        let normalizedTarget = normalizePath(targetDir);
+        if (isDescendantDir(folderPath, normalizedTarget)) return;
+        if (normalizedTarget === folderPath) {
+          setClipboard(null);
+          setSelected({ kind: 'folder', path: folderPath });
+          return;
+        }
+        let nextDir = props.onMoveFolder(folderPath, normalizedTarget);
+        setClipboard(null);
+        if (nextDir) setSelected({ kind: 'folder', path: nextDir });
+        return;
+      }
+    }
     // Arrow navigation operates inside the tree only when focused
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
@@ -353,6 +464,7 @@ export function FileTree(props: FileTreeProps) {
           onCloseMenu={() => setMenuSel(null)}
           onDeleteFile={props.onDeleteFile}
           onDeleteFolder={props.onDeleteFolder}
+          clipboard={clipboard}
         />
       ))}
     </div>
@@ -380,6 +492,7 @@ function Row(props: {
   onCloseMenu: () => void;
   onDeleteFile: (path: string) => void;
   onDeleteFolder: (path: string) => void;
+  clipboard: Selection | null;
 }) {
   const { node, depth } = props;
   const isMenuHere =
@@ -434,10 +547,16 @@ function Row(props: {
       props.selected?.kind === 'folder' && normalizePath(props.selected.path) === normalizePath(node.dir);
     const isEditing =
       props.editing?.kind === 'folder' && normalizePath(props.editing.path) === normalizePath(node.dir);
+    const isCut =
+      props.clipboard?.kind === 'folder' &&
+      normalizePath(props.clipboard.path) === normalizePath(node.dir);
+    let className = 'tree-row';
+    if (isActive) className += ' is-active';
+    if (isCut) className += ' is-cut';
     return (
       <div className="tree-folder">
         <div
-          className={`tree-row ${isActive ? 'is-active' : ''}`}
+          className={className}
           style={{ paddingLeft: 6 + depth * 10 }}
           onClick={() => props.onSelectFolder(node.dir)}
           onContextMenu={(e) => {
@@ -565,6 +684,7 @@ function Row(props: {
               onCloseMenu={props.onCloseMenu}
               onDeleteFile={props.onDeleteFile}
               onDeleteFolder={props.onDeleteFolder}
+              clipboard={props.clipboard}
             />
           ))}
       </div>
@@ -578,9 +698,14 @@ function Row(props: {
     props.selected?.kind === 'file' && normalizePath(props.selected.path) === normalizePath(node.path);
   const isEditing =
     props.editing?.kind === 'file' && normalizePath(props.editing.path) === normalizePath(node.path);
+  const isCut =
+    props.clipboard?.kind === 'file' && normalizePath(props.clipboard.path) === normalizePath(node.path);
+  let rowClass = 'tree-row';
+  if (isActive || isSelected) rowClass += ' is-active';
+  if (isCut) rowClass += ' is-cut';
   return (
     <div
-      className={`tree-row ${isActive || isSelected ? 'is-active' : ''}`}
+      className={rowClass}
       style={{ paddingLeft: 6 + depth * 10 }}
       onClick={() => props.onSelectFile(node.path)}
       onContextMenu={(e) => {
