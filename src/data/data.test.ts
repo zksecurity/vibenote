@@ -445,6 +445,55 @@ describe('useRepoData', () => {
     expect(result.current.state.user).toEqual(expect.objectContaining({ login: 'hubot' }));
   });
 
+  test('syncing a linked repo refreshes the active file contents after store updates', async () => {
+    const slug = 'acme/docs';
+    const recordRecent = vi.fn<RecordRecentFn>();
+
+    const store = new LocalStore(slug);
+    const noteId = store.createFile('Seed.md', 'initial text');
+    const notePath = store.loadFileById(noteId)?.path;
+    if (!notePath) throw new Error('Missing note path after seeding');
+    markRepoLinked(slug);
+
+    mockGetSessionToken.mockReturnValue('session-token');
+    mockGetSessionUser.mockReturnValue({
+      login: 'mona',
+      name: 'Mona',
+      avatarUrl: 'https://example.com/mona.png',
+    });
+    setRepoMetadata(writableMeta);
+    mockSyncBidirectional.mockImplementationOnce(async (localStore: LocalStore, _slug: string) => {
+      localStore.saveFile(notePath, 'remote text');
+      return {
+        pulled: 1,
+        pushed: 0,
+        merged: 0,
+        deletedRemote: 0,
+        deletedLocal: 0,
+      };
+    });
+
+    const { result } = renderRepoData({
+      slug,
+      route: { kind: 'repo', owner: 'acme', repo: 'docs' },
+      recordRecent,
+    });
+
+    await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
+
+    act(() => {
+      result.current.actions.selectFile(notePath);
+    });
+
+    await waitFor(() => expect(result.current.state.activeFile?.content).toBe('initial text'));
+
+    await act(async () => {
+      await result.current.actions.syncNow();
+    });
+
+    await waitFor(() => expect(result.current.state.activeFile?.content).toBe('remote text'));
+  });
+
   test('sync surfaces detailed message when GitHub returns 422', async () => {
     const slug = 'acme/docs';
     const recordRecent = vi.fn<RecordRecentFn>();

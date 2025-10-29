@@ -239,7 +239,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     if (!canEdit) return undefined;
     if (!activeId) return undefined;
     return getRepoStore(slug).loadFileById(activeId) ?? undefined;
-  }, [canEdit, activeId]);
+  }, [canEdit, activeId, files]);
 
   let activeFile: RepoFile | undefined = canEdit ? activeLocalFile : activeReadOnlyFile;
   let activePath = activeFile?.path;
