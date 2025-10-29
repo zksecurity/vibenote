@@ -267,6 +267,18 @@ export function FileTree(props: FileTreeProps) {
     return true;
   };
 
+  const sameSelection = (a: Selection | null, b: Selection | null) => {
+    if (!a || !b) return false;
+    if (a.kind !== b.kind) return false;
+    return normalizePath(a.path) === normalizePath(b.path);
+  };
+
+  const toggleMenuSelection = (sel: Selection) => {
+    setMenuSel((prev) => (sameSelection(prev, sel) ? null : sel));
+  };
+
+  const closeMenu = () => setMenuSel(null);
+
   // Keyboard bindings handle navigation plus cut/paste moves using primary shortcuts.
   const onKeyDown = (e: React.KeyboardEvent) => {
     // When inline-editing, let inputs handle keys (Backspace, Enter, etc.)
@@ -283,12 +295,12 @@ export function FileTree(props: FileTreeProps) {
       let key = e.key.toLowerCase();
       if (key === 'x') {
         e.preventDefault();
-        cutSelection(selected);
+        void cutSelection(selected);
         return;
       }
       if (key === 'v') {
         e.preventDefault();
-        pasteIntoSelection(selected);
+        void pasteIntoSelection(selected);
         return;
       }
     }
@@ -435,6 +447,8 @@ export function FileTree(props: FileTreeProps) {
   // Dismiss inline menu when clicking anywhere outside the tree (e.g., closing sidebar)
   useEffect(() => {
     const onGlobalPointerDown = (e: Event) => {
+      const pointer = e as PointerEvent;
+      if (pointer.button === 2) return;
       if (!menuSel) return;
       const el = e.target as HTMLElement | null;
       // Close menu when clicking/tapping anywhere that is not the inline menu itself
@@ -519,8 +533,8 @@ export function FileTree(props: FileTreeProps) {
           onSubmitEdit={submitEdit}
           newEntry={props.newEntry ?? null}
           onCancelEditing={cancelEdit}
-          onRequestMenu={(sel) => setMenuSel(sel)}
-          onCloseMenu={() => setMenuSel(null)}
+          onToggleMenu={toggleMenuSelection}
+          onCloseMenu={closeMenu}
           onDeleteFile={props.onDeleteFile}
           onDeleteFolder={props.onDeleteFolder}
           clipboard={clipboardFallback}
@@ -550,7 +564,7 @@ function Row(props: {
   onSubmitEdit: (ctx: { kind: 'file' | 'folder'; path?: string }) => void;
   newEntry: NewEntry | null;
   onCancelEditing: () => void;
-  onRequestMenu: (sel: Selection) => void;
+  onToggleMenu: (sel: Selection) => void;
   onCloseMenu: () => void;
   onDeleteFile: (path: string) => void;
   onDeleteFolder: (path: string) => void;
@@ -570,12 +584,7 @@ function Row(props: {
     if (e.pointerType !== 'touch') return; // mobile gesture
     props.onSetSelection(sel);
     let timer = window.setTimeout(() => {
-      let current = props.menuSel;
-      if (current && current.kind === sel?.kind && normalizePath(current.path) === normalizePath(sel?.path)) {
-        props.onCloseMenu();
-      } else {
-        props.onRequestMenu(sel);
-      }
+      props.onToggleMenu(sel);
     }, 550);
     const clear = () => window.clearTimeout(timer);
     const target = e.currentTarget as HTMLElement;
@@ -630,16 +639,7 @@ function Row(props: {
             e.preventDefault();
             let next: Selection = { kind: 'folder', path: node.dir };
             props.onSetSelection(next);
-            let current = props.menuSel;
-            if (
-              current &&
-              current.kind === next.kind &&
-              normalizePath(current.path) === normalizePath(next.path)
-            ) {
-              props.onCloseMenu();
-              return;
-            }
-            props.onRequestMenu(next);
+            props.onToggleMenu(next);
           }}
           onPointerDown={(e) => startLongPress(e, { kind: 'folder', path: node.dir })}
         >
@@ -776,7 +776,7 @@ function Row(props: {
               onSubmitEdit={props.onSubmitEdit}
               newEntry={props.newEntry}
               onCancelEditing={props.onCancelEditing}
-              onRequestMenu={props.onRequestMenu}
+              onToggleMenu={props.onToggleMenu}
               onCloseMenu={props.onCloseMenu}
               onDeleteFile={props.onDeleteFile}
               onDeleteFolder={props.onDeleteFolder}
@@ -808,16 +808,7 @@ function Row(props: {
         e.preventDefault();
         let next: Selection = { kind: 'file', path: node.path };
         props.onSetSelection(next);
-        let current = props.menuSel;
-        if (
-          current &&
-          current.kind === next.kind &&
-          normalizePath(current.path) === normalizePath(next.path)
-        ) {
-          props.onCloseMenu();
-          return;
-        }
-        props.onRequestMenu(next);
+        props.onToggleMenu(next);
       }}
       onPointerDown={(e) => startLongPress(e, { kind: 'file', path: node.path })}
       onDoubleClick={() => props.onSelectFile(node.path)}
