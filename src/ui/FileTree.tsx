@@ -25,10 +25,12 @@ type FileTreeProps = {
   onSelectionChange?: (sel: Selection) => void;
   onSelectFile: (path: string) => void;
   onRenameFile: (path: string, newName: string) => void;
+  onMoveFile: (path: string, targetDir: string) => string | undefined;
   onDeleteFile: (path: string) => void;
   onCreateFile: (dir: string, name: string) => void;
   onCreateFolder: (parentDir: string, name: string) => void;
   onRenameFolder: (dir: string, newName: string) => void;
+  onMoveFolder: (dir: string, targetDir: string) => string | undefined;
   onDeleteFolder: (path: string) => void;
   newEntry?: NewEntry; // request inline create under parent dir
   onFinishCreate?: () => void;
@@ -55,6 +57,8 @@ export function FileTree(props: FileTreeProps) {
   let containerRef = useRef<HTMLDivElement | null>(null);
   // Tracks which row shows the inline action menu.
   let [menuSel, setMenuSel] = useState<Selection>(null);
+  // Remembers the item marked for moving with cut/paste (in-memory fallback when clipboard API fails).
+  let [clipboardFallback, setClipboard] = useState<Selection>(null);
 
   // Keep the latest collapsed map available to effects without resubscribing.
   let collapsedMapRef = useRef(props.collapsed);
@@ -72,6 +76,11 @@ export function FileTree(props: FileTreeProps) {
       if (props.collapsed[dir] !== true) manual.delete(dir);
     }
   }, [props.collapsed]);
+
+  // Leaving edit mode always resets the clipboard so rename flows stay isolated.
+  useEffect(() => {
+    if (editing) setClipboard(null);
+  }, [editing]);
 
   type FlatItem = { kind: 'folder' | 'file'; path: string; depth: number };
   // Flatten the tree into the list rendered on screen, respecting collapsed state.
@@ -122,10 +131,179 @@ export function FileTree(props: FileTreeProps) {
     }
   }, [props.newEntry?.key, props.collapsed, props.onCollapsedChange, props.newEntry?.parentDir]);
 
-  // Keyboard bindings
+  // Convenience helpers to resolve file metadata and paste destinations.
+  const findFileByPath = (path: string) =>
+    props.files.find((file) => normalizePath(file.path) === normalizePath(path));
+
+  const resolvePasteTargetDir = (target: Selection | null) => {
+    if (target?.kind === 'folder') return target.path;
+    if (target?.kind === 'file') {
+      let file = findFileByPath(target.path);
+      if (file) return file.dir;
+    }
+    return '';
+  };
+
+  // Guard against moving a folder into one of its own subdirectories.
+  const isDescendantDir = (parent: string, target: string) => {
+    let normalizedParent = normalizePath(parent);
+    let normalizedTarget = normalizePath(target);
+    if (normalizedParent === '' || normalizedTarget === '') return false;
+    return normalizedTarget.startsWith(`${normalizedParent}/`);
+  };
+
+  const writeClipboard = async (payload: Selection | null) => {
+    if (!payload) return false;
+    if (
+      typeof navigator === 'undefined' ||
+      !navigator.clipboard ||
+      typeof navigator.clipboard.writeText !== 'function'
+    )
+      return false;
+    try {
+      await navigator.clipboard.writeText(
+        JSON.stringify({ vibenoteCut: { kind: payload.kind, path: payload.path } })
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const readClipboard = async () => {
+    if (
+      typeof navigator === 'undefined' ||
+      !navigator.clipboard ||
+      typeof navigator.clipboard.readText !== 'function'
+    )
+      return null;
+    try {
+      let text = await navigator.clipboard.readText();
+      let parsed = JSON.parse(text);
+      if (
+        parsed &&
+        typeof parsed === 'object' &&
+        parsed.vibenoteCut &&
+        (parsed.vibenoteCut.kind === 'file' || parsed.vibenoteCut.kind === 'folder') &&
+        typeof parsed.vibenoteCut.path === 'string'
+      ) {
+        return parsed.vibenoteCut as Selection;
+      }
+    } catch {}
+    return null;
+  };
+
+  const normalizeSelection = (sel: Selection | null): Selection | null => {
+    if (!sel) return null;
+    if (sel.kind === 'file') {
+      let file = findFileByPath(sel.path);
+      if (!file) return null;
+      return { kind: 'file', path: file.path };
+    }
+    let normalized = normalizePath(sel.path);
+    if (normalized === '') return null;
+    let exists = props.folders.some((dir) => normalizePath(dir) === normalized);
+    if (!exists) return null;
+    return { kind: 'folder', path: normalized };
+  };
+
+  const rememberCutSelection = (sel: Selection | null) => {
+    let normalized = normalizeSelection(sel);
+    if (!normalized) {
+      setClipboard(null);
+      return null;
+    }
+    setClipboard(normalized);
+    return normalized;
+  };
+
+  const cutSelection = async (sel: Selection | null) => {
+    let normalized = rememberCutSelection(sel);
+    if (!normalized) return false;
+    await writeClipboard(normalized);
+    return true;
+  };
+
+  const pasteIntoSelection = async (sel: Selection | null) => {
+    let clipboard = (await readClipboard()) ?? clipboardFallback;
+    if (!clipboard) return false;
+    let targetDir = resolvePasteTargetDir(sel ?? selected);
+    if (clipboard.kind === 'file') {
+      let file = findFileByPath(clipboard.path);
+      if (!file) {
+        setClipboard(null);
+        return true;
+      }
+      let normalizedTarget = normalizePath(targetDir);
+      let normalizedCurrent = normalizePath(file.dir);
+      if (normalizedTarget === normalizedCurrent) {
+        setClipboard(null);
+        setSelected({ kind: 'file', path: file.path });
+        return true;
+      }
+      let nextPath = props.onMoveFile(file.path, normalizedTarget);
+      setClipboard(null);
+      if (nextPath) setSelected({ kind: 'file', path: nextPath });
+      return true;
+    }
+    let folderPath = normalizePath(clipboard.path);
+    if (folderPath === '') {
+      setClipboard(null);
+      return true;
+    }
+    let normalizedTarget = normalizePath(targetDir);
+    if (isDescendantDir(folderPath, normalizedTarget)) {
+      setClipboard(null);
+      return true;
+    }
+    if (normalizedTarget === folderPath) {
+      setClipboard(null);
+      setSelected({ kind: 'folder', path: folderPath });
+      return true;
+    }
+    let nextDir = props.onMoveFolder(folderPath, normalizedTarget);
+    setClipboard(null);
+    if (nextDir) setSelected({ kind: 'folder', path: nextDir });
+    return true;
+  };
+
+  const sameSelection = (a: Selection | null, b: Selection | null) => {
+    if (!a || !b) return false;
+    if (a.kind !== b.kind) return false;
+    return normalizePath(a.path) === normalizePath(b.path);
+  };
+
+  const toggleMenuSelection = (sel: Selection) => {
+    setMenuSel((prev) => (sameSelection(prev, sel) ? null : sel));
+  };
+
+  const closeMenu = () => setMenuSel(null);
+
+  // Keyboard bindings handle navigation plus cut/paste moves using primary shortcuts.
   const onKeyDown = (e: React.KeyboardEvent) => {
     // When inline-editing, let inputs handle keys (Backspace, Enter, etc.)
     if (editing) return;
+    if (e.key === 'Escape') {
+      if (clipboardFallback) {
+        e.preventDefault();
+        setClipboard(null);
+        return;
+      }
+    }
+    let usesPrimaryModifier = e.metaKey || e.ctrlKey;
+    if (usesPrimaryModifier) {
+      let key = e.key.toLowerCase();
+      if (key === 'x') {
+        e.preventDefault();
+        void cutSelection(selected);
+        return;
+      }
+      if (key === 'v') {
+        e.preventDefault();
+        void pasteIntoSelection(selected);
+        return;
+      }
+    }
     // Arrow navigation operates inside the tree only when focused
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
@@ -269,6 +447,8 @@ export function FileTree(props: FileTreeProps) {
   // Dismiss inline menu when clicking anywhere outside the tree (e.g., closing sidebar)
   useEffect(() => {
     const onGlobalPointerDown = (e: Event) => {
+      const pointer = e as PointerEvent;
+      if (pointer.button === 2) return;
       if (!menuSel) return;
       const el = e.target as HTMLElement | null;
       // Close menu when clicking/tapping anywhere that is not the inline menu itself
@@ -291,6 +471,7 @@ export function FileTree(props: FileTreeProps) {
         }
         onKeyDown(e);
       }}
+      onBlur={() => setClipboard(null)}
     >
       {props.newEntry && props.newEntry.parentDir === '' && (
         <div className="tree-row is-new" style={{ paddingLeft: 6 }}>
@@ -328,6 +509,9 @@ export function FileTree(props: FileTreeProps) {
           collapsed={props.collapsed}
           activePath={props.activePath}
           selected={selected}
+          onSetSelection={(sel) => setSelected(sel)}
+          onCutSelection={cutSelection}
+          onPasteSelection={pasteIntoSelection}
           menuSel={menuSel}
           editing={editing}
           editText={editText}
@@ -349,10 +533,11 @@ export function FileTree(props: FileTreeProps) {
           onSubmitEdit={submitEdit}
           newEntry={props.newEntry ?? null}
           onCancelEditing={cancelEdit}
-          onRequestMenu={(sel) => setMenuSel(sel)}
-          onCloseMenu={() => setMenuSel(null)}
+          onToggleMenu={toggleMenuSelection}
+          onCloseMenu={closeMenu}
           onDeleteFile={props.onDeleteFile}
           onDeleteFolder={props.onDeleteFolder}
+          clipboard={clipboardFallback}
         />
       ))}
     </div>
@@ -365,6 +550,9 @@ function Row(props: {
   collapsed: Record<string, boolean>;
   activePath: string | undefined;
   selected: Selection;
+  onSetSelection: (sel: Selection) => void;
+  onCutSelection: (sel: Selection) => Promise<boolean>;
+  onPasteSelection: (sel: Selection) => Promise<boolean>;
   menuSel: Selection;
   editing: Selection;
   editText: string;
@@ -376,10 +564,11 @@ function Row(props: {
   onSubmitEdit: (ctx: { kind: 'file' | 'folder'; path?: string }) => void;
   newEntry: NewEntry | null;
   onCancelEditing: () => void;
-  onRequestMenu: (sel: Selection) => void;
+  onToggleMenu: (sel: Selection) => void;
   onCloseMenu: () => void;
   onDeleteFile: (path: string) => void;
   onDeleteFolder: (path: string) => void;
+  clipboard: Selection | null;
 }) {
   const { node, depth } = props;
   const isMenuHere =
@@ -393,8 +582,9 @@ function Row(props: {
 
   const startLongPress = (e: React.PointerEvent, sel: Selection) => {
     if (e.pointerType !== 'touch') return; // mobile gesture
+    props.onSetSelection(sel);
     let timer = window.setTimeout(() => {
-      props.onRequestMenu(sel);
+      props.onToggleMenu(sel);
     }, 550);
     const clear = () => window.clearTimeout(timer);
     const target = e.currentTarget as HTMLElement;
@@ -434,15 +624,22 @@ function Row(props: {
       props.selected?.kind === 'folder' && normalizePath(props.selected.path) === normalizePath(node.dir);
     const isEditing =
       props.editing?.kind === 'folder' && normalizePath(props.editing.path) === normalizePath(node.dir);
+    const isCut =
+      props.clipboard?.kind === 'folder' && normalizePath(props.clipboard.path) === normalizePath(node.dir);
+    let className = 'tree-row';
+    if (isActive) className += ' is-active';
+    if (isCut) className += ' is-cut';
     return (
       <div className="tree-folder">
         <div
-          className={`tree-row ${isActive ? 'is-active' : ''}`}
+          className={className}
           style={{ paddingLeft: 6 + depth * 10 }}
           onClick={() => props.onSelectFolder(node.dir)}
           onContextMenu={(e) => {
             e.preventDefault();
-            props.onRequestMenu({ kind: 'folder', path: node.dir });
+            let next: Selection = { kind: 'folder', path: node.dir };
+            props.onSetSelection(next);
+            props.onToggleMenu(next);
           }}
           onPointerDown={(e) => startLongPress(e, { kind: 'folder', path: node.dir })}
         >
@@ -484,29 +681,44 @@ function Row(props: {
             <span className="tree-title">{node.name || 'Root'}</span>
           )}
           {isMenuHere && (
-            <div className="tree-menu" onClick={(e) => e.stopPropagation()}>
-              <button
-                className="btn small subtle"
-                onClick={() => {
-                  const name = node.name || '';
-                  props.onStartEdit({ kind: 'folder', path: node.dir }, name);
-                  props.onCloseMenu();
-                }}
-              >
-                Rename
-              </button>
-              {node.dir !== '' && (
-                <button
-                  className="btn small subtle danger"
-                  onClick={() => {
-                    props.onDeleteFolder(node.dir);
-                    props.onCloseMenu();
-                  }}
-                >
-                  Delete
-                </button>
-              )}
-            </div>
+            <TreeMenu
+              onClose={props.onCloseMenu}
+              actions={[
+                {
+                  label: 'Cut',
+                  disabled: node.dir === '',
+                  onSelect: () => props.onCutSelection({ kind: 'folder', path: node.dir }),
+                },
+                {
+                  label: 'Paste',
+                  onSelect: () => props.onPasteSelection({ kind: 'folder', path: node.dir }),
+                },
+                {
+                  label: 'Rename',
+                  onSelect: () => {
+                    const name = node.name || '';
+                    props.onStartEdit({ kind: 'folder', path: node.dir }, name);
+                    return true;
+                  },
+                },
+                ...(node.dir !== ''
+                  ? [
+                      {
+                        label: 'Delete',
+                        onSelect: () => {
+                          props.onDeleteFolder(node.dir);
+                          return true;
+                        },
+                        variant: 'danger' as const,
+                      },
+                    ]
+                  : []),
+                {
+                  label: 'Cancel',
+                  onSelect: () => true,
+                },
+              ]}
+            />
           )}
         </div>
         {!isCollapsed && props.newEntry && props.newEntry.parentDir === node.dir && (
@@ -555,16 +767,20 @@ function Row(props: {
               editText={props.editText}
               onSelectFolder={props.onSelectFolder}
               onSelectFile={props.onSelectFile}
+              onSetSelection={props.onSetSelection}
+              onCutSelection={props.onCutSelection}
+              onPasteSelection={props.onPasteSelection}
               onToggleFolder={props.onToggleFolder}
               onStartEdit={props.onStartEdit}
               onEditTextChange={props.onEditTextChange}
               onSubmitEdit={props.onSubmitEdit}
               newEntry={props.newEntry}
               onCancelEditing={props.onCancelEditing}
-              onRequestMenu={props.onRequestMenu}
+              onToggleMenu={props.onToggleMenu}
               onCloseMenu={props.onCloseMenu}
               onDeleteFile={props.onDeleteFile}
               onDeleteFolder={props.onDeleteFolder}
+              clipboard={props.clipboard}
             />
           ))}
       </div>
@@ -578,14 +794,21 @@ function Row(props: {
     props.selected?.kind === 'file' && normalizePath(props.selected.path) === normalizePath(node.path);
   const isEditing =
     props.editing?.kind === 'file' && normalizePath(props.editing.path) === normalizePath(node.path);
+  const isCut =
+    props.clipboard?.kind === 'file' && normalizePath(props.clipboard.path) === normalizePath(node.path);
+  let rowClass = 'tree-row';
+  if (isActive || isSelected) rowClass += ' is-active';
+  if (isCut) rowClass += ' is-cut';
   return (
     <div
-      className={`tree-row ${isActive || isSelected ? 'is-active' : ''}`}
+      className={rowClass}
       style={{ paddingLeft: 6 + depth * 10 }}
       onClick={() => props.onSelectFile(node.path)}
       onContextMenu={(e) => {
         e.preventDefault();
-        props.onRequestMenu({ kind: 'file', path: node.path });
+        let next: Selection = { kind: 'file', path: node.path };
+        props.onSetSelection(next);
+        props.onToggleMenu(next);
       }}
       onPointerDown={(e) => startLongPress(e, { kind: 'file', path: node.path })}
       onDoubleClick={() => props.onSelectFile(node.path)}
@@ -619,27 +842,72 @@ function Row(props: {
         <span className="tree-title">{node.name}</span>
       )}
       {isMenuHere && (
-        <div className="tree-menu" onClick={(e) => e.stopPropagation()}>
-          <button
-            className="btn small subtle"
-            onClick={() => {
-              props.onStartEdit({ kind: 'file', path: node.path }, node.title);
-              props.onCloseMenu();
-            }}
-          >
-            Rename
-          </button>
-          <button
-            className="btn small subtle danger"
-            onClick={() => {
-              props.onDeleteFile(node.path);
-              props.onCloseMenu();
-            }}
-          >
-            Delete
-          </button>
-        </div>
+        <TreeMenu
+          onClose={props.onCloseMenu}
+          actions={[
+            {
+              label: 'Cut',
+              onSelect: () => props.onCutSelection({ kind: 'file', path: node.path }),
+            },
+            {
+              label: 'Paste',
+              onSelect: () => props.onPasteSelection({ kind: 'file', path: node.path }),
+            },
+            {
+              label: 'Rename',
+              onSelect: () => {
+                props.onStartEdit({ kind: 'file', path: node.path }, node.title);
+                return true;
+              },
+            },
+            {
+              label: 'Delete',
+              onSelect: () => {
+                props.onDeleteFile(node.path);
+                return true;
+              },
+              variant: 'danger',
+            },
+            {
+              label: 'Cancel',
+              onSelect: () => true,
+            },
+          ]}
+        />
       )}
+    </div>
+  );
+}
+
+type MenuAction = {
+  label: string;
+  onSelect: () => boolean | Promise<boolean>;
+  disabled?: boolean;
+  variant?: 'danger';
+};
+
+function TreeMenu({ actions, onClose }: { actions: MenuAction[]; onClose: () => void }) {
+  return (
+    <div className="tree-menu" onClick={(e) => e.stopPropagation()}>
+      {actions.map((action, index) => {
+        let className = 'btn small subtle';
+        if (action.variant === 'danger') className += ' danger';
+        return (
+          <button
+            key={index}
+            className={className}
+            disabled={action.disabled}
+            onClick={() => {
+              if (action.disabled) return;
+              Promise.resolve(action.onSelect()).then((shouldClose) => {
+                if (shouldClose !== false) onClose();
+              });
+            }}
+          >
+            {action.label}
+          </button>
+        );
+      })}
     </div>
   );
 }

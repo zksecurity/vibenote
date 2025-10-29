@@ -314,8 +314,10 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
               onCreateNote={actions.createNote}
               onCreateFolder={actions.createFolder}
               onRenameFile={actions.renameFile}
+              onMoveFile={actions.moveFile}
               onDeleteFile={actions.deleteFile}
               onRenameFolder={actions.renameFolder}
+              onMoveFolder={actions.moveFolder}
               onDeleteFolder={actions.deleteFolder}
             />
             {canSync ? (
@@ -496,8 +498,10 @@ type FileSidebarProps = {
   onCreateNote: (dir: string, name: string) => string | undefined;
   onCreateFolder: (parentDir: string, name: string) => void;
   onRenameFile: (path: string, name: string) => void;
+  onMoveFile: (path: string, targetDir: string) => string | undefined;
   onDeleteFile: (path: string) => void;
   onRenameFolder: (dir: string, newName: string) => void;
+  onMoveFolder: (dir: string, targetDir: string) => string | undefined;
   onDeleteFolder: (dir: string) => void;
 };
 
@@ -512,8 +516,10 @@ function FileSidebar(props: FileSidebarProps) {
     onCreateNote,
     onCreateFolder,
     onRenameFile,
+    onMoveFile,
     onDeleteFile,
     onRenameFolder,
+    onMoveFolder,
     onDeleteFolder,
   } = props;
 
@@ -608,6 +614,7 @@ function FileSidebar(props: FileSidebarProps) {
           onSelectionChange={setSelection}
           onSelectFile={onSelect}
           onRenameFile={onRenameFile}
+          onMoveFile={onMoveFile}
           onDeleteFile={onDeleteFile}
           onCreateFile={(dir, name) => {
             const createdPath = onCreateNote(dir, name);
@@ -615,6 +622,7 @@ function FileSidebar(props: FileSidebarProps) {
           }}
           onCreateFolder={onCreateFolder}
           onRenameFolder={onRenameFolder}
+          onMoveFolder={onMoveFolder}
           onDeleteFolder={onDeleteFolder}
           newEntry={canEdit ? newEntry : null}
           onFinishCreate={() => setNewEntry(null)}

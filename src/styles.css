@@ -1391,6 +1391,9 @@ textarea:focus-visible {
 .tree-row.is-active {
   background: #eaeef2;
 }
+.tree-row.is-cut {
+  opacity: 0.55;
+}
 .tree-disclosure {
   display: inline-flex;
   align-items: center;
@@ -1461,16 +1464,22 @@ textarea:focus-visible {
 .tree-menu {
   position: absolute;
   right: 6px;
-  top: 50%;
-  transform: translateY(-50%);
+  top: 4px;
+  transform: none;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: var(--shadow);
-  padding: 4px;
+  padding: 6px;
   display: flex;
+  flex-direction: column;
   gap: 6px;
+  align-items: stretch;
   z-index: 2;
+}
+.tree-menu .btn {
+  width: 100%;
+  justify-content: center;
 }
 
 .account-menu {
