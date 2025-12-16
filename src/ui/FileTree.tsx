@@ -571,6 +571,10 @@ function Row(props: {
   clipboard: Selection | null;
 }) {
   const { node, depth } = props;
+  // On mobile, the long-press gesture opens the inline menu, but the browser often
+  // emits a synthetic click when the finger is released. If we don't suppress that
+  // click, the row's onClick handler closes the menu immediately.
+  let ignoreNextClickRef = useRef(false);
   const isMenuHere =
     props.menuSel &&
     ((props.menuSel.kind === 'folder' &&
@@ -584,6 +588,7 @@ function Row(props: {
     if (e.pointerType !== 'touch') return; // mobile gesture
     props.onSetSelection(sel);
     let timer = window.setTimeout(() => {
+      ignoreNextClickRef.current = true;
       props.onToggleMenu(sel);
     }, 550);
     const clear = () => window.clearTimeout(timer);
@@ -634,7 +639,15 @@ function Row(props: {
         <div
           className={className}
           style={{ paddingLeft: 6 + depth * 10 }}
-          onClick={() => props.onSelectFolder(node.dir)}
+          onClick={(e) => {
+            if (ignoreNextClickRef.current) {
+              ignoreNextClickRef.current = false;
+              e.preventDefault();
+              e.stopPropagation();
+              return;
+            }
+            props.onSelectFolder(node.dir);
+          }}
           onContextMenu={(e) => {
             e.preventDefault();
             let next: Selection = { kind: 'folder', path: node.dir };
@@ -803,7 +816,15 @@ function Row(props: {
     <div
       className={rowClass}
       style={{ paddingLeft: 6 + depth * 10 }}
-      onClick={() => props.onSelectFile(node.path)}
+      onClick={(e) => {
+        if (ignoreNextClickRef.current) {
+          ignoreNextClickRef.current = false;
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+        props.onSelectFile(node.path);
+      }}
       onContextMenu={(e) => {
         e.preventDefault();
         let next: Selection = { kind: 'file', path: node.path };
