@@ -1,11 +1,11 @@
-// Unit tests for FileTree interaction patterns (context menus + long-press).
+// Unit tests for FileTree interaction patterns (context menus).
 import React from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { FileTree, type FileEntry } from './FileTree';
 
-function renderTree() {
+function renderTree(onSelectFile = vi.fn()) {
   cleanup();
 
   let files: FileEntry[] = [
@@ -24,7 +24,7 @@ function renderTree() {
       activePath={undefined}
       collapsed={{}}
       onCollapsedChange={vi.fn()}
-      onSelectFile={vi.fn()}
+      onSelectFile={onSelectFile}
       onRenameFile={vi.fn()}
       onMoveFile={vi.fn()}
       onDeleteFile={vi.fn()}
@@ -39,30 +39,38 @@ function renderTree() {
   let title = screen.getByText('note.md');
   let row = title.closest('.tree-row');
   if (!row) throw new Error('expected file row element');
-  return { row };
+  return { row, onSelectFile };
 }
 
 describe('FileTree context menu', () => {
-  it('mobile: long-press keeps the file menu open (no immediate close)', async () => {
-    let { row } = renderTree();
+  it('clicking row while menu is open closes menu and selects file', () => {
+    let { row, onSelectFile } = renderTree();
 
-    fireEvent.pointerDown(row, { pointerType: 'touch', button: 0 });
-
-    // FileTree uses a 550ms long-press threshold.
-    await new Promise((resolve) => window.setTimeout(resolve, 600));
-
-    // Menu should be open after the long-press delay.
+    fireEvent.contextMenu(row);
     expect(screen.getByText('Rename')).toBeTruthy();
 
-    // On mobile, releasing the finger frequently triggers a synthetic click.
-    // The menu should remain usable after the long-press gesture completes.
-    fireEvent.pointerUp(row, { pointerType: 'touch', button: 0 });
+    // Click while menu is open - should close menu and select file
     fireEvent.click(row);
+    expect(onSelectFile).toHaveBeenCalledWith('note.md');
+    expect(screen.queryByText('Rename')).toBeNull();
+  });
 
+  it('menu survives additional pointerdown on same row', () => {
+    // On some mobile browsers, lifting the finger after a long-press can fire
+    // additional pointerdown events on the same row. The menu should not close.
+    let { row } = renderTree();
+
+    fireEvent.contextMenu(row);
+    expect(screen.getByText('Rename')).toBeTruthy();
+
+    // Additional pointerdown on the same row (mobile browser quirk)
+    fireEvent.pointerDown(row, { pointerType: 'touch', button: 0 });
+
+    // Menu should still be open
     expect(screen.getByText('Rename')).toBeTruthy();
   });
 
-  it('desktop: right-click toggles the file menu on/off on the same file', () => {
+  it('right-click toggles the file menu on/off on the same file', () => {
     let { row } = renderTree();
 
     fireEvent.contextMenu(row);

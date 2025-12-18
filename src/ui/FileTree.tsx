@@ -451,8 +451,13 @@ export function FileTree(props: FileTreeProps) {
       if (pointer.button === 2) return;
       if (!menuSel) return;
       const el = e.target as HTMLElement | null;
-      // Close menu when clicking/tapping anywhere that is not the inline menu itself
-      if (!el || !el.closest('.tree-menu')) setMenuSel(null);
+      // Close menu when clicking/tapping anywhere that is not the inline menu itself.
+      // Also allow pointerdown on the same row that has the menu (for long-press gesture,
+      // where lifting the finger can fire additional pointerdown events on some mobile browsers).
+      if (el?.closest('.tree-menu')) return;
+      let row = el?.closest('.tree-row');
+      if (row && row.querySelector('.tree-menu')) return;
+      setMenuSel(null);
     };
     window.addEventListener('pointerdown', onGlobalPointerDown, true);
     return () => window.removeEventListener('pointerdown', onGlobalPointerDown, true);
@@ -571,10 +576,6 @@ function Row(props: {
   clipboard: Selection | null;
 }) {
   const { node, depth } = props;
-  // On mobile, the long-press gesture opens the inline menu, but the browser often
-  // emits a synthetic click when the finger is released. If we don't suppress that
-  // click, the row's onClick handler closes the menu immediately.
-  let ignoreNextClickRef = useRef(false);
   const isMenuHere =
     props.menuSel &&
     ((props.menuSel.kind === 'folder' &&
@@ -583,46 +584,6 @@ function Row(props: {
       (props.menuSel.kind === 'file' &&
         node.kind === 'file' &&
         normalizePath(props.menuSel.path) === normalizePath(node.path)));
-
-  const startLongPress = (e: React.PointerEvent, sel: Selection) => {
-    if (e.pointerType !== 'touch') return; // mobile gesture
-    props.onSetSelection(sel);
-    let timer = window.setTimeout(() => {
-      ignoreNextClickRef.current = true;
-      props.onToggleMenu(sel);
-    }, 550);
-    const clear = () => window.clearTimeout(timer);
-    const target = e.currentTarget as HTMLElement;
-    const remove = () => {
-      target.removeEventListener('pointerup', clear);
-      target.removeEventListener('pointercancel', clear);
-      target.removeEventListener('pointerleave', clear);
-    };
-    target.addEventListener(
-      'pointerup',
-      () => {
-        clear();
-        remove();
-      },
-      { once: true }
-    );
-    target.addEventListener(
-      'pointercancel',
-      () => {
-        clear();
-        remove();
-      },
-      { once: true }
-    );
-    target.addEventListener(
-      'pointerleave',
-      () => {
-        clear();
-        remove();
-      },
-      { once: true }
-    );
-  };
   if (node.kind === 'folder') {
     const isCollapsed = node.dir !== '' && props.collapsed[node.dir] !== false;
     const isActive =
@@ -639,22 +600,13 @@ function Row(props: {
         <div
           className={className}
           style={{ paddingLeft: 6 + depth * 10 }}
-          onClick={(e) => {
-            if (ignoreNextClickRef.current) {
-              ignoreNextClickRef.current = false;
-              e.preventDefault();
-              e.stopPropagation();
-              return;
-            }
-            props.onSelectFolder(node.dir);
-          }}
+          onClick={() => props.onSelectFolder(node.dir)}
           onContextMenu={(e) => {
             e.preventDefault();
             let next: Selection = { kind: 'folder', path: node.dir };
             props.onSetSelection(next);
             props.onToggleMenu(next);
           }}
-          onPointerDown={(e) => startLongPress(e, { kind: 'folder', path: node.dir })}
         >
           <button
             className="tree-disclosure"
@@ -816,22 +768,13 @@ function Row(props: {
     <div
       className={rowClass}
       style={{ paddingLeft: 6 + depth * 10 }}
-      onClick={(e) => {
-        if (ignoreNextClickRef.current) {
-          ignoreNextClickRef.current = false;
-          e.preventDefault();
-          e.stopPropagation();
-          return;
-        }
-        props.onSelectFile(node.path);
-      }}
+      onClick={() => props.onSelectFile(node.path)}
       onContextMenu={(e) => {
         e.preventDefault();
         let next: Selection = { kind: 'file', path: node.path };
         props.onSetSelection(next);
         props.onToggleMenu(next);
       }}
-      onPointerDown={(e) => startLongPress(e, { kind: 'file', path: node.path })}
       onDoubleClick={() => props.onSelectFile(node.path)}
     >
       <span className="tree-disclosure-spacer" />
