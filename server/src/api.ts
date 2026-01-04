@@ -14,6 +14,15 @@ export type OAuthTokenResult = {
   tokenType: string;
 };
 
+function isUserAllowed(env: Env, login: string): boolean {
+  // If no allowlist is configured, allow all users (production mode)
+  if (!env.ALLOWED_GITHUB_USERS || env.ALLOWED_GITHUB_USERS.length === 0) {
+    return true;
+  }
+  // Otherwise, only allow users in the allowlist (staging mode)
+  return env.ALLOWED_GITHUB_USERS.includes(login);
+}
+
 export async function createAuthStartRedirect(
   env: Env,
   returnTo: string,
@@ -41,6 +50,19 @@ export async function handleAuthCallback(
   let returnTo = getOptionalString(state, 'returnTo') ?? '/';
   let tokens = await exchangeCode(env, code, callbackUrl, stateToken);
   let user = await fetchGitHubUser(tokens.accessToken);
+
+  // Validate user is allowed (for staging environments with user allowlist)
+  if (!isUserAllowed(env, user.login)) {
+    let rt = new URL(returnTo, returnTo.startsWith('http') ? undefined : pageOrigin);
+    let errorHtml = `<!doctype html><meta charset="utf-8"><title>VibeNote - Unauthorized</title>
+      <style>body{font-family:system-ui;max-width:600px;margin:100px auto;padding:20px;text-align:center}</style>
+      <h1>Unauthorized</h1>
+      <p>Your GitHub user <strong>@${user.login}</strong> is not authorized to use this staging environment.</p>
+      <p>Please contact the VibeNote development team if you believe this is an error.</p>
+      <p><a href="${rt.toString()}">Return to app</a></p>`;
+    return { html: errorHtml };
+  }
+
   let sessionId = crypto.randomUUID();
   let encryptedRefresh = store.encryptRefreshToken(tokens.refreshToken);
   let recordInput: Omit<SessionRecord, 'createdAt' | 'updatedAt' | 'lastAccessAt'> = {
@@ -102,6 +124,13 @@ export async function refreshAccessToken(
   if (!record) {
     throw new Error('session expired');
   }
+
+  // Validate user is still allowed (in case they were removed from allowlist)
+  if (!isUserAllowed(env, record.login)) {
+    await store.delete(sessionId);
+    throw new Error('user not authorized');
+  }
+
   let refreshPlain = store.decryptRefreshToken(record.refreshTokenCiphertext);
   let refreshed = await refreshWithToken(env, refreshPlain);
   let encryptedRefresh = store.encryptRefreshToken(refreshed.refreshToken);

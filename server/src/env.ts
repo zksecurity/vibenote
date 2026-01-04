@@ -8,6 +8,7 @@ export { type Env, env };
 type Env = {
   PORT: number;
   ALLOWED_ORIGINS: string[];
+  ALLOWED_GITHUB_USERS: string[] | undefined;
   GITHUB_APP_SLUG: string;
   GITHUB_APP_ID: number;
   GITHUB_APP_PRIVATE_KEY: string;
@@ -29,6 +30,11 @@ function getEnv(): Env {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
+  const allowedUsers = process.env.ALLOWED_GITHUB_USERS
+    ? process.env.ALLOWED_GITHUB_USERS.split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : undefined;
   const SESSION_JWT_SECRET = process.env.SESSION_JWT_SECRET ?? 'dev-session-secret-change-me';
   const SESSION_STORE_FILE = process.env.SESSION_STORE_FILE ?? './server/data/sessions.json';
   const SESSION_ENCRYPTION_KEY = must('SESSION_ENCRYPTION_KEY');
@@ -42,6 +48,7 @@ function getEnv(): Env {
   const env: Env = {
     PORT: Number.isFinite(port) ? port : 8787,
     ALLOWED_ORIGINS: allowed,
+    ALLOWED_GITHUB_USERS: allowedUsers,
     GITHUB_APP_SLUG: must('GITHUB_APP_SLUG'),
     GITHUB_APP_ID,
     GITHUB_APP_PRIVATE_KEY,
