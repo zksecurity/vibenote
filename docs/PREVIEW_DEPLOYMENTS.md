@@ -32,16 +32,29 @@ According to [Vercel's documentation](https://github.com/vercel/vercel/discussio
 - Attackers cannot deploy to URLs matching our pattern
 
 **CORS Restriction:**
-```
-ALLOWED_ORIGINS=https://vibenote.dev,http://localhost:3000
-VERCEL_PREVIEW_PATTERN=/^https:\/\/vibenote-[a-z0-9-]+-gregor-mitschabaudes-projects\.vercel\.app$/
+```regex
+/^https:\/\/vibenote-(git-[a-z0-9-]+|[a-z0-9]+)-gregor-mitschabaudes-projects\.vercel\.app$/
 ```
 
 This regex:
-- ✅ Allows all VibeNote preview deployments from your Vercel team
+- ✅ Allows git branch deploys: `vibenote-git-{branch}-gregor-mitschabaudes-projects.vercel.app`
+- ✅ Allows deployment deploys: `vibenote-{id}-gregor-mitschabaudes-projects.vercel.app`
+- ✅ Blocks team-suffix attacks (see security note below)
 - ✅ Blocks all other `*.vercel.app` deployments
-- ✅ Maintains security boundary - only trusted team members can deploy
 - ✅ No staging GitHub App needed - can use production backend safely
+
+**Security Note - Team Suffix Attack:**
+
+A naive regex like `vibenote-[a-z0-9-]+-gregor-mitschabaudes-projects.vercel.app` would be vulnerable to:
+- Attacker creates team `mitschabaudes-projects` (a suffix of the real team)
+- Attacker creates project `vibenote-abc-gregor`
+- Resulting URL: `vibenote-abc-gregor-{id}-mitschabaudes-projects.vercel.app`
+- This would match the naive regex! ❌
+
+The fix is to restrict the middle segment:
+- For git deploys: literal `git-` prefix prevents ambiguity
+- For deployment IDs: no hyphens allowed (`[a-z0-9]+` only)
+- This ensures the team slug cannot be split across segments ✅
 
 ## Implementation Options
 
