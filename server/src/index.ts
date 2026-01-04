@@ -29,8 +29,8 @@ await sessionStore.init();
 // Pattern to allow Vercel preview deployments from trusted team
 // Format: https://vibenote-{deployment-id}-gregor-mitschabaudes-projects.vercel.app
 // or: https://vibenote-git-{branch-name}-gregor-mitschabaudes-projects.vercel.app
-// Note: deployment-id is alphanumeric only (no hyphens) to prevent team-suffix attacks
-const VERCEL_PREVIEW_PATTERN = /^https:\/\/vibenote-(git-[a-z0-9-]+|[a-z0-9]+)-gregor-mitschabaudes-projects\.vercel\.app$/;
+// The negative lookahead (?!git-) prevents matching git branch URLs via the deployment ID pattern
+const VERCEL_PREVIEW_PATTERN = /^https:\/\/vibenote-(git-[a-z0-9-]+|(?!git-)[a-z0-9]+)-gregor-mitschabaudes-projects\.vercel\.app$/;
 
 function isAllowedOrigin(origin: string): boolean {
   if (env.ALLOWED_ORIGINS.includes(origin)) return true;
