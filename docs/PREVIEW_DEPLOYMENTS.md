@@ -19,22 +19,22 @@ According to [Vercel's documentation](https://github.com/vercel/vercel/discussio
 {project-name}-git-{branch-name}-{team-slug}.vercel.app
 ```
 
-**Example:** For project `vibenote` on team `zksecurity`:
-- `vibenote-abc123xyz-zksecurity.vercel.app` (deployment-specific)
-- `vibenote-git-main-zksecurity.vercel.app` (git branch-based)
-- `vibenote-git-fix-auth-zksecurity.vercel.app` (PR branch)
+**Example:** For project `vibenote` on team `gregor-mitschabaudes-projects`:
+- `vibenote-abc123xyz-gregor-mitschabaudes-projects.vercel.app` (deployment-specific)
+- `vibenote-git-main-gregor-mitschabaudes-projects.vercel.app` (git branch-based)
+- `vibenote-git-fix-auth-gregor-mitschabaudes-projects.vercel.app` (PR branch)
 
 ### Why This is Secure
 
 **Team slugs are globally unique on Vercel** ([source](https://vercel.com/docs/rest-api/reference/endpoints/teams/get-a-team)):
-- Only members of the `zksecurity` team can create deployments matching `*-zksecurity.vercel.app`
+- Only members of the `gregor-mitschabaudes-projects` team can create deployments matching `*-gregor-mitschabaudes-projects.vercel.app`
 - Attackers cannot register a duplicate team slug
 - Attackers cannot deploy to URLs matching our pattern
 
 **CORS Restriction:**
 ```
 ALLOWED_ORIGINS=https://vibenote.dev,http://localhost:3000
-ALLOWED_ORIGIN_PATTERN=^https://vibenote-[a-z0-9-]+-zksecurity\.vercel\.app$
+VERCEL_PREVIEW_PATTERN=/^https:\/\/vibenote-[a-z0-9-]+-gregor-mitschabaudes-projects\.vercel\.app$/
 ```
 
 This regex:
@@ -80,20 +80,28 @@ This regex:
 3. Configure staging backend with team-scoped CORS pattern
 4. Configure Vercel to use staging backend for previews
 
-## Required Information
+## Configuration
 
-To implement either option, we need to confirm:
-1. **Vercel project name**: Likely `vibenote` based on repo name
-2. **Vercel team slug**: Need to confirm (possibly `zksecurity` based on GitHub org)
+**Vercel Details:**
+- Project name: `vibenote`
+- Team slug: `gregor-mitschabaudes-projects`
+- Team URL: https://vercel.com/gregor-mitschabaudes-projects/vibenote
 
-You can find these by:
-- Visit Vercel Dashboard → Project Settings → General
-- Team slug appears in the URL: `vercel.com/{team-slug}/{project-name}`
+## Implementation Status
 
-## Next Steps
+✅ **Backend Changes Complete:**
+- Added `VERCEL_PREVIEW_PATTERN` constant in `server/src/index.ts:32`
+- Updated CORS middleware to allow team-scoped preview URLs
+- Updated `returnTo` validation to accept preview URLs
 
-Once we confirm the Vercel team slug and project name, we can:
-1. Implement regex-based CORS validation in backend
-2. Configure Vercel environment variables
+⏳ **Next Steps:**
+1. Configure Vercel environment variables (if needed - see below)
+2. Deploy backend changes to production
 3. Test on a preview deployment
-4. Document the pattern for team reference
+4. Verify OAuth flow works from preview URL
+
+## Vercel Environment Variables
+
+The frontend should already work with preview deployments since it builds with `VITE_VIBENOTE_API_BASE=https://api.vibenote.dev`.
+
+**No Vercel configuration changes needed** - preview deployments will automatically use the production backend, which now allows their origin via the CORS pattern.

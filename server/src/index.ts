@@ -26,13 +26,24 @@ const sessionStore = createSessionStore({
 });
 await sessionStore.init();
 
+// Pattern to allow Vercel preview deployments from trusted team
+// Format: https://vibenote-{deployment-id}-gregor-mitschabaudes-projects.vercel.app
+// or: https://vibenote-git-{branch-name}-gregor-mitschabaudes-projects.vercel.app
+const VERCEL_PREVIEW_PATTERN = /^https:\/\/vibenote-[a-z0-9-]+-gregor-mitschabaudes-projects\.vercel\.app$/;
+
+function isAllowedOrigin(origin: string): boolean {
+  if (env.ALLOWED_ORIGINS.includes(origin)) return true;
+  if (VERCEL_PREVIEW_PATTERN.test(origin)) return true;
+  return false;
+}
+
 const app = express();
 app.use(express.json({ limit: '2mb' }));
 app.use(
   cors({
     origin: (origin, cb) => {
       if (!origin) return cb(null, true);
-      if (env.ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+      if (isAllowedOrigin(origin)) return cb(null, true);
       return cb(Error('CORS not allowed'));
     },
     credentials: true,
@@ -188,7 +199,8 @@ function normalizeReturnTo(value: string, allowedOrigins: string[]): string | nu
   if (protocol !== 'https:' && protocol !== 'http:') {
     return null;
   }
-  if (!allowedOrigins.includes(parsed.origin)) {
+  // Check both explicit allowlist and Vercel preview pattern
+  if (!allowedOrigins.includes(parsed.origin) && !VERCEL_PREVIEW_PATTERN.test(parsed.origin)) {
     return null;
   }
   return parsed.toString();
