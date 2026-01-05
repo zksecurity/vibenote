@@ -34,11 +34,6 @@ function isAllowedOrigin(origin: string): boolean {
   return false;
 }
 
-function isPreviewOrigin(origin: string): boolean {
-  if (!env.VERCEL_PREVIEW_URL_PATTERN) return false;
-  return env.VERCEL_PREVIEW_URL_PATTERN.test(origin);
-}
-
 const app = express();
 app.use(express.json({ limit: '2mb' }));
 app.use(
