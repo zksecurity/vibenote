@@ -9,7 +9,7 @@ type Env = {
   PORT: number;
   ALLOWED_ORIGINS: string[];
   ALLOWED_GITHUB_USERS: string[] | undefined;
-  VERCEL_PREVIEW_URL_PATTERN: RegExp;
+  VERCEL_PREVIEW_URL_PATTERN: RegExp | undefined;
   GITHUB_APP_SLUG: string;
   GITHUB_APP_ID: number;
   GITHUB_APP_PRIVATE_KEY: string;
@@ -38,14 +38,14 @@ function getEnv(): Env {
     : undefined;
 
   // Parse Vercel preview URL pattern (regex string)
-  // Default pattern matches: vibenote-{id or git-branch}-{team-slug}.vercel.app
-  const defaultPattern = '^https:\\/\\/[a-z0-9-]+-(?:git-[a-z0-9-]+|(?!git-)[a-z0-9]+)-[a-z0-9-]+\\.vercel\\.app$';
-  const previewPatternStr = process.env.VERCEL_PREVIEW_URL_PATTERN ?? defaultPattern;
-  let VERCEL_PREVIEW_URL_PATTERN: RegExp;
-  try {
-    VERCEL_PREVIEW_URL_PATTERN = new RegExp(previewPatternStr);
-  } catch (error) {
-    throw new Error(`Invalid VERCEL_PREVIEW_URL_PATTERN regex: ${(error as Error).message}`);
+  // If not set, preview URLs are not allowed (fail-safe)
+  let VERCEL_PREVIEW_URL_PATTERN: RegExp | undefined = undefined;
+  if (process.env.VERCEL_PREVIEW_URL_PATTERN) {
+    try {
+      VERCEL_PREVIEW_URL_PATTERN = new RegExp(process.env.VERCEL_PREVIEW_URL_PATTERN);
+    } catch (error) {
+      throw new Error(`Invalid VERCEL_PREVIEW_URL_PATTERN regex: ${(error as Error).message}`);
+    }
   }
 
   const SESSION_JWT_SECRET = process.env.SESSION_JWT_SECRET ?? 'dev-session-secret-change-me';

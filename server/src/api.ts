@@ -15,6 +15,7 @@ export type OAuthTokenResult = {
 };
 
 function isPreviewOrigin(env: Env, origin: string): boolean {
+  if (!env.VERCEL_PREVIEW_URL_PATTERN) return false;
   return env.VERCEL_PREVIEW_URL_PATTERN.test(origin);
 }
 

@@ -126,11 +126,15 @@ api.vibenote.dev → single backend instance
 - ✅ No separate GitHub App needed
 
 **Implementation:**
-1. Add `ALLOWED_GITHUB_USERS` to production backend `.env`:
+1. Configure production backend `.env`:
    ```bash
+   # Required: Preview URL pattern for your project and team
+   VERCEL_PREVIEW_URL_PATTERN=^https:\/\/vibenote-(git-[a-z0-9-]+|(?!git-)[a-z0-9]+)-gregor-mitschabaudes-projects\.vercel\.app$
+
+   # Required: User allowlist for preview deployments
    ALLOWED_GITHUB_USERS=your-github-username,other-dev
    ```
-2. Restart backend - user allowlist now enforced for preview origins only
+2. Restart backend - preview deployments now enabled with user allowlist
 3. Configure Vercel environment variables (preview deployments use same backend)
 
 ## Configuration
@@ -142,19 +146,19 @@ api.vibenote.dev → single backend instance
 
 **Environment Variables:**
 
-### `VERCEL_PREVIEW_URL_PATTERN` (Optional)
+### `VERCEL_PREVIEW_URL_PATTERN` (Required for preview deployments)
 Regular expression to match Vercel preview deployment URLs.
 
-- **Default**: `^https:\/\/[a-z0-9-]+-(?:git-[a-z0-9-]+|(?!git-)[a-z0-9]+)-[a-z0-9-]+\.vercel\.app$`
-  - Matches any Vercel preview URL with format: `{project}-{id or git-branch}-{team}.vercel.app`
-  - Permissive but relies on user allowlist for security
+- **If not set**: Preview deployments are blocked entirely (fail-safe)
+- **Must be set explicitly** to enable preview deployments
 
-- **Recommended**: Set project and team-specific pattern for defense in depth
+- **Required format**: Project and team-specific pattern
   ```bash
   VERCEL_PREVIEW_URL_PATTERN=^https:\/\/vibenote-(git-[a-z0-9-]+|(?!git-)[a-z0-9]+)-gregor-mitschabaudes-projects\.vercel\.app$
   ```
   - Only matches your specific project (`vibenote`) and team (`gregor-mitschabaudes-projects`)
-  - Blocks team-suffix attacks at CORS layer
+  - Provides CORS-layer defense against team-suffix attacks
+  - Combined with user allowlist for defense in depth
 
 ### `ALLOWED_GITHUB_USERS` (Required for preview deployments)
 Comma-separated list of GitHub usernames allowed to authenticate from preview deployments.
@@ -188,8 +192,8 @@ Comma-separated list of GitHub usernames allowed to authenticate from preview de
    # Existing production config stays the same
    ALLOWED_ORIGINS=http://localhost:3000,https://vibenote.dev
 
-   # Optional: Set specific preview URL pattern (recommended for security)
-   # If not set, uses permissive default that matches any Vercel preview URL
+   # Required: Set specific preview URL pattern for your project and team
+   # Without this, preview deployments are blocked entirely
    VERCEL_PREVIEW_URL_PATTERN=^https:\/\/vibenote-(git-[a-z0-9-]+|(?!git-)[a-z0-9]+)-gregor-mitschabaudes-projects\.vercel\.app$
 
    # Required: GitHub user allowlist for preview deployments

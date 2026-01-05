@@ -27,13 +27,15 @@ const sessionStore = createSessionStore({
 await sessionStore.init();
 
 function isAllowedOrigin(origin: string): boolean {
-  // Allow both production origins and preview deployments
+  // Allow production origins
   if (env.ALLOWED_ORIGINS.includes(origin)) return true;
-  if (env.VERCEL_PREVIEW_URL_PATTERN.test(origin)) return true;
+  // Allow preview deployments only if pattern is configured
+  if (env.VERCEL_PREVIEW_URL_PATTERN && env.VERCEL_PREVIEW_URL_PATTERN.test(origin)) return true;
   return false;
 }
 
 function isPreviewOrigin(origin: string): boolean {
+  if (!env.VERCEL_PREVIEW_URL_PATTERN) return false;
   return env.VERCEL_PREVIEW_URL_PATTERN.test(origin);
 }
 
@@ -202,8 +204,12 @@ function normalizeReturnTo(value: string, allowedOrigins: string[]): string | nu
   if (protocol !== 'https:' && protocol !== 'http:') {
     return null;
   }
-  // Check both explicit allowlist and Vercel preview pattern
-  if (allowedOrigins.includes(parsed.origin) || env.VERCEL_PREVIEW_URL_PATTERN.test(parsed.origin)) {
+  // Check explicit allowlist
+  if (allowedOrigins.includes(parsed.origin)) {
+    return parsed.toString();
+  }
+  // Check Vercel preview pattern if configured
+  if (env.VERCEL_PREVIEW_URL_PATTERN && env.VERCEL_PREVIEW_URL_PATTERN.test(parsed.origin)) {
     return parsed.toString();
   }
   return null;
