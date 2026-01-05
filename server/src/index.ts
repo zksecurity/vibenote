@@ -1,3 +1,4 @@
+// Express API server wiring and request handling.
 import express from 'express';
 import cors from 'cors';
 import { env } from './env.ts';
@@ -26,13 +27,22 @@ const sessionStore = createSessionStore({
 });
 await sessionStore.init();
 
+function isAllowedOrigin(origin: string): boolean {
+  // Allow production origins
+  if (env.ALLOWED_ORIGINS.includes(origin)) return true;
+  // Allow preview deployments only if pattern is configured
+  if (env.PREVIEW_URL_PATTERN && env.PREVIEW_URL_PATTERN.test(origin)) return true;
+  return false;
+}
+
 const app = express();
+app.set('trust proxy', true);
 app.use(express.json({ limit: '2mb' }));
 app.use(
   cors({
     origin: (origin, cb) => {
       if (!origin) return cb(null, true);
-      if (env.ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+      if (isAllowedOrigin(origin)) return cb(null, true);
       return cb(Error('CORS not allowed'));
     },
     credentials: true,
@@ -61,8 +71,7 @@ app.get(
       sessionStore,
       code,
       stateToken,
-      callbackURL(req),
-      requestOrigin(req)
+      callbackURL(req)
     );
     res.status(200).type('html').send(html);
   })
@@ -74,7 +83,7 @@ app.post(
   handleErrors(async (req, res) => {
     let claims = req.sessionUser;
     if (!claims) throw HttpError(401, 'missing session');
-    let tokens = await refreshAccessToken(env, sessionStore, claims.sessionId);
+    let tokens = await refreshAccessToken(env, sessionStore, claims.sessionId, requestOriginForAccessCheck(req));
     res.json({ accessToken: tokens.accessToken, accessTokenExpiresAt: tokens.accessTokenExpiresAt });
   })
 );
@@ -132,6 +141,9 @@ sharingEndpoints(app);
 
 const server = app.listen(env.PORT, () => {
   console.log(`[vibenote] api listening on :${env.PORT}`);
+  if (env.PREVIEW_ALLOWED_GITHUB_USERS && env.PREVIEW_ALLOWED_GITHUB_USERS.length > 0) {
+    console.log(`[vibenote] preview deployment allowlist: ${env.PREVIEW_ALLOWED_GITHUB_USERS.join(', ')}`);
+  }
 });
 
 for (let sig of ['SIGINT', 'SIGTERM']) {
@@ -164,12 +176,20 @@ function requestOrigin(req: express.Request): string {
   return `${getProtocol(req)}://${getHost(req)}`;
 }
 
+function requestOriginForAccessCheck(req: express.Request): string {
+  let origin = req.get('origin');
+  if (origin !== undefined && origin.trim().length > 0) {
+    return origin;
+  }
+  throw HttpError(400, 'missing origin');
+}
+
 function getProtocol(req: express.Request): string {
-  return req.header('x-forwarded-proto') ?? req.protocol ?? 'https';
+  return req.protocol ?? 'https';
 }
 
 function getHost(req: express.Request): string {
-  return req.header('x-forwarded-host') ?? req.get('host') ?? 'localhost';
+  return req.get('host') ?? 'localhost';
 }
 
 function normalizeReturnTo(value: string, allowedOrigins: string[]): string | null {
@@ -188,8 +208,13 @@ function normalizeReturnTo(value: string, allowedOrigins: string[]): string | nu
   if (protocol !== 'https:' && protocol !== 'http:') {
     return null;
   }
-  if (!allowedOrigins.includes(parsed.origin)) {
-    return null;
+  // Check explicit allowlist
+  if (allowedOrigins.includes(parsed.origin)) {
+    return parsed.toString();
   }
-  return parsed.toString();
+  // Check preview pattern if configured
+  if (env.PREVIEW_URL_PATTERN && env.PREVIEW_URL_PATTERN.test(parsed.origin)) {
+    return parsed.toString();
+  }
+  return null;
 }

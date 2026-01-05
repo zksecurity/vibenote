@@ -8,6 +8,8 @@ export { type Env, env };
 type Env = {
   PORT: number;
   ALLOWED_ORIGINS: string[];
+  PREVIEW_ALLOWED_GITHUB_USERS: string[] | undefined;
+  PREVIEW_URL_PATTERN: RegExp | undefined;
   GITHUB_APP_SLUG: string;
   GITHUB_APP_ID: number;
   GITHUB_APP_PRIVATE_KEY: string;
@@ -29,6 +31,23 @@ function getEnv(): Env {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
+  const allowedUsers = process.env.PREVIEW_ALLOWED_GITHUB_USERS
+    ? process.env.PREVIEW_ALLOWED_GITHUB_USERS.split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : undefined;
+
+  // Parse preview URL pattern (regex string)
+  // If not set, preview URLs are not allowed (fail-safe)
+  let PREVIEW_URL_PATTERN: RegExp | undefined = undefined;
+  if (process.env.PREVIEW_URL_PATTERN) {
+    try {
+      PREVIEW_URL_PATTERN = new RegExp(process.env.PREVIEW_URL_PATTERN);
+    } catch (error) {
+      throw new Error(`Invalid PREVIEW_URL_PATTERN regex: ${(error as Error).message}`);
+    }
+  }
+
   const SESSION_JWT_SECRET = process.env.SESSION_JWT_SECRET ?? 'dev-session-secret-change-me';
   const SESSION_STORE_FILE = process.env.SESSION_STORE_FILE ?? './server/data/sessions.json';
   const SESSION_ENCRYPTION_KEY = must('SESSION_ENCRYPTION_KEY');
@@ -42,6 +61,8 @@ function getEnv(): Env {
   const env: Env = {
     PORT: Number.isFinite(port) ? port : 8787,
     ALLOWED_ORIGINS: allowed,
+    PREVIEW_ALLOWED_GITHUB_USERS: allowedUsers,
+    PREVIEW_URL_PATTERN,
     GITHUB_APP_SLUG: must('GITHUB_APP_SLUG'),
     GITHUB_APP_ID,
     GITHUB_APP_PRIVATE_KEY,
