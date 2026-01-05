@@ -15,8 +15,8 @@ export type OAuthTokenResult = {
 };
 
 export function isPreviewOrigin(env: Env, origin: string): boolean {
-  if (!env.VERCEL_PREVIEW_URL_PATTERN) return false;
-  return env.VERCEL_PREVIEW_URL_PATTERN.test(origin);
+  if (!env.PREVIEW_URL_PATTERN) return false;
+  return env.PREVIEW_URL_PATTERN.test(origin);
 }
 
 function isUserAllowed(env: Env, login: string, origin: string): boolean {
@@ -29,12 +29,12 @@ function isUserAllowed(env: Env, login: string, origin: string): boolean {
   }
 
   // Preview origin - check user allowlist
-  if (!env.ALLOWED_GITHUB_USERS || env.ALLOWED_GITHUB_USERS.length === 0) {
+  if (!env.PREVIEW_ALLOWED_GITHUB_USERS || env.PREVIEW_ALLOWED_GITHUB_USERS.length === 0) {
     // No allowlist configured - deny access from previews for safety
     return false;
   }
 
-  return env.ALLOWED_GITHUB_USERS.includes(login);
+  return env.PREVIEW_ALLOWED_GITHUB_USERS.includes(login);
 }
 
 export async function createAuthStartRedirect(

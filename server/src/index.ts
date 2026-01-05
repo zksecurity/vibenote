@@ -30,7 +30,7 @@ function isAllowedOrigin(origin: string): boolean {
   // Allow production origins
   if (env.ALLOWED_ORIGINS.includes(origin)) return true;
   // Allow preview deployments only if pattern is configured
-  if (env.VERCEL_PREVIEW_URL_PATTERN && env.VERCEL_PREVIEW_URL_PATTERN.test(origin)) return true;
+  if (env.PREVIEW_URL_PATTERN && env.PREVIEW_URL_PATTERN.test(origin)) return true;
   return false;
 }
 
@@ -140,8 +140,8 @@ sharingEndpoints(app);
 
 const server = app.listen(env.PORT, () => {
   console.log(`[vibenote] api listening on :${env.PORT}`);
-  if (env.ALLOWED_GITHUB_USERS && env.ALLOWED_GITHUB_USERS.length > 0) {
-    console.log(`[vibenote] preview deployment allowlist: ${env.ALLOWED_GITHUB_USERS.join(', ')}`);
+  if (env.PREVIEW_ALLOWED_GITHUB_USERS && env.PREVIEW_ALLOWED_GITHUB_USERS.length > 0) {
+    console.log(`[vibenote] preview deployment allowlist: ${env.PREVIEW_ALLOWED_GITHUB_USERS.join(', ')}`);
   }
 });
 
@@ -203,8 +203,8 @@ function normalizeReturnTo(value: string, allowedOrigins: string[]): string | nu
   if (allowedOrigins.includes(parsed.origin)) {
     return parsed.toString();
   }
-  // Check Vercel preview pattern if configured
-  if (env.VERCEL_PREVIEW_URL_PATTERN && env.VERCEL_PREVIEW_URL_PATTERN.test(parsed.origin)) {
+  // Check preview pattern if configured
+  if (env.PREVIEW_URL_PATTERN && env.PREVIEW_URL_PATTERN.test(parsed.origin)) {
     return parsed.toString();
   }
   return null;
