@@ -1,14 +1,22 @@
-# Preview Deployments - Security Analysis & Implementation Plan
+# Preview Deployments - Security Model & Setup
 
-## Security Concern
+## Threat Model
 
-Allowing `*.vercel.app` in CORS would be **catastrophic** because:
-- Anyone can deploy arbitrary code to `evil-app.vercel.app`
-- Malicious app could call our backend's OAuth endpoints
-- Our backend would return auth tokens to the attacker's origin
-- Attacker gains full read/write access to all repos where GitHub App is installed
+The main risk is a malicious `*.vercel.app` deployment that tricks users into
+signing in and then receives their OAuth session/access tokens. With those tokens,
+an attacker can read/write repos, create shares, and exfiltrate notes of other users.
 
-## Secure Solution: Team-Scoped URL Patterns
+We defend against this by only allowing a small set of GitHub users to authenticate
+from preview origins. Everyone else is blocked at the OAuth callback.
+
+## Why URL Patterns Are Not a Security Boundary
+
+Preview URLs are not cryptographically protected. Regex-based allowlists are
+useful to limit accidental exposure but can be mis-scoped or bypassed if you
+choose a weak pattern. They are not sufficient on their own.
+
+We still use a team-scoped regex to prevent obvious mistakes, but the actual
+security boundary is the GitHub user allowlist.
 
 ### Vercel URL Structure
 
@@ -19,212 +27,96 @@ According to [Vercel's documentation](https://github.com/vercel/vercel/discussio
 {project-name}-git-{branch-name}-{team-slug}.vercel.app
 ```
 
-**Example:** For project `vibenote` on team `gregor-mitschabaudes-projects`:
-- `vibenote-abc123xyz-gregor-mitschabaudes-projects.vercel.app` (deployment-specific)
-- `vibenote-git-main-gregor-mitschabaudes-projects.vercel.app` (git branch-based)
-- `vibenote-git-fix-auth-gregor-mitschabaudes-projects.vercel.app` (PR branch)
+**Example** (project `vibenote`, team `gregor-mitschabaudes-projects`):
 
-### Why This is Secure
+- `vibenote-abc123xyz-gregor-mitschabaudes-projects.vercel.app`
+- `vibenote-git-main-gregor-mitschabaudes-projects.vercel.app`
+- `vibenote-git-fix-auth-gregor-mitschabaudes-projects.vercel.app`
 
-**Team slugs are globally unique on Vercel** ([source](https://vercel.com/docs/rest-api/reference/endpoints/teams/get-a-team)):
-- Only members of the `gregor-mitschabaudes-projects` team can create deployments matching `*-gregor-mitschabaudes-projects.vercel.app`
-- Attackers cannot register a duplicate team slug
-- Attackers cannot deploy to URLs matching our pattern
+### Team Suffix Attack
 
-**CORS Restriction:**
+A naive regex like `vibenote-[a-z0-9-]+-gregor-mitschabaudes-projects.vercel.app`
+can be tricked by a suffix team name. The safe pattern avoids hyphens in the
+deployment id segment and requires `git-` for branch deploys:
+
 ```regex
-/^https:\/\/vibenote-(git-[a-z0-9-]+|[a-z0-9]+)-gregor-mitschabaudes-projects\.vercel\.app$/
+^https:\/\/vibenote-(git-[a-z0-9-]+|(?!git-)[a-z0-9]+)-gregor-mitschabaudes-projects\.vercel\.app$
 ```
 
-This regex:
-- ✅ Allows git branch deploys: `vibenote-git-{branch}-gregor-mitschabaudes-projects.vercel.app`
-- ✅ Allows deployment deploys: `vibenote-{id}-gregor-mitschabaudes-projects.vercel.app`
-- ✅ Blocks team-suffix attacks (see security note below)
-- ✅ Blocks all other `*.vercel.app` deployments
-- ✅ No staging GitHub App needed - can use production backend safely
+## Security Model
 
-**Security Note - Team Suffix Attack:**
+### Core Rule
 
-A naive regex like `vibenote-[a-z0-9-]+-gregor-mitschabaudes-projects.vercel.app` would be vulnerable to:
-- Attacker creates team `mitschabaudes-projects` (a suffix of the real team)
-- Attacker creates project `vibenote-abc-gregor`
-- Resulting URL: `vibenote-abc-gregor-{id}-mitschabaudes-projects.vercel.app`
-- This would match the naive regex! ❌
+- Preview origins are **allowed to authenticate only if the GitHub login is on
+  `PREVIEW_ALLOWED_GITHUB_USERS`**.
+- Production origins (`ALLOWED_ORIGINS`) allow all authenticated users.
 
-The fix is to restrict the middle segment:
-- For git deploys: literal `git-` prefix prevents ambiguity
-- For deployment IDs: no hyphens allowed (`[a-z0-9]+` only)
-- This ensures the team slug cannot be split across segments ✅
+### Why This Works
 
-## Security Model: Per-Request Mode Detection
+Even if an attacker hosts a malicious `*.vercel.app` app:
 
-The backend **automatically detects the mode per-request** based on the request origin:
+1. They can reach the OAuth endpoints.
+2. The callback will reject them unless their GitHub login is allowlisted.
+3. Tokens are never posted back to the malicious origin.
 
-### Production Request (origin matches `ALLOWED_ORIGINS`)
-- ✅ All authenticated users allowed
-- ✅ Normal OAuth flow
+### What This Does Not Protect Against
 
-### Preview Request (origin matches Vercel preview pattern)
-- ✅ Enforces GitHub user allowlist
-- ✅ Only approved developers can authenticate
-- ❌ Unauthorized users get clear error message
+- Allowlisted users can still be phished. If you are on the allowlist, you must
+  treat preview URLs with extra care.
 
-**Two layers of defense (for preview requests only):**
+## Callback & Refresh Flow (How It Enforces the Allowlist)
 
-### Layer 1: CORS URL Pattern Validation
-- Allows both production origins and preview URLs
-- Regex validates preview URLs match your team pattern
-- Blocks unauthorized origins
-- **Not cryptographically secure** (suffix attacks theoretically possible)
+1. `/v1/auth/github/start` validates `returnTo` against `ALLOWED_ORIGINS` and
+   `PREVIEW_URL_PATTERN`, then signs it into the OAuth state.
+2. `/v1/auth/github/callback` requires `returnTo` to be an absolute URL and uses
+   its origin to decide preview vs production.
+3. If the origin is a preview origin, the GitHub login must be on the allowlist,
+   otherwise the callback returns an Unauthorized page.
+4. `/v1/auth/github/refresh` uses the request `Origin` header to enforce the same
+   allowlist rule for preview origins.
 
-### Layer 2: GitHub User Allowlist ✅ (Actual Security Boundary)
-- Backend validates authenticated GitHub username on preview requests
-- Production requests skip this check
-- Only approved developers can access repos from preview deployments
-- Works even if attacker bypasses CORS
+## Single Backend Instance
 
-**Why this works:**
-Even if an attacker:
-1. ✅ Crafts a team-suffix collision URL
-2. ✅ Bypasses CORS validation
-3. ✅ Completes OAuth flow
-4. ❌ **Gets blocked** - they're not on the developer allowlist (preview origin)
+Run one backend for both production and preview:
 
-**Single Backend Instance:**
-Run **one backend instance** that serves both production and preview traffic:
-- Determines mode based on request origin (not environment variables)
-- Production requests: Skip user allowlist check
-- Preview requests: Enforce user allowlist
-- Configure `PREVIEW_ALLOWED_GITHUB_USERS` once, applies to all preview requests
-
----
-
-## Implementation
-
-### Single Backend Instance ✅
-
-Run **one production backend** that serves both production and preview traffic:
-
-**Architecture:**
 ```
 api.vibenote.dev → single backend instance
   ├─ Production requests (vibenote.dev) → no user allowlist
-  └─ Preview requests (*.vercel.app)     → enforces user allowlist
+  └─ Preview requests (*.vercel.app)     → allowlist enforced
 ```
-
-**How it works:**
-- Backend detects preview requests by checking if origin matches Vercel pattern
-- Same GitHub App, same database, same secrets
-- User allowlist only enforced for preview origins
-- Production traffic unaffected
-
-**Pros:**
-- ✅ Single backend instance (no staging infrastructure)
-- ✅ Single codebase, single deployment
-- ✅ Production stays secure (user allowlist not checked)
-- ✅ Preview deployments locked down to approved developers
-- ✅ No separate GitHub App needed
-
-**Implementation:**
-1. Configure production backend `.env`:
-   ```bash
-   # Required: Preview URL pattern for your project and team
-   PREVIEW_URL_PATTERN=^https:\/\/vibenote-(git-[a-z0-9-]+|(?!git-)[a-z0-9]+)-gregor-mitschabaudes-projects\.vercel\.app$
-
-   # Required: User allowlist for preview deployments
-   PREVIEW_ALLOWED_GITHUB_USERS=your-github-username,other-dev
-   ```
-2. Restart backend - preview deployments now enabled with user allowlist
-3. Configure Vercel environment variables (preview deployments use same backend)
 
 ## Configuration
 
-**Vercel Details:**
-- Project name: `vibenote`
-- Team slug: `gregor-mitschabaudes-projects`
-- Team URL: https://vercel.com/gregor-mitschabaudes-projects/vibenote
-
-**Environment Variables:**
-
 ### `PREVIEW_URL_PATTERN` (Required for preview deployments)
-Regular expression to match preview deployment URLs (e.g., Vercel, Netlify, etc.).
 
-- **If not set**: Preview deployments are blocked entirely (fail-safe)
-- **Must be set explicitly** to enable preview deployments
+- If not set: preview deployments are blocked (fail-safe).
+- Must match your project and team slug.
 
-- **Required format**: Project and team-specific pattern
-  ```bash
-  PREVIEW_URL_PATTERN=^https:\/\/vibenote-(git-[a-z0-9-]+|(?!git-)[a-z0-9]+)-gregor-mitschabaudes-projects\.vercel\.app$
-  ```
-  - Only matches your specific project (`vibenote`) and team (`gregor-mitschabaudes-projects`)
-  - Provides CORS-layer defense against team-suffix attacks
-  - Combined with user allowlist for defense in depth
+Example:
+
+```bash
+PREVIEW_URL_PATTERN=^https:\/\/vibenote-(git-[a-z0-9-]+|(?!git-)[a-z0-9]+)-gregor-mitschabaudes-projects\.vercel\.app$
+```
 
 ### `PREVIEW_ALLOWED_GITHUB_USERS` (Required for preview deployments)
-Comma-separated list of GitHub usernames allowed to authenticate from preview deployments.
 
-- Backend checks this on every OAuth login and token refresh from preview origins
-- Production origins skip this check
-- If unset, preview deployments are denied (fail-safe)
+- Comma-separated GitHub usernames allowed to authenticate from preview origins.
+- If unset or empty: preview authentication is denied.
 
-## Implementation Status
+Example:
 
-✅ **Backend Changes Complete:**
-- Added per-request origin detection (`isPreviewOrigin()` in `server/src/api.ts:17`)
-- Added `PREVIEW_URL_PATTERN` env variable (used for both CORS and user allowlist)
-- Updated CORS middleware to allow both production and preview URLs
-- Updated `returnTo` validation to allow both production and preview URLs
-- Added `PREVIEW_ALLOWED_GITHUB_USERS` env variable (`server/src/env.ts:11`)
-- Updated user allowlist validation to be origin-conditional (`server/src/api.ts:22-38`)
-- OAuth callback enforces user allowlist only for preview origins (`server/src/api.ts:69`)
-- Session refresh enforces user allowlist only for preview origins (`server/src/api.ts:145`)
-- Added startup logging showing preview deployment allowlist if configured
-
-**How it works:**
-- Single backend instance serves all traffic
-- Detects preview requests by checking origin matches Vercel pattern
-- Production requests: User allowlist check skipped, all users allowed
-- Preview requests: User allowlist enforced, only approved developers
-
-⏳ **Next Steps:**
-1. Configure production backend `.env` for preview deployments:
-   ```bash
-   # Existing production config stays the same
-   ALLOWED_ORIGINS=http://localhost:3000,https://vibenote.dev
-
-   # Required: Set specific preview URL pattern for your project and team
-   # Without this, preview deployments are blocked entirely
-   PREVIEW_URL_PATTERN=^https:\/\/vibenote-(git-[a-z0-9-]+|(?!git-)[a-z0-9]+)-gregor-mitschabaudes-projects\.vercel\.app$
-
-   # Required: GitHub user allowlist for preview deployments
-   PREVIEW_ALLOWED_GITHUB_USERS=your-github-username,other-dev
-   ```
-
-2. Restart production backend:
-   ```bash
-   pm2 restart vibenote-api
-   ```
-
-   You should see: `[vibenote] preview deployment allowlist: your-username, other-dev`
-
-3. Configure Vercel environment variable:
-   - `VITE_VIBENOTE_API_BASE=https://api.vibenote.dev` (Preview environment)
-
-4. Test on a preview deployment:
-   - Create PR → Vercel deploys preview
-   - Visit preview URL → Sign in with GitHub
-   - If you're in allowlist → ✅ Success
-   - If not → Shows unauthorized page
+```bash
+PREVIEW_ALLOWED_GITHUB_USERS=your-github-username,other-dev
+```
 
 ## Vercel Environment Variables
 
 Configure in Vercel Dashboard → Project Settings → Environment Variables:
 
-| Variable | Value | Environment |
-|----------|-------|-------------|
-| `VITE_VIBENOTE_API_BASE` | `https://api.vibenote.dev` | Preview |
-| `VITE_VIBENOTE_API_BASE` | `https://api.vibenote.dev` | Production |
+| Variable                 | Value                      | Environment |
+| ------------------------ | -------------------------- | ----------- |
+| `VITE_VIBENOTE_API_BASE` | `https://api.vibenote.dev` | Preview     |
+| `VITE_VIBENOTE_API_BASE` | `https://api.vibenote.dev` | Production  |
 
-Both use the **same backend** - the backend determines the mode per-request:
-- Preview deployments: Backend detects preview origin, enforces user allowlist
-- Production: Backend detects production origin, skips user allowlist
+Both environments talk to the same backend; the backend decides preview vs
+production based on the request origin and the signed `returnTo` on callback.

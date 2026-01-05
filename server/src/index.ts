@@ -1,3 +1,4 @@
+// Express API server wiring and request handling.
 import express from 'express';
 import cors from 'cors';
 import { env } from './env.ts';
@@ -35,6 +36,7 @@ function isAllowedOrigin(origin: string): boolean {
 }
 
 const app = express();
+app.set('trust proxy', true);
 app.use(express.json({ limit: '2mb' }));
 app.use(
   cors({
@@ -69,8 +71,7 @@ app.get(
       sessionStore,
       code,
       stateToken,
-      callbackURL(req),
-      requestOrigin(req)
+      callbackURL(req)
     );
     res.status(200).type('html').send(html);
   })
@@ -82,7 +83,7 @@ app.post(
   handleErrors(async (req, res) => {
     let claims = req.sessionUser;
     if (!claims) throw HttpError(401, 'missing session');
-    let tokens = await refreshAccessToken(env, sessionStore, claims.sessionId, requestOrigin(req));
+    let tokens = await refreshAccessToken(env, sessionStore, claims.sessionId, requestOriginForAccessCheck(req));
     res.json({ accessToken: tokens.accessToken, accessTokenExpiresAt: tokens.accessTokenExpiresAt });
   })
 );
@@ -175,12 +176,20 @@ function requestOrigin(req: express.Request): string {
   return `${getProtocol(req)}://${getHost(req)}`;
 }
 
+function requestOriginForAccessCheck(req: express.Request): string {
+  let origin = req.get('origin');
+  if (origin !== undefined && origin.trim().length > 0) {
+    return origin;
+  }
+  throw HttpError(400, 'missing origin');
+}
+
 function getProtocol(req: express.Request): string {
-  return req.header('x-forwarded-proto') ?? req.protocol ?? 'https';
+  return req.protocol ?? 'https';
 }
 
 function getHost(req: express.Request): string {
-  return req.header('x-forwarded-host') ?? req.get('host') ?? 'localhost';
+  return req.get('host') ?? 'localhost';
 }
 
 function normalizeReturnTo(value: string, allowedOrigins: string[]): string | null {

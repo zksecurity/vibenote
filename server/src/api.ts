@@ -1,3 +1,4 @@
+// Auth/session helpers for API routes and security checks.
 import crypto from 'node:crypto';
 import type { Env } from './env.ts';
 import { signSession, verifySession, signState, verifyState, type SessionClaims } from './jwt.ts';
@@ -57,24 +58,29 @@ export async function handleAuthCallback(
   store: SessionStoreInstance,
   code: string,
   stateToken: string,
-  callbackUrl: string,
-  pageOrigin: string
+  callbackUrl: string
 ): Promise<{ html: string }> {
   let state = await verifyState(stateToken, env.SESSION_JWT_SECRET);
-  let returnTo = getOptionalString(state, 'returnTo') ?? '/';
+  let returnTo = getOptionalString(state, 'returnTo');
+  if (returnTo === null || !returnTo.startsWith('http')) {
+    throw Error('invalid returnTo origin');
+  }
+  let returnToUrl = new URL(returnTo);
   let tokens = await exchangeCode(env, code, callbackUrl, stateToken);
   let user = await fetchGitHubUser(tokens.accessToken);
+  let accessOrigin = returnToUrl.origin;
 
   // Validate user is allowed (enforced for preview deployments only)
-  if (!isUserAllowed(env, user.login, pageOrigin)) {
-    let rt = new URL(returnTo, returnTo.startsWith('http') ? undefined : pageOrigin);
-    const isPreview = isPreviewOrigin(env, pageOrigin);
+  if (!isUserAllowed(env, user.login, accessOrigin)) {
+    const isPreview = isPreviewOrigin(env, accessOrigin);
     let errorHtml = `<!doctype html><meta charset="utf-8"><title>VibeNote - Unauthorized</title>
       <style>body{font-family:system-ui;max-width:600px;margin:100px auto;padding:20px;text-align:center}</style>
       <h1>Unauthorized</h1>
-      <p>Your GitHub user <strong>@${user.login}</strong> is not authorized to use ${isPreview ? 'preview deployments' : 'this environment'}.</p>
+      <p>Your GitHub user <strong>@${user.login}</strong> is not authorized to use ${
+      isPreview ? 'preview deployments' : 'this environment'
+    }.</p>
       <p>Please contact the VibeNote development team if you believe this is an error.</p>
-      <p><a href="${rt.toString()}">Return to app</a></p>`;
+      <p><a href="${returnToUrl.toString()}">Return to app</a></p>`;
     return { html: errorHtml };
   }
 
@@ -102,8 +108,7 @@ export async function handleAuthCallback(
     accessToken: tokens.accessToken,
     accessTokenExpiresAt: tokens.accessTokenExpiresAt,
   };
-  let rt = new URL(returnTo, returnTo.startsWith('http') ? undefined : pageOrigin);
-  let origin = rt.origin;
+  let origin = returnToUrl.origin;
   let message = {
     type: 'vibenote:auth',
     sessionToken,
@@ -126,7 +131,7 @@ export async function handleAuthCallback(
         setTimeout(function(){ window.close(); }, 50);
       })();
     </script>
-    <p>Signed in. You can close this window. <a href="${rt.toString()}">Continue</a></p>`;
+    <p>Signed in. You can close this window. <a href="${returnToUrl.toString()}">Continue</a></p>`;
   return { html };
 }
 
@@ -169,7 +174,9 @@ export async function buildInstallUrl(
   returnTo: string
 ): Promise<string> {
   let state = await signState({ owner, repo, returnTo, t: Date.now() }, env.SESSION_JWT_SECRET, 1800);
-  return `https://github.com/apps/${env.GITHUB_APP_SLUG}/installations/new?state=${encodeURIComponent(state)}`;
+  return `https://github.com/apps/${env.GITHUB_APP_SLUG}/installations/new?state=${encodeURIComponent(
+    state
+  )}`;
 }
 
 export async function buildSetupRedirect(
@@ -212,7 +219,12 @@ async function fetchGitHubUser(accessToken: string): Promise<{
   return parseGitHubUser(raw);
 }
 
-async function exchangeCode(env: Env, code: string, callbackUrl: string, stateToken: string): Promise<OAuthTokenResult> {
+async function exchangeCode(
+  env: Env,
+  code: string,
+  callbackUrl: string,
+  stateToken: string
+): Promise<OAuthTokenResult> {
   let body = {
     client_id: env.GITHUB_OAUTH_CLIENT_ID,
     client_secret: env.GITHUB_OAUTH_CLIENT_SECRET,
