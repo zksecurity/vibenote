@@ -95,7 +95,7 @@ api.vibenote.dev → single backend instance
 Example:
 
 ```bash
-PREVIEW_URL_PATTERN=^https:\/\/vibenote-(git-[a-z0-9-]+|(?!git-)[a-z0-9]+)-gregor-mitschabaudes-projects\.vercel\.app$
+PREVIEW_URL_PATTERN=^https:\/\/vibenote-(git-[a-z0-9-]+|(?!git-)[a-z0-9]+)-your-vercel-team-slug\.vercel\.app$
 ```
 
 ### `PREVIEW_ALLOWED_GITHUB_USERS` (Required for preview deployments)
