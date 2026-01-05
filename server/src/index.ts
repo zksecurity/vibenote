@@ -26,26 +26,20 @@ const sessionStore = createSessionStore({
 });
 await sessionStore.init();
 
-// Staging mode: ALLOWED_GITHUB_USERS is set
-// - Allows Vercel preview deployments in CORS (with user allowlist as security boundary)
-// Production mode: ALLOWED_GITHUB_USERS is undefined
-// - Strict CORS (only ALLOWED_ORIGINS), all authenticated users allowed
-const isStagingMode = env.ALLOWED_GITHUB_USERS !== undefined && env.ALLOWED_GITHUB_USERS.length > 0;
-
-// Pattern to allow Vercel preview deployments (only used in staging mode)
+// Pattern to allow Vercel preview deployments
 // Format: https://vibenote-{deployment-id}-gregor-mitschabaudes-projects.vercel.app
 // or: https://vibenote-git-{branch-name}-gregor-mitschabaudes-projects.vercel.app
 const VERCEL_PREVIEW_PATTERN = /^https:\/\/vibenote-(git-[a-z0-9-]+|(?!git-)[a-z0-9]+)-gregor-mitschabaudes-projects\.vercel\.app$/;
 
 function isAllowedOrigin(origin: string): boolean {
-  // Always check explicit allowlist
+  // Allow both production origins and preview deployments
   if (env.ALLOWED_ORIGINS.includes(origin)) return true;
-
-  // In staging mode, also allow Vercel preview deployments
-  // (user allowlist provides actual security)
-  if (isStagingMode && VERCEL_PREVIEW_PATTERN.test(origin)) return true;
-
+  if (VERCEL_PREVIEW_PATTERN.test(origin)) return true;
   return false;
+}
+
+function isPreviewOrigin(origin: string): boolean {
+  return VERCEL_PREVIEW_PATTERN.test(origin);
 }
 
 const app = express();
@@ -96,7 +90,7 @@ app.post(
   handleErrors(async (req, res) => {
     let claims = req.sessionUser;
     if (!claims) throw HttpError(401, 'missing session');
-    let tokens = await refreshAccessToken(env, sessionStore, claims.sessionId);
+    let tokens = await refreshAccessToken(env, sessionStore, claims.sessionId, requestOrigin(req));
     res.json({ accessToken: tokens.accessToken, accessTokenExpiresAt: tokens.accessTokenExpiresAt });
   })
 );
@@ -153,10 +147,9 @@ app.post('/v1/webhooks/github', (_req, res) => {
 sharingEndpoints(app);
 
 const server = app.listen(env.PORT, () => {
-  const mode = isStagingMode ? 'staging (user allowlist enabled)' : 'production';
-  console.log(`[vibenote] api listening on :${env.PORT} [mode: ${mode}]`);
-  if (isStagingMode) {
-    console.log(`[vibenote] allowed users: ${env.ALLOWED_GITHUB_USERS?.join(', ')}`);
+  console.log(`[vibenote] api listening on :${env.PORT}`);
+  if (env.ALLOWED_GITHUB_USERS && env.ALLOWED_GITHUB_USERS.length > 0) {
+    console.log(`[vibenote] preview deployment allowlist: ${env.ALLOWED_GITHUB_USERS.join(', ')}`);
   }
 });
 
@@ -214,12 +207,8 @@ function normalizeReturnTo(value: string, allowedOrigins: string[]): string | nu
   if (protocol !== 'https:' && protocol !== 'http:') {
     return null;
   }
-  // Check explicit allowlist
-  if (allowedOrigins.includes(parsed.origin)) {
-    return parsed.toString();
-  }
-  // In staging mode, also allow Vercel preview pattern
-  if (isStagingMode && VERCEL_PREVIEW_PATTERN.test(parsed.origin)) {
+  // Check both explicit allowlist and Vercel preview pattern
+  if (allowedOrigins.includes(parsed.origin) || VERCEL_PREVIEW_PATTERN.test(parsed.origin)) {
     return parsed.toString();
   }
   return null;

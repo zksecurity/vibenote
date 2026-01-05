@@ -14,12 +14,28 @@ export type OAuthTokenResult = {
   tokenType: string;
 };
 
-function isUserAllowed(env: Env, login: string): boolean {
-  // If no allowlist is configured, allow all users (production mode)
-  if (!env.ALLOWED_GITHUB_USERS || env.ALLOWED_GITHUB_USERS.length === 0) {
+// Pattern to identify Vercel preview deployments
+const VERCEL_PREVIEW_PATTERN = /^https:\/\/vibenote-(git-[a-z0-9-]+|(?!git-)[a-z0-9]+)-gregor-mitschabaudes-projects\.vercel\.app$/;
+
+function isPreviewOrigin(origin: string): boolean {
+  return VERCEL_PREVIEW_PATTERN.test(origin);
+}
+
+function isUserAllowed(env: Env, login: string, origin: string): boolean {
+  // Only enforce user allowlist for preview deployments
+  const isPreview = isPreviewOrigin(origin);
+
+  if (!isPreview) {
+    // Production origin - allow all users
     return true;
   }
-  // Otherwise, only allow users in the allowlist (staging mode)
+
+  // Preview origin - check user allowlist
+  if (!env.ALLOWED_GITHUB_USERS || env.ALLOWED_GITHUB_USERS.length === 0) {
+    // No allowlist configured - deny access from previews for safety
+    return false;
+  }
+
   return env.ALLOWED_GITHUB_USERS.includes(login);
 }
 
@@ -51,13 +67,14 @@ export async function handleAuthCallback(
   let tokens = await exchangeCode(env, code, callbackUrl, stateToken);
   let user = await fetchGitHubUser(tokens.accessToken);
 
-  // Validate user is allowed (for staging environments with user allowlist)
-  if (!isUserAllowed(env, user.login)) {
+  // Validate user is allowed (enforced for preview deployments only)
+  if (!isUserAllowed(env, user.login, pageOrigin)) {
     let rt = new URL(returnTo, returnTo.startsWith('http') ? undefined : pageOrigin);
+    const isPreview = isPreviewOrigin(pageOrigin);
     let errorHtml = `<!doctype html><meta charset="utf-8"><title>VibeNote - Unauthorized</title>
       <style>body{font-family:system-ui;max-width:600px;margin:100px auto;padding:20px;text-align:center}</style>
       <h1>Unauthorized</h1>
-      <p>Your GitHub user <strong>@${user.login}</strong> is not authorized to use this staging environment.</p>
+      <p>Your GitHub user <strong>@${user.login}</strong> is not authorized to use ${isPreview ? 'preview deployments' : 'this environment'}.</p>
       <p>Please contact the VibeNote development team if you believe this is an error.</p>
       <p><a href="${rt.toString()}">Return to app</a></p>`;
     return { html: errorHtml };
@@ -118,15 +135,16 @@ export async function handleAuthCallback(
 export async function refreshAccessToken(
   env: Env,
   store: SessionStoreInstance,
-  sessionId: string
+  sessionId: string,
+  requestOrigin: string
 ): Promise<OAuthTokenResult> {
   let record = store.get(sessionId);
   if (!record) {
     throw new Error('session expired');
   }
 
-  // Validate user is still allowed (in case they were removed from allowlist)
-  if (!isUserAllowed(env, record.login)) {
+  // Validate user is still allowed (enforced for preview deployments only)
+  if (!isUserAllowed(env, record.login, requestOrigin)) {
     await store.delete(sessionId);
     throw new Error('user not authorized');
   }

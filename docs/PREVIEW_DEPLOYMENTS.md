@@ -56,30 +56,31 @@ The fix is to restrict the middle segment:
 - For deployment IDs: no hyphens allowed (`[a-z0-9]+` only)
 - This ensures the team slug cannot be split across segments ✅
 
-## Security Model: Defense in Depth
+## Security Model: Per-Request Mode Detection
 
-The backend **automatically detects** whether it's running in staging or production mode based on the `ALLOWED_GITHUB_USERS` environment variable:
+The backend **automatically detects the mode per-request** based on the request origin:
 
-### Staging Mode (ALLOWED_GITHUB_USERS is set)
-- ✅ Allows Vercel preview deployments in CORS
-- ✅ Enforces GitHub user allowlist (actual security boundary)
-- ✅ Only approved developers can authenticate
-
-### Production Mode (ALLOWED_GITHUB_USERS not set)
-- ✅ Strict CORS (only `ALLOWED_ORIGINS`)
-- ✅ Does NOT allow Vercel preview patterns
+### Production Request (origin matches `ALLOWED_ORIGINS`)
 - ✅ All authenticated users allowed
+- ✅ Normal OAuth flow
 
-**Two layers of defense (staging mode only):**
+### Preview Request (origin matches Vercel preview pattern)
+- ✅ Enforces GitHub user allowlist
+- ✅ Only approved developers can authenticate
+- ❌ Unauthorized users get clear error message
+
+**Two layers of defense (for preview requests only):**
 
 ### Layer 1: CORS URL Pattern Validation
+- Allows both production origins and preview URLs
 - Regex validates preview URLs match your team pattern
-- Blocks casual attacks and unauthorized origins
-- **Not cryptographically secure** (suffix attacks possible)
+- Blocks unauthorized origins
+- **Not cryptographically secure** (suffix attacks theoretically possible)
 
 ### Layer 2: GitHub User Allowlist ✅ (Actual Security Boundary)
-- Backend validates authenticated GitHub username
-- Only approved developers can access repos through VibeNote
+- Backend validates authenticated GitHub username on preview requests
+- Production requests skip this check
+- Only approved developers can access repos from preview deployments
 - Works even if attacker bypasses CORS
 
 **Why this works:**
@@ -87,66 +88,50 @@ Even if an attacker:
 1. ✅ Crafts a team-suffix collision URL
 2. ✅ Bypasses CORS validation
 3. ✅ Completes OAuth flow
-4. ❌ **Gets blocked** - they're not on the developer allowlist
+4. ❌ **Gets blocked** - they're not on the developer allowlist (preview origin)
 
-**Single Instance, Dual Mode:**
-You can run **one backend instance** that serves both production and staging:
-- Production config: `ALLOWED_GITHUB_USERS` unset → strict mode
-- Staging config: `ALLOWED_GITHUB_USERS=user1,user2` → preview mode with allowlist
+**Single Backend Instance:**
+Run **one backend instance** that serves both production and preview traffic:
+- Determines mode based on request origin (not environment variables)
+- Production requests: Skip user allowlist check
+- Preview requests: Enforce user allowlist
+- Configure `ALLOWED_GITHUB_USERS` once, applies to all preview requests
 
 ---
 
-## Implementation Options
+## Implementation
 
-### Option A: Single Backend Instance (Recommended) ✅
+### Single Backend Instance ✅
 
-Run **one backend codebase** with different configurations for production and staging:
+Run **one production backend** that serves both production and preview traffic:
 
-**Deployment Architecture:**
+**Architecture:**
 ```
-Production:  api.vibenote.dev          → backend (no ALLOWED_GITHUB_USERS)
-Staging:     api-staging.vibenote.dev  → same backend code (with ALLOWED_GITHUB_USERS)
+api.vibenote.dev → single backend instance
+  ├─ Production requests (vibenote.dev) → no user allowlist
+  └─ Preview requests (*.vercel.app)     → enforces user allowlist
 ```
+
+**How it works:**
+- Backend detects preview requests by checking if origin matches Vercel pattern
+- Same GitHub App, same database, same secrets
+- User allowlist only enforced for preview origins
+- Production traffic unaffected
 
 **Pros:**
-- Single codebase to maintain
-- Backend auto-detects mode based on environment variable
-- Production stays secure (strict CORS, no preview URLs)
-- Staging allows preview deployments (with user allowlist)
-- Can run both on same VPS (different ports) or separate instances
-
-**Cons:**
-- Need to deploy backend twice (once for prod, once for staging)
-- Requires separate staging GitHub App
+- ✅ Single backend instance (no staging infrastructure)
+- ✅ Single codebase, single deployment
+- ✅ Production stays secure (user allowlist not checked)
+- ✅ Preview deployments locked down to approved developers
+- ✅ No separate GitHub App needed
 
 **Implementation:**
-1. Deploy backend to production: `api.vibenote.dev` (existing setup, no changes)
-2. Deploy same backend code to staging: `api-staging.vibenote.dev`
-3. Create staging GitHub App with callback: `https://api-staging.vibenote.dev/v1/auth/github/callback`
-4. Configure staging backend `.env`:
+1. Add `ALLOWED_GITHUB_USERS` to production backend `.env`:
    ```bash
    ALLOWED_GITHUB_USERS=your-github-username,other-dev
-   GITHUB_APP_SLUG=vibenote-app-staging
-   GITHUB_APP_ID=<staging-app-id>
-   # ... staging GitHub App credentials
    ```
-5. Configure Vercel environment variables (preview deployments use staging)
-
-### Option B: Separate Backend Codebases (Not Recommended)
-
-Maintain separate production and staging backends with different code.
-
-**Cons:**
-- Code duplication
-- Harder to keep in sync
-- Requires separate staging GitHub App
-- More maintenance overhead
-
-**Implementation:**
-1. Deploy staging backend at `api-staging.vibenote.dev`
-2. Create staging GitHub App with staging callback URLs
-3. Configure staging backend with team-scoped CORS pattern
-4. Configure Vercel to use staging backend for previews
+2. Restart backend - user allowlist now enforced for preview origins only
+3. Configure Vercel environment variables (preview deployments use same backend)
 
 ## Configuration
 
@@ -158,47 +143,47 @@ Maintain separate production and staging backends with different code.
 ## Implementation Status
 
 ✅ **Backend Changes Complete:**
-- Added mode detection (`isStagingMode`) based on `ALLOWED_GITHUB_USERS` env var
-- Added `VERCEL_PREVIEW_PATTERN` constant (only used in staging mode)
-- Updated CORS middleware with conditional preview URL validation
-- Updated `returnTo` validation with conditional preview URL validation
+- Added per-request origin detection (`isPreviewOrigin()` in `server/src/api.ts:20`)
+- Added `VERCEL_PREVIEW_PATTERN` constant (used for both CORS and user allowlist)
+- Updated CORS middleware to allow both production and preview URLs
+- Updated `returnTo` validation to allow both production and preview URLs
 - Added `ALLOWED_GITHUB_USERS` env variable (`server/src/env.ts:11`)
-- Added user allowlist validation in OAuth callback (`server/src/api.ts:46`)
-- Added user allowlist validation in session refresh (`server/src/api.ts:129`)
-- Added startup logging showing mode and allowed users
+- Updated user allowlist validation to be origin-conditional (`server/src/api.ts:24-40`)
+- OAuth callback enforces user allowlist only for preview origins (`server/src/api.ts:71`)
+- Session refresh enforces user allowlist only for preview origins (`server/src/api.ts:147`)
+- Added startup logging showing preview deployment allowlist if configured
 
 **How it works:**
-- Production: No `ALLOWED_GITHUB_USERS` → strict CORS, all users allowed
-- Staging: `ALLOWED_GITHUB_USERS` set → allows preview URLs, enforces user allowlist
+- Single backend instance serves all traffic
+- Detects preview requests by checking origin matches Vercel pattern
+- Production requests: User allowlist check skipped, all users allowed
+- Preview requests: User allowlist enforced, only approved developers
 
-⏳ **Next Steps for Staging Deployment:**
-1. Deploy same backend code to `api-staging.vibenote.dev` (or separate port on VPS)
-2. Create staging GitHub App with callback: `https://api-staging.vibenote.dev/v1/auth/github/callback`
-3. Configure staging `.env`:
+⏳ **Next Steps:**
+1. Add `ALLOWED_GITHUB_USERS` to production backend `.env`:
    ```bash
-   # This env var enables staging mode
+   # Existing production config stays the same
+   ALLOWED_ORIGINS=http://localhost:3000,https://vibenote.dev
+
+   # Add this line with your GitHub usernames
    ALLOWED_GITHUB_USERS=your-github-username,other-dev
-
-   # Staging GitHub App credentials
-   GITHUB_APP_SLUG=vibenote-app-staging
-   GITHUB_APP_ID=<staging-app-id>
-   GITHUB_APP_PRIVATE_KEY=<staging-pem>
-   GITHUB_OAUTH_CLIENT_ID=<staging-client-id>
-   GITHUB_OAUTH_CLIENT_SECRET=<staging-secret>
-
-   # Separate session/share stores
-   SESSION_STORE_FILE=./server/data/sessions-staging.json
-   SHARE_STORE_FILE=./server/data/shares-staging.json
-
-   # Generate new secrets
-   SESSION_JWT_SECRET=<generate-new>
-   SESSION_ENCRYPTION_KEY=<generate-new>
-   GITHUB_WEBHOOK_SECRET=<generate-new>
    ```
-4. Configure Vercel environment variable:
-   - `VITE_VIBENOTE_API_BASE=https://api-staging.vibenote.dev` (Preview environment)
-5. Restart staging backend - you should see log: `[mode: staging (user allowlist enabled)]`
-6. Test on a preview deployment
+
+2. Restart production backend:
+   ```bash
+   pm2 restart vibenote-api
+   ```
+
+   You should see: `[vibenote] preview deployment allowlist: your-username, other-dev`
+
+3. Configure Vercel environment variable:
+   - `VITE_VIBENOTE_API_BASE=https://api.vibenote.dev` (Preview environment)
+
+4. Test on a preview deployment:
+   - Create PR → Vercel deploys preview
+   - Visit preview URL → Sign in with GitHub
+   - If you're in allowlist → ✅ Success
+   - If not → Shows unauthorized page
 
 ## Vercel Environment Variables
 
@@ -206,9 +191,9 @@ Configure in Vercel Dashboard → Project Settings → Environment Variables:
 
 | Variable | Value | Environment |
 |----------|-------|-------------|
-| `VITE_VIBENOTE_API_BASE` | `https://api-staging.vibenote.dev` | Preview |
+| `VITE_VIBENOTE_API_BASE` | `https://api.vibenote.dev` | Preview |
 | `VITE_VIBENOTE_API_BASE` | `https://api.vibenote.dev` | Production |
 
-This ensures:
-- Preview deployments connect to staging backend (with user allowlist)
-- Production deploys connect to production backend (all users allowed)
+Both use the **same backend** - the backend determines the mode per-request:
+- Preview deployments: Backend detects preview origin, enforces user allowlist
+- Production: Backend detects production origin, skips user allowlist
