@@ -58,7 +58,19 @@ The fix is to restrict the middle segment:
 
 ## Security Model: Defense in Depth
 
-The secure implementation uses **two layers of defense**:
+The backend **automatically detects** whether it's running in staging or production mode based on the `ALLOWED_GITHUB_USERS` environment variable:
+
+### Staging Mode (ALLOWED_GITHUB_USERS is set)
+- ✅ Allows Vercel preview deployments in CORS
+- ✅ Enforces GitHub user allowlist (actual security boundary)
+- ✅ Only approved developers can authenticate
+
+### Production Mode (ALLOWED_GITHUB_USERS not set)
+- ✅ Strict CORS (only `ALLOWED_ORIGINS`)
+- ✅ Does NOT allow Vercel preview patterns
+- ✅ All authenticated users allowed
+
+**Two layers of defense (staging mode only):**
 
 ### Layer 1: CORS URL Pattern Validation
 - Regex validates preview URLs match your team pattern
@@ -77,49 +89,56 @@ Even if an attacker:
 3. ✅ Completes OAuth flow
 4. ❌ **Gets blocked** - they're not on the developer allowlist
 
-**Configuration:**
-```bash
-# Staging backend .env
-ALLOWED_GITHUB_USERS=mitscherlich,other-dev-username
-```
-
-If unset (production), all users are allowed.
+**Single Instance, Dual Mode:**
+You can run **one backend instance** that serves both production and staging:
+- Production config: `ALLOWED_GITHUB_USERS` unset → strict mode
+- Staging config: `ALLOWED_GITHUB_USERS=user1,user2` → preview mode with allowlist
 
 ---
 
 ## Implementation Options
 
-### Option A: Staging Backend with User Allowlist (Recommended) ✅
+### Option A: Single Backend Instance (Recommended) ✅
+
+Run **one backend codebase** with different configurations for production and staging:
+
+**Deployment Architecture:**
+```
+Production:  api.vibenote.dev          → backend (no ALLOWED_GITHUB_USERS)
+Staging:     api-staging.vibenote.dev  → same backend code (with ALLOWED_GITHUB_USERS)
+```
 
 **Pros:**
-- **Actually secure** - user allowlist is the real security boundary
-- Can install staging GitHub App on any repo (even production repos for testing)
-- Only approved developers can access those repos
-- Preview deployments isolated from production
-- Can test backend changes alongside frontend changes
+- Single codebase to maintain
+- Backend auto-detects mode based on environment variable
+- Production stays secure (strict CORS, no preview URLs)
+- Staging allows preview deployments (with user allowlist)
+- Can run both on same VPS (different ports) or separate instances
 
 **Cons:**
-- Requires separate staging infrastructure
+- Need to deploy backend twice (once for prod, once for staging)
 - Requires separate staging GitHub App
-- More maintenance overhead
 
 **Implementation:**
-1. Deploy staging backend at `api-staging.vibenote.dev`
-2. Create staging GitHub App with staging callback URLs
-3. Configure staging backend with:
-   - Team-scoped CORS pattern (defense in depth)
-   - `ALLOWED_GITHUB_USERS=mitscherlich,other-dev` (actual security)
-4. Configure Vercel to use staging backend for previews
+1. Deploy backend to production: `api.vibenote.dev` (existing setup, no changes)
+2. Deploy same backend code to staging: `api-staging.vibenote.dev`
+3. Create staging GitHub App with callback: `https://api-staging.vibenote.dev/v1/auth/github/callback`
+4. Configure staging backend `.env`:
+   ```bash
+   ALLOWED_GITHUB_USERS=your-github-username,other-dev
+   GITHUB_APP_SLUG=vibenote-app-staging
+   GITHUB_APP_ID=<staging-app-id>
+   # ... staging GitHub App credentials
+   ```
+5. Configure Vercel environment variables (preview deployments use staging)
 
-### Option B: Production Backend (Not Recommended)
+### Option B: Separate Backend Codebases (Not Recommended)
 
-**Pros:**
-- Preview deployments isolated from production
-- Can test backend changes together with frontend changes
-- Safer for experimental features
+Maintain separate production and staging backends with different code.
 
 **Cons:**
-- Requires separate backend infrastructure
+- Code duplication
+- Harder to keep in sync
 - Requires separate staging GitHub App
 - More maintenance overhead
 
@@ -139,30 +158,47 @@ If unset (production), all users are allowed.
 ## Implementation Status
 
 ✅ **Backend Changes Complete:**
-- Added `VERCEL_PREVIEW_PATTERN` constant in `server/src/index.ts:33`
-- Updated CORS middleware to allow team-scoped preview URLs
-- Updated `returnTo` validation to accept preview URLs
+- Added mode detection (`isStagingMode`) based on `ALLOWED_GITHUB_USERS` env var
+- Added `VERCEL_PREVIEW_PATTERN` constant (only used in staging mode)
+- Updated CORS middleware with conditional preview URL validation
+- Updated `returnTo` validation with conditional preview URL validation
 - Added `ALLOWED_GITHUB_USERS` env variable (`server/src/env.ts:11`)
 - Added user allowlist validation in OAuth callback (`server/src/api.ts:46`)
 - Added user allowlist validation in session refresh (`server/src/api.ts:129`)
+- Added startup logging showing mode and allowed users
 
-⏳ **Next Steps for Staging Backend:**
-1. Deploy staging backend at `api-staging.vibenote.dev` (or subdirectory)
-2. Create staging GitHub App with staging callback URL
-3. Configure staging backend `.env`:
+**How it works:**
+- Production: No `ALLOWED_GITHUB_USERS` → strict CORS, all users allowed
+- Staging: `ALLOWED_GITHUB_USERS` set → allows preview URLs, enforces user allowlist
+
+⏳ **Next Steps for Staging Deployment:**
+1. Deploy same backend code to `api-staging.vibenote.dev` (or separate port on VPS)
+2. Create staging GitHub App with callback: `https://api-staging.vibenote.dev/v1/auth/github/callback`
+3. Configure staging `.env`:
    ```bash
+   # This env var enables staging mode
    ALLOWED_GITHUB_USERS=your-github-username,other-dev
-   ALLOWED_ORIGINS=http://localhost:3000,https://vibenote.dev,https://*.vercel.app
+
+   # Staging GitHub App credentials
    GITHUB_APP_SLUG=vibenote-app-staging
    GITHUB_APP_ID=<staging-app-id>
    GITHUB_APP_PRIVATE_KEY=<staging-pem>
    GITHUB_OAUTH_CLIENT_ID=<staging-client-id>
    GITHUB_OAUTH_CLIENT_SECRET=<staging-secret>
-   # ... other secrets
+
+   # Separate session/share stores
+   SESSION_STORE_FILE=./server/data/sessions-staging.json
+   SHARE_STORE_FILE=./server/data/shares-staging.json
+
+   # Generate new secrets
+   SESSION_JWT_SECRET=<generate-new>
+   SESSION_ENCRYPTION_KEY=<generate-new>
+   GITHUB_WEBHOOK_SECRET=<generate-new>
    ```
 4. Configure Vercel environment variable:
    - `VITE_VIBENOTE_API_BASE=https://api-staging.vibenote.dev` (Preview environment)
-5. Test on a preview deployment
+5. Restart staging backend - you should see log: `[mode: staging (user allowlist enabled)]`
+6. Test on a preview deployment
 
 ## Vercel Environment Variables
 
