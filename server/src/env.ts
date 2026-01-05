@@ -9,6 +9,7 @@ type Env = {
   PORT: number;
   ALLOWED_ORIGINS: string[];
   ALLOWED_GITHUB_USERS: string[] | undefined;
+  VERCEL_PREVIEW_URL_PATTERN: RegExp;
   GITHUB_APP_SLUG: string;
   GITHUB_APP_ID: number;
   GITHUB_APP_PRIVATE_KEY: string;
@@ -35,6 +36,18 @@ function getEnv(): Env {
         .map((s) => s.trim())
         .filter(Boolean)
     : undefined;
+
+  // Parse Vercel preview URL pattern (regex string)
+  // Default pattern matches: vibenote-{id or git-branch}-{team-slug}.vercel.app
+  const defaultPattern = '^https:\\/\\/[a-z0-9-]+-(?:git-[a-z0-9-]+|(?!git-)[a-z0-9]+)-[a-z0-9-]+\\.vercel\\.app$';
+  const previewPatternStr = process.env.VERCEL_PREVIEW_URL_PATTERN ?? defaultPattern;
+  let VERCEL_PREVIEW_URL_PATTERN: RegExp;
+  try {
+    VERCEL_PREVIEW_URL_PATTERN = new RegExp(previewPatternStr);
+  } catch (error) {
+    throw new Error(`Invalid VERCEL_PREVIEW_URL_PATTERN regex: ${(error as Error).message}`);
+  }
+
   const SESSION_JWT_SECRET = process.env.SESSION_JWT_SECRET ?? 'dev-session-secret-change-me';
   const SESSION_STORE_FILE = process.env.SESSION_STORE_FILE ?? './server/data/sessions.json';
   const SESSION_ENCRYPTION_KEY = must('SESSION_ENCRYPTION_KEY');
@@ -49,6 +62,7 @@ function getEnv(): Env {
     PORT: Number.isFinite(port) ? port : 8787,
     ALLOWED_ORIGINS: allowed,
     ALLOWED_GITHUB_USERS: allowedUsers,
+    VERCEL_PREVIEW_URL_PATTERN,
     GITHUB_APP_SLUG: must('GITHUB_APP_SLUG'),
     GITHUB_APP_ID,
     GITHUB_APP_PRIVATE_KEY,

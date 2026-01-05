@@ -26,20 +26,15 @@ const sessionStore = createSessionStore({
 });
 await sessionStore.init();
 
-// Pattern to allow Vercel preview deployments
-// Format: https://vibenote-{deployment-id}-gregor-mitschabaudes-projects.vercel.app
-// or: https://vibenote-git-{branch-name}-gregor-mitschabaudes-projects.vercel.app
-const VERCEL_PREVIEW_PATTERN = /^https:\/\/vibenote-(git-[a-z0-9-]+|(?!git-)[a-z0-9]+)-gregor-mitschabaudes-projects\.vercel\.app$/;
-
 function isAllowedOrigin(origin: string): boolean {
   // Allow both production origins and preview deployments
   if (env.ALLOWED_ORIGINS.includes(origin)) return true;
-  if (VERCEL_PREVIEW_PATTERN.test(origin)) return true;
+  if (env.VERCEL_PREVIEW_URL_PATTERN.test(origin)) return true;
   return false;
 }
 
 function isPreviewOrigin(origin: string): boolean {
-  return VERCEL_PREVIEW_PATTERN.test(origin);
+  return env.VERCEL_PREVIEW_URL_PATTERN.test(origin);
 }
 
 const app = express();
@@ -208,7 +203,7 @@ function normalizeReturnTo(value: string, allowedOrigins: string[]): string | nu
     return null;
   }
   // Check both explicit allowlist and Vercel preview pattern
-  if (allowedOrigins.includes(parsed.origin) || VERCEL_PREVIEW_PATTERN.test(parsed.origin)) {
+  if (allowedOrigins.includes(parsed.origin) || env.VERCEL_PREVIEW_URL_PATTERN.test(parsed.origin)) {
     return parsed.toString();
   }
   return null;

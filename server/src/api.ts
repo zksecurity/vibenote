@@ -14,16 +14,13 @@ export type OAuthTokenResult = {
   tokenType: string;
 };
 
-// Pattern to identify Vercel preview deployments
-const VERCEL_PREVIEW_PATTERN = /^https:\/\/vibenote-(git-[a-z0-9-]+|(?!git-)[a-z0-9]+)-gregor-mitschabaudes-projects\.vercel\.app$/;
-
-function isPreviewOrigin(origin: string): boolean {
-  return VERCEL_PREVIEW_PATTERN.test(origin);
+function isPreviewOrigin(env: Env, origin: string): boolean {
+  return env.VERCEL_PREVIEW_URL_PATTERN.test(origin);
 }
 
 function isUserAllowed(env: Env, login: string, origin: string): boolean {
   // Only enforce user allowlist for preview deployments
-  const isPreview = isPreviewOrigin(origin);
+  const isPreview = isPreviewOrigin(env, origin);
 
   if (!isPreview) {
     // Production origin - allow all users
@@ -70,7 +67,7 @@ export async function handleAuthCallback(
   // Validate user is allowed (enforced for preview deployments only)
   if (!isUserAllowed(env, user.login, pageOrigin)) {
     let rt = new URL(returnTo, returnTo.startsWith('http') ? undefined : pageOrigin);
-    const isPreview = isPreviewOrigin(pageOrigin);
+    const isPreview = isPreviewOrigin(env, pageOrigin);
     let errorHtml = `<!doctype html><meta charset="utf-8"><title>VibeNote - Unauthorized</title>
       <style>body{font-family:system-ui;max-width:600px;margin:100px auto;padding:20px;text-align:center}</style>
       <h1>Unauthorized</h1>

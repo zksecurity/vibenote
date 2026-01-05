@@ -140,6 +140,29 @@ api.vibenote.dev → single backend instance
 - Team slug: `gregor-mitschabaudes-projects`
 - Team URL: https://vercel.com/gregor-mitschabaudes-projects/vibenote
 
+**Environment Variables:**
+
+### `VERCEL_PREVIEW_URL_PATTERN` (Optional)
+Regular expression to match Vercel preview deployment URLs.
+
+- **Default**: `^https:\/\/[a-z0-9-]+-(?:git-[a-z0-9-]+|(?!git-)[a-z0-9]+)-[a-z0-9-]+\.vercel\.app$`
+  - Matches any Vercel preview URL with format: `{project}-{id or git-branch}-{team}.vercel.app`
+  - Permissive but relies on user allowlist for security
+
+- **Recommended**: Set project and team-specific pattern for defense in depth
+  ```bash
+  VERCEL_PREVIEW_URL_PATTERN=^https:\/\/vibenote-(git-[a-z0-9-]+|(?!git-)[a-z0-9]+)-gregor-mitschabaudes-projects\.vercel\.app$
+  ```
+  - Only matches your specific project (`vibenote`) and team (`gregor-mitschabaudes-projects`)
+  - Blocks team-suffix attacks at CORS layer
+
+### `ALLOWED_GITHUB_USERS` (Required for preview deployments)
+Comma-separated list of GitHub usernames allowed to authenticate from preview deployments.
+
+- Backend checks this on every OAuth login and token refresh from preview origins
+- Production origins skip this check
+- If unset, preview deployments are denied (fail-safe)
+
 ## Implementation Status
 
 ✅ **Backend Changes Complete:**
@@ -160,12 +183,16 @@ api.vibenote.dev → single backend instance
 - Preview requests: User allowlist enforced, only approved developers
 
 ⏳ **Next Steps:**
-1. Add `ALLOWED_GITHUB_USERS` to production backend `.env`:
+1. Configure production backend `.env` for preview deployments:
    ```bash
    # Existing production config stays the same
    ALLOWED_ORIGINS=http://localhost:3000,https://vibenote.dev
 
-   # Add this line with your GitHub usernames
+   # Optional: Set specific preview URL pattern (recommended for security)
+   # If not set, uses permissive default that matches any Vercel preview URL
+   VERCEL_PREVIEW_URL_PATTERN=^https:\/\/vibenote-(git-[a-z0-9-]+|(?!git-)[a-z0-9]+)-gregor-mitschabaudes-projects\.vercel\.app$
+
+   # Required: GitHub user allowlist for preview deployments
    ALLOWED_GITHUB_USERS=your-github-username,other-dev
    ```
 
