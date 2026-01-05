@@ -27,20 +27,20 @@ According to [Vercel's documentation](https://github.com/vercel/vercel/discussio
 {project-name}-git-{branch-name}-{team-slug}.vercel.app
 ```
 
-**Example** (project `vibenote`, team `gregor-mitschabaudes-projects`):
+**Example** (project `vibenote`, team `your-team`):
 
-- `vibenote-abc123xyz-gregor-mitschabaudes-projects.vercel.app`
-- `vibenote-git-main-gregor-mitschabaudes-projects.vercel.app`
-- `vibenote-git-fix-auth-gregor-mitschabaudes-projects.vercel.app`
+- `vibenote-abc123xyz-your-team.vercel.app`
+- `vibenote-git-main-your-team.vercel.app`
+- `vibenote-git-fix-auth-your-team.vercel.app`
 
 ### Team Suffix Attack
 
-A naive regex like `vibenote-[a-z0-9-]+-gregor-mitschabaudes-projects.vercel.app`
+A naive regex like `vibenote-[a-z0-9-]+-your-team.vercel.app`
 can be tricked by a suffix team name. The safe pattern avoids hyphens in the
 deployment id segment and requires `git-` for branch deploys:
 
 ```regex
-^https:\/\/vibenote-(git-[a-z0-9-]+|(?!git-)[a-z0-9]+)-gregor-mitschabaudes-projects\.vercel\.app$
+^https:\/\/vibenote-(git-[a-z0-9-]+|(?!git-)[a-z0-9]+)-your-team\.vercel\.app$
 ```
 
 ## Security Model
