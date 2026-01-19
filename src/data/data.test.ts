@@ -1175,6 +1175,69 @@ describe('useRepoData', () => {
     expect(seenRepoLinked.every((flag) => flag === false)).toBe(true);
   });
 
+  // Regression test for issue #91: switching files on public repos should not cause infinite loops.
+  // The bug was caused by race conditions between selectFile() and the auto-load effect.
+  test('read-only file selection does not oscillate between files', async () => {
+    const slug = 'octo/public';
+    const recordRecent = vi.fn<RecordRecentFn>();
+
+    mockGetSessionToken.mockReturnValue(null);
+    setRepoMetadata(readOnlyMeta);
+
+    mockListRepoFiles.mockResolvedValue([
+      { path: 'README.md', sha: 'sha-readme', kind: 'markdown' },
+      { path: 'docs/guide.md', sha: 'sha-guide', kind: 'markdown' },
+    ]);
+
+    // Track all paths that setActivePath is called with to detect oscillation
+    let activePathHistory: (string | undefined)[] = [];
+    let pullCount = 0;
+
+    mockPullRepoFile.mockImplementation(async (_config, path: string): Promise<RemoteFile> => {
+      pullCount++;
+      // Simulate network delay
+      await new Promise((r) => setTimeout(r, 10));
+      return { path, content: `# ${path}`, sha: `sha-${path}`, kind: 'markdown' };
+    });
+
+    const { result } = renderHook(() => {
+      const [route, setRoute] = useState<RepoRoute>({ kind: 'repo', owner: 'octo', repo: 'public' });
+      return useRepoData({
+        slug,
+        route,
+        recordRecent,
+        setActivePath: (nextPath) => {
+          activePathHistory.push(nextPath);
+          setRoute((prev) => (prev.kind === 'repo' ? { ...prev, notePath: nextPath } : prev));
+        },
+      });
+    });
+
+    await waitFor(() => expect(result.current.state.files.length).toBe(2));
+
+    // Select docs/guide.md
+    act(() => {
+      result.current.actions.selectFile('docs/guide.md');
+    });
+
+    // Wait for selection to complete
+    await waitFor(() => expect(result.current.state.activeFile?.path).toBe('docs/guide.md'));
+
+    // Check that we didn't oscillate - path history should not have repeated back-and-forth
+    // A healthy history might be: ['README.md', 'docs/guide.md'] or similar
+    // An oscillating history would be: ['docs/guide.md', 'README.md', 'docs/guide.md', ...]
+    let oscillations = 0;
+    for (let i = 2; i < activePathHistory.length; i++) {
+      if (activePathHistory[i] === activePathHistory[i - 2] && activePathHistory[i] !== activePathHistory[i - 1]) {
+        oscillations++;
+      }
+    }
+    expect(oscillations).toBe(0);
+
+    // Also verify we didn't make excessive pull requests (would indicate concurrent loads)
+    expect(pullCount).toBeLessThanOrEqual(2); // At most: initial README + selected file
+  });
+
   // Signing out should clear local data and disable syncing.
   test('signing out clears local state and disables syncing', async () => {
     const slug = 'acme/docs';
