@@ -41,6 +41,11 @@ type ShareLink = {
 
 async function getRepoMetadata(owner: string, repo: string): Promise<RepoMetadata> {
   let token = await ensureFreshAccessToken();
+
+  // Detect auth failure early: user has a session but access token refresh failed.
+  // This prevents the public-API fallback from masking the auth error with 'not-found'.
+  let sessionButNoToken = getSessionToken() !== null && token === null;
+
   let isPrivate: boolean | null = null;
   let defaultBranch: string | null = null;
   let repoSelected = false;
@@ -56,6 +61,11 @@ async function getRepoMetadata(owner: string, repo: string): Promise<RepoMetadat
     if (!errorKind) errorKind = kind;
     if (message && !errorMessage) errorMessage = message;
   };
+
+  // Record auth error upfront if user has session but token refresh failed
+  if (sessionButNoToken) {
+    rememberError('auth', 'GitHub access token could not be refreshed');
+  }
 
   const extractMessage = (payload: Record<string, unknown> | null) =>
     typeof payload?.message === 'string' ? payload.message : undefined;
