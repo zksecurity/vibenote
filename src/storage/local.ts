@@ -792,7 +792,8 @@ export function findFileByPath(slug: string, path: string): { id: string; doc: R
 
 export function findByRemoteSha(
   slug: string,
-  remoteSha: string | undefined
+  remoteSha: string | undefined,
+  excludePaths?: Set<string>
 ): { id: string; doc: RepoFile } | null {
   if (!remoteSha) return null;
   let idx = loadIndexForSlug(slug);
@@ -800,6 +801,7 @@ export function findByRemoteSha(
     let doc = loadFileForKey(slug, meta.id);
     if (!doc) continue;
     if (doc.lastRemoteSha === remoteSha) {
+      if (excludePaths && excludePaths.has(doc.path)) continue;
       return { id: meta.id, doc };
     }
   }
@@ -808,7 +810,8 @@ export function findByRemoteSha(
 
 export function findBySyncedHash(
   slug: string,
-  syncedHash: string | undefined
+  syncedHash: string | undefined,
+  excludePaths?: Set<string>
 ): { id: string; doc: RepoFile } | null {
   if (!syncedHash) return null;
   let idx = loadIndexForSlug(slug);
@@ -816,6 +819,7 @@ export function findBySyncedHash(
     let doc = loadFileForKey(slug, meta.id);
     if (!doc) continue;
     if (doc.lastSyncedHash === syncedHash) {
+      if (excludePaths && excludePaths.has(doc.path)) continue;
       return { id: meta.id, doc };
     }
   }

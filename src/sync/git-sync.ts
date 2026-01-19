@@ -24,6 +24,7 @@ import {
 } from '../storage/local';
 import { mergeMarkdown } from '../merge/merge';
 import { readCachedBlob, writeCachedBlob } from '../storage/blob-cache';
+import { computeGitBlobSha, computeGitBlobShaFromBase64 } from '../lib/git-hash';
 
 export type { RemoteConfig, RemoteFile };
 export { formatSyncFailure };
@@ -429,21 +430,26 @@ async function commitChanges(
     let normalized = normalizeBase64(change.contentBase64 ?? '');
     let encoding = change.encoding ?? 'utf-8';
     if (encoding === 'base64') {
+      // Binary file: compute blob sha locally, then verify against GitHub's response
       let blobSha = blobShaCache.get(normalized);
       if (!blobSha) {
-        blobSha = await createBlob({
+        let computedSha = await computeGitBlobShaFromBase64(normalized);
+        let remoteSha = await createBlob({
           token,
           ownerEncoded,
           repoEncoded,
           contentBase64: normalized,
         });
+        // Verify local computation matches GitHub's response
+        if (computedSha !== remoteSha) {
+          throw new Error(
+            `Blob SHA mismatch for ${change.path}: computed ${computedSha}, GitHub returned ${remoteSha}`
+          );
+        }
+        blobSha = computedSha;
         blobShaCache.set(normalized, blobSha);
-        // set known correct blob sha
-        // TODO this is a hack around the incomplete tree response below
-        // doesn't apply to non-binary files
-        // it's more important for binary files though, since those will get the blob sha stored in placeholder URL
-        blobShas[change.path] = blobSha;
       }
+      blobShas[change.path] = blobSha;
       treeItems.push({
         path: change.path,
         mode: '100644',
@@ -451,12 +457,16 @@ async function commitChanges(
         sha: blobSha,
       });
     } else {
+      // Text file: compute blob sha locally
       let decoded = '';
       try {
         decoded = fromBase64(normalized);
       } catch (err) {
         console.warn('vibenote: failed to decode base64 content for', change.path, err);
       }
+      // Compute blob sha for text content
+      let computedSha = await computeGitBlobSha(decoded);
+      blobShas[change.path] = computedSha;
       treeItems.push({
         path: change.path,
         mode: '100644',
@@ -479,16 +489,22 @@ async function commitChanges(
   if (!treeRes.ok) {
     await throwGitHubError(treeRes, treePath);
   }
-  // FIXME: the returned payload is a shallow tree, so it will NOT contain blobs for nested files
-  // => the blob sha map we are creating here does not necessarily include blob shas of files we just added
-  // => for these files we will use the _commit sha_ for `lastRemoteSha`
+  // Verify GitHub's returned blob shas match our locally computed ones.
+  // The tree response is shallow (only top-level files), but we now compute all shas locally.
   let treeJson = await treeRes.json();
   if (Array.isArray(treeJson?.tree)) {
     for (let entry of treeJson.tree) {
       if (!entry || entry.type !== 'blob') continue;
       if (!entry.path || !entry.sha) continue;
-      if (trackedPaths.has(String(entry.path))) {
-        blobShas[String(entry.path)] = String(entry.sha);
+      let entryPath = String(entry.path);
+      let remoteSha = String(entry.sha);
+      if (trackedPaths.has(entryPath)) {
+        let computedSha = blobShas[entryPath];
+        if (computedSha !== undefined && computedSha !== remoteSha) {
+          throw new Error(
+            `Blob SHA mismatch for ${entryPath}: computed ${computedSha}, GitHub returned ${remoteSha}`
+          );
+        }
       }
     }
   }
@@ -823,12 +839,15 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
     let local = findFileByPath(storeSlug, e.path);
     if (!local) {
       if (renameSources.has(e.path) || deleteSources.has(e.path)) continue;
-      let renamed = e.sha ? findByRemoteSha(storeSlug, e.sha) : null;
+      // When looking for rename candidates, exclude files whose paths still exist on remote.
+      // If a file's path exists on remote, it's not a rename source (remote has both old and new).
+      let remotePaths = new Set(remoteMap.keys());
+      let renamed = e.sha ? findByRemoteSha(storeSlug, e.sha, remotePaths) : null;
       if (!renamed) {
         remoteFile = await pullRepoFile(config, e.path);
         if (!remoteFile) continue;
         remoteContentHash = computeRemoteHash(remoteFile);
-        renamed = findBySyncedHash(storeSlug, remoteContentHash);
+        renamed = findBySyncedHash(storeSlug, remoteContentHash, remotePaths);
       }
       if (renamed && renamed.doc.path !== e.path) {
         moveFilePath(storeSlug, renamed.id, e.path);

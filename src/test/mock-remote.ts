@@ -5,6 +5,7 @@
  * without touching the network.
  */
 import { Buffer } from 'node:buffer';
+import { createHash } from 'node:crypto';
 
 type RemoteFile = { text: string; sha: string };
 
@@ -198,9 +199,17 @@ class MockRemoteRepo {
       if (blob === undefined) {
         return this.makeResponse(404, { message: 'not found' });
       }
+      // Blobs are stored either as raw text (from createTree inline content) or
+      // with 'base64:' prefix (from createBlob endpoint)
+      let base64Content: string;
+      if (blob.startsWith('base64:')) {
+        base64Content = blob.slice(7);
+      } else {
+        base64Content = Buffer.from(blob, 'utf8').toString('base64');
+      }
       return this.makeResponse(200, {
         sha,
-        content: Buffer.from(blob, 'utf8').toString('base64'),
+        content: base64Content,
         encoding: 'base64',
       });
     }
@@ -252,8 +261,10 @@ class MockRemoteRepo {
       if (encoding !== 'base64' || !content) {
         return this.makeResponse(422, { message: 'invalid blob payload' });
       }
-      const sha = this.computeSha(content);
-      this.blobs.set(sha, content);
+      // Decode base64 content and compute real Git blob sha
+      const sha = this.computeShaFromBase64(content);
+      // Store the base64 content as-is (use 'base64:' prefix to distinguish from inline text)
+      this.blobs.set(sha, 'base64:' + content);
       return this.makeResponse(201, { sha });
     }
 
@@ -288,7 +299,9 @@ class MockRemoteRepo {
         } else if (entry.sha) {
           const blob = this.blobs.get(entry.sha);
           if (blob !== undefined) {
-            nextTree.set(entry.path, { text: blob, sha: entry.sha });
+            // Handle both raw text and base64-prefixed binary content
+            const text = blob.startsWith('base64:') ? blob.slice(7) : blob;
+            nextTree.set(entry.path, { text, sha: entry.sha });
           }
         }
       }
@@ -422,8 +435,21 @@ class MockRemoteRepo {
   }
 
   private computeSha(text: string): string {
-    this.sequence += 1;
-    return `sha-${this.sequence}-${this.simpleHash(text)}`;
+    // Compute real Git blob SHA-1: SHA-1("blob " + byte_length + "\0" + content)
+    let contentBuffer = Buffer.from(text, 'utf8');
+    return this.computeShaFromBytes(contentBuffer);
+  }
+
+  private computeShaFromBase64(base64Content: string): string {
+    // Decode base64 first, then compute Git blob SHA
+    let contentBuffer = Buffer.from(base64Content, 'base64');
+    return this.computeShaFromBytes(contentBuffer);
+  }
+
+  private computeShaFromBytes(contentBuffer: Buffer): string {
+    let header = `blob ${contentBuffer.length}\0`;
+    let combined = Buffer.concat([Buffer.from(header, 'utf8'), contentBuffer]);
+    return createHash('sha1').update(combined).digest('hex');
   }
 
   private nextCommit(): string {
