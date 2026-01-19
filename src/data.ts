@@ -254,12 +254,19 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   }, [canEdit, activeId]);
 
   // When the loaded doc changes path (e.g., rename or sync or restoring last active), push the route forward.
-  // TODO this can also fire also when desiredPath changes _more quickly_ than activePath, reverting the route change
-  // solved with a setTimeout hack below in `ensureActivePath()`
+  // We track the previous activeFile.path to only update the route when the FILE changes,
+  // not when desiredPath changes (which happens during navigation).
+  let prevActivePathRef = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (activeFile?.path === undefined) return;
-    if (pathsEqual(desiredPath, activeFile.path)) return;
-    setActivePath(activeFile.path, { replace: true });
+    let currentPath = activeFile?.path;
+    let prevPath = prevActivePathRef.current;
+    prevActivePathRef.current = currentPath;
+
+    // Only act when activeFile.path actually changed (not just on initial mount or desiredPath changes)
+    if (currentPath === undefined) return;
+    if (currentPath === prevPath) return;
+    if (pathsEqual(desiredPath, currentPath)) return;
+    setActivePath(currentPath, { replace: true });
   }, [activeFile?.path, desiredPath]);
 
   // Remember recently opened repos once we know the current repo is reachable.
