@@ -1,0 +1,97 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+
+export type RepoKeyRecord = {
+  id: string;
+  key: string;
+  owner: string;
+  repo: string;
+  registeredAt: string;
+  registeredBy: string;
+};
+
+export type RepoKeyStoreOptions = {
+  filePath: string;
+};
+
+type RepoKeyStoreData = {
+  records: RepoKeyRecord[];
+};
+
+const FILE_MODE = 0o600;
+
+export function createRepoKeyStore(options: RepoKeyStoreOptions): RepoKeyStoreInstance {
+  return new RepoKeyStore(options);
+}
+
+export type RepoKeyStoreInstance = {
+  init(): Promise<void>;
+  get(id: string): RepoKeyRecord | undefined;
+  set(record: RepoKeyRecord): Promise<void>;
+};
+
+class RepoKeyStore implements RepoKeyStoreInstance {
+  #filePath: string;
+  #dirPath: string;
+  #keys: Map<string, RepoKeyRecord>;
+  #persistQueue: Promise<void>;
+
+  constructor(options: RepoKeyStoreOptions) {
+    if (!options.filePath || options.filePath.trim().length === 0) {
+      throw new Error('repo key store requires file path');
+    }
+    this.#filePath = path.resolve(options.filePath);
+    this.#dirPath = path.dirname(this.#filePath);
+    this.#keys = new Map();
+    this.#persistQueue = Promise.resolve();
+  }
+
+  async init(): Promise<void> {
+    await fs.mkdir(this.#dirPath, { recursive: true });
+    try {
+      let raw = await fs.readFile(this.#filePath, 'utf8');
+      let parsed = JSON.parse(raw) as RepoKeyStoreData | RepoKeyRecord[];
+      if (Array.isArray(parsed)) {
+        this.#hydrate(parsed);
+      } else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.records)) {
+        this.#hydrate(parsed.records);
+      } else {
+        this.#hydrate([]);
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        await this.#persist();
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  get(id: string): RepoKeyRecord | undefined {
+    return this.#keys.get(id);
+  }
+
+  async set(record: RepoKeyRecord): Promise<void> {
+    this.#keys.set(record.id, record);
+    await this.#persist();
+  }
+
+  #hydrate(records: RepoKeyRecord[]): void {
+    this.#keys.clear();
+    for (let record of records) {
+      if (!record || typeof record.id !== 'string') continue;
+      this.#keys.set(record.id, record);
+    }
+  }
+
+  async #persist(): Promise<void> {
+    let serialized: RepoKeyRecord[] = Array.from(this.#keys.values());
+    let payload: RepoKeyStoreData = { records: serialized };
+    this.#persistQueue = this.#persistQueue.then(async () => {
+      let tmpPath = `${this.#filePath}.tmp`;
+      await fs.writeFile(tmpPath, JSON.stringify(payload, null, 2), { mode: FILE_MODE });
+      await fs.rename(tmpPath, this.#filePath);
+    });
+    await this.#persistQueue;
+  }
+}
