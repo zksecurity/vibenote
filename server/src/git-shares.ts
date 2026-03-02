@@ -396,13 +396,13 @@ function gitShareEndpoints(app: express.Express) {
       if (keyFileRes.status === 404) throw HttpError(404, REPO_ACCESS_DENIED);
       if (!keyFileRes.ok) throw HttpError(404, REPO_ACCESS_DENIED);
 
-      let keyFileContent: { id?: string };
+      let keyFileContent: { id?: string; key?: string };
       try {
         keyFileContent = JSON.parse(await keyFileRes.text());
       } catch {
         throw HttpError(404, REPO_ACCESS_DENIED);
       }
-      if (!keyFileContent || keyFileContent.id !== id) {
+      if (!keyFileContent || keyFileContent.id !== id || keyFileContent.key !== key) {
         throw HttpError(404, REPO_ACCESS_DENIED);
       }
 
