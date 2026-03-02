@@ -65,9 +65,9 @@ All mutating endpoints require a VibeNote session JWT in the `Authorization: Bea
 
 ```json
 {
-  "owner": "mitschabaude-bot",
-  "repo": "audit-scoping",
-  "path": "SCOPE-stwo-cairo-hedwig.md",
+  "owner": "acme-org",
+  "repo": "team-notes",
+  "path": "notes/weekly-update.md",
   "branch": "main"
 }
 ```
