@@ -10,7 +10,7 @@ export { gitShareEndpoints };
 
 // --- Validation helpers ---
 
-const TOKEN_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+const TOKEN_PATTERN = /^[A-Za-z0-9_-]{4,128}$/;
 
 function isValidToken(token: string): boolean {
   return TOKEN_PATTERN.test(token);
@@ -42,31 +42,29 @@ await repoKeyStore.init();
 
 // --- GitHub helpers ---
 
-async function fetchRepoFile(owner: string, repo: string, filePath: string, accept: string): Promise<Response> {
+async function fetchRepoFile(owner: string, repo: string, filePath: string, accept: string, ref?: string): Promise<Response> {
   let installationId: number;
   try {
     installationId = await getRepoInstallationId(env, owner, repo);
   } catch {
-    throw HttpError(404, 'repository not found or app not installed');
+    throw HttpError(404, 'share not found');
   }
-  const res = await installationRequest(
-    env,
-    installationId,
-    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodeAssetPath(filePath)}`,
-    { headers: { Accept: accept } }
-  );
-  if (res.status === 404) throw HttpError(404, 'content not found');
+  const pathSegment = encodeAssetPath(filePath);
+  const url = ref
+    ? `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${pathSegment}?ref=${encodeURIComponent(ref)}`
+    : `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${pathSegment}`;
+  const res = await installationRequest(env, installationId, url, { headers: { Accept: accept } });
+  if (res.status === 404) throw HttpError(404, 'share not found');
   if (!res.ok) {
-    const text = await res.text();
-    throw HttpError(502, `github error ${res.status}: ${text}`);
+    throw HttpError(502, 'internal error');
   }
   return res;
 }
 
-async function fetchShareJson(owner: string, repo: string, token: string): Promise<string> {
-  const ghRes = await fetchRepoFile(owner, repo, `.shares/${token}.json`, 'application/vnd.github.raw');
+async function fetchShareJson(owner: string, repo: string, token: string, ref?: string): Promise<{ path: string; ref?: string }> {
+  const ghRes = await fetchRepoFile(owner, repo, `.shares/${token}.json`, 'application/vnd.github.raw', ref);
   const raw = await ghRes.text();
-  let parsed: { path?: string };
+  let parsed: { path?: string; ref?: string };
   try {
     parsed = JSON.parse(raw);
   } catch {
@@ -75,7 +73,7 @@ async function fetchShareJson(owner: string, repo: string, token: string): Promi
   if (!parsed || typeof parsed.path !== 'string') {
     throw HttpError(502, 'share descriptor missing path');
   }
-  return validatePath(parsed.path);
+  return { path: validatePath(parsed.path), ref: parsed.ref };
 }
 
 async function fetchCollaboratorPermission(
@@ -159,12 +157,12 @@ function cacheAssets(cacheKey: string, notePath: string, markdown: string): Set<
   return paths;
 }
 
-async function ensureAssetsLoaded(cacheKey: string, owner: string, repo: string, notePath: string): Promise<Set<string>> {
+async function ensureAssetsLoaded(cacheKey: string, owner: string, repo: string, notePath: string, ref?: string): Promise<Set<string>> {
   const cached = assetCache.get(cacheKey);
   if (cached && Date.now() - cached.cachedAt <= ASSET_CACHE_TTL_MS) {
     return cached.paths;
   }
-  const ghRes = await fetchRepoFile(owner, repo, notePath, 'application/vnd.github.raw');
+  const ghRes = await fetchRepoFile(owner, repo, notePath, 'application/vnd.github.raw', ref);
   const markdown = await ghRes.text();
   return cacheAssets(cacheKey, notePath, markdown);
 }
@@ -174,9 +172,10 @@ async function serveContent(
   owner: string,
   repo: string,
   notePath: string,
-  cacheKey: string
+  cacheKey: string,
+  ref?: string
 ): Promise<void> {
-  const ghRes = await fetchRepoFile(owner, repo, notePath, 'application/vnd.github.raw');
+  const ghRes = await fetchRepoFile(owner, repo, notePath, 'application/vnd.github.raw', ref);
   const text = await ghRes.text();
   cacheAssets(cacheKey, notePath, text);
   res
@@ -192,16 +191,17 @@ async function serveAsset(
   owner: string,
   repo: string,
   notePath: string,
-  cacheKey: string
+  cacheKey: string,
+  ref?: string
 ): Promise<void> {
   const rawPathParam = decodeURIComponent(asTrimmedString(req.query.path));
   const pathCandidate = resolveAssetPath(notePath, rawPathParam);
   if (!pathCandidate) throw HttpError(400, 'invalid asset path');
 
-  const allowedPaths = await ensureAssetsLoaded(cacheKey, owner, repo, notePath);
+  const allowedPaths = await ensureAssetsLoaded(cacheKey, owner, repo, notePath, ref);
   if (!allowedPaths.has(pathCandidate)) throw HttpError(404, 'asset not found');
 
-  const ghRes = await fetchRepoFile(owner, repo, pathCandidate, 'application/vnd.github.raw');
+  const ghRes = await fetchRepoFile(owner, repo, pathCandidate, 'application/vnd.github.raw', ref);
   const buffer = Buffer.from(await ghRes.arrayBuffer());
   const contentType = ghRes.headers.get('Content-Type') ?? 'application/octet-stream';
   const headers: Record<string, string> = {
@@ -246,7 +246,11 @@ function getEncShareParams(req: express.Request): { owner: string; repo: string;
   if (!keyId || !blob) throw HttpError(400, 'invalid parameters');
 
   const keyRecord = repoKeyStore.get(keyId);
-  if (!keyRecord) throw HttpError(404, 'key not found');
+  if (!keyRecord) {
+    // Dummy decryption to avoid timing side-channel revealing valid keyIds
+    try { decryptBlob('0'.repeat(64), blob); } catch {}
+    throw HttpError(404, 'share not found');
+  }
 
   const { owner, repo, token } = decryptBlob(keyRecord.key, blob);
   if (!isValidOwnerRepo(owner, repo)) throw HttpError(400, 'invalid owner/repo in encrypted payload');
@@ -280,8 +284,8 @@ function gitShareEndpoints(app: express.Express) {
       const keyId = (params.keyId ?? '').trim();
       const blob = (params.blob ?? '').trim();
       const { owner, repo, token } = getEncShareParams(req);
-      const notePath = await fetchShareJson(owner, repo, token);
-      await serveContent(res, owner, repo, notePath, encCacheKey(keyId, blob));
+      const { path: notePath, ref } = await fetchShareJson(owner, repo, token);
+      await serveContent(res, owner, repo, notePath, encCacheKey(keyId, blob), ref);
     })
   );
 
@@ -289,8 +293,8 @@ function gitShareEndpoints(app: express.Express) {
     '/v1/git-shares/enc/:keyId/:blob',
     handleErrors(async (req, res) => {
       const { owner, repo, token } = getEncShareParams(req);
-      const notePath = await fetchShareJson(owner, repo, token);
-      res.json({ owner, repo, token, path: notePath });
+      const { path: notePath } = await fetchShareJson(owner, repo, token);
+      res.json({ path: notePath });
     })
   );
 
@@ -301,8 +305,8 @@ function gitShareEndpoints(app: express.Express) {
       const keyId = (params.keyId ?? '').trim();
       const blob = (params.blob ?? '').trim();
       const { owner, repo, token } = getEncShareParams(req);
-      const notePath = await fetchShareJson(owner, repo, token);
-      await serveAsset(req, res, owner, repo, notePath, encCacheKey(keyId, blob));
+      const { path: notePath, ref } = await fetchShareJson(owner, repo, token);
+      await serveAsset(req, res, owner, repo, notePath, encCacheKey(keyId, blob), ref);
     })
   );
 
@@ -314,8 +318,8 @@ function gitShareEndpoints(app: express.Express) {
     '/v1/git-shares/:owner/:repo/:token/content',
     handleErrors(async (req, res) => {
       const { owner, repo, token } = getOpenShareParams(req);
-      const notePath = await fetchShareJson(owner, repo, token);
-      await serveContent(res, owner, repo, notePath, openCacheKey(owner, repo, token));
+      const { path: notePath, ref } = await fetchShareJson(owner, repo, token);
+      await serveContent(res, owner, repo, notePath, openCacheKey(owner, repo, token), ref);
     })
   );
 
@@ -323,7 +327,7 @@ function gitShareEndpoints(app: express.Express) {
     '/v1/git-shares/:owner/:repo/:token',
     handleErrors(async (req, res) => {
       const { owner, repo, token } = getOpenShareParams(req);
-      const notePath = await fetchShareJson(owner, repo, token);
+      const { path: notePath } = await fetchShareJson(owner, repo, token);
       res.json({ owner, repo, token, path: notePath });
     })
   );
@@ -332,8 +336,8 @@ function gitShareEndpoints(app: express.Express) {
     '/v1/git-shares/:owner/:repo/:token/assets',
     handleErrors(async (req, res) => {
       const { owner, repo, token } = getOpenShareParams(req);
-      const notePath = await fetchShareJson(owner, repo, token);
-      await serveAsset(req, res, owner, repo, notePath, openCacheKey(owner, repo, token));
+      const { path: notePath, ref } = await fetchShareJson(owner, repo, token);
+      await serveAsset(req, res, owner, repo, notePath, openCacheKey(owner, repo, token), ref);
     })
   );
 
@@ -357,17 +361,19 @@ function gitShareEndpoints(app: express.Express) {
       if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) throw HttpError(400, 'invalid key id');
       if (!/^[0-9a-f]{64}$/i.test(key)) throw HttpError(400, 'key must be 64 hex characters (256-bit)');
 
+      const REPO_ACCESS_DENIED = 'repository not found or insufficient permissions';
+
       // Verify caller has write access to the repo
       let installationId: number;
       try {
         installationId = await getRepoInstallationId(env, owner, repo);
       } catch {
-        throw HttpError(404, 'repository not found or app not installed');
+        throw HttpError(404, REPO_ACCESS_DENIED);
       }
 
       const permission = await fetchCollaboratorPermission(installationId, owner, repo, session.login);
       if (permission === null || !hasWritePermission(permission)) {
-        throw HttpError(403, 'insufficient permissions');
+        throw HttpError(404, REPO_ACCESS_DENIED);
       }
 
       // Fetch .shares/.key from repo and verify matching id
@@ -379,20 +385,17 @@ function gitShareEndpoints(app: express.Express) {
         )}`,
         { headers: { Accept: 'application/vnd.github.raw' } }
       );
-      if (keyFileRes.status === 404) throw HttpError(404, '.shares/.key not found in repository');
-      if (!keyFileRes.ok) {
-        const text = await keyFileRes.text();
-        throw HttpError(502, `github error ${keyFileRes.status}: ${text}`);
-      }
+      if (keyFileRes.status === 404) throw HttpError(404, REPO_ACCESS_DENIED);
+      if (!keyFileRes.ok) throw HttpError(404, REPO_ACCESS_DENIED);
 
       let keyFileContent: { id?: string };
       try {
         keyFileContent = JSON.parse(await keyFileRes.text());
       } catch {
-        throw HttpError(400, 'invalid .shares/.key format');
+        throw HttpError(404, REPO_ACCESS_DENIED);
       }
       if (!keyFileContent || keyFileContent.id !== id) {
-        throw HttpError(400, '.shares/.key id does not match');
+        throw HttpError(404, REPO_ACCESS_DENIED);
       }
 
       await repoKeyStore.set({
