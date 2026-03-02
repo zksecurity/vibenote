@@ -150,6 +150,7 @@ function sharingEndpoints(app: express.Express) {
       const headers: Record<string, string> = {
         'Content-Type': contentType,
         'Cache-Control': 'public, max-age=300',
+        'Content-Security-Policy': "default-src 'none'",
         Vary: 'Accept-Encoding',
       };
       const etag = ghRes.headers.get('ETag');
