@@ -25,9 +25,9 @@ The API returns raw `text/markdown`.
 ### Example
 
 ```
-# User sends: https://vibenote.dev/s/0bTFyBg4vAhE_GaYOBHG867B
+# User sends: https://vibenote.dev/s/abc123XYZ
 # Fetch this instead:
-web_fetch https://api.vibenote.dev/v1/share-links/0bTFyBg4vAhE_GaYOBHG867B/content
+web_fetch https://api.vibenote.dev/v1/share-links/abc123XYZ/content
 ```
 
 ## Share Link API
