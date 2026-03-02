@@ -27,7 +27,7 @@ Example: `vibenote.dev/s/acme-org/team-notes/weekly-update`
 4. Read `path` from JSON
 5. Fetch and serve the content at that path
 
-**No server-side state.** Security: the token name must be unguessable if the repo is private, or use tier 2.
+**No server-side state.** Security: for private repos, the token is the ONLY access credential in the URL. The UI/CLI **must** default to generating cryptographically random tokens (e.g. `crypto.randomBytes(18).toString('base64url')` → 24 chars, 144 bits of entropy). Short human-readable token names (like `weekly-update`) are fine for public repos or when using tier 2 encryption, but are insecure for tier 1 on private repos — a 4-char token has only ~16M combinations and is brute-forceable.
 
 ### Tier 2 — Encrypted Shares (one-time setup per repo)
 
