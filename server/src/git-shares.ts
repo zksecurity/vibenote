@@ -268,6 +268,45 @@ function encCacheKey(keyId: string, blob: string): string {
 
 function gitShareEndpoints(app: express.Express) {
   // ==========================================
+  // Tier 2 — Encrypted share resolution
+  // (must be registered before Tier 1 so that
+  //  /enc/:keyId/:blob doesn't match :owner/:repo/:token)
+  // ==========================================
+
+  app.get(
+    '/v1/git-shares/enc/:keyId/:blob/content',
+    handleErrors(async (req, res) => {
+      const params = req.params as Record<string, string | undefined>;
+      const keyId = (params.keyId ?? '').trim();
+      const blob = (params.blob ?? '').trim();
+      const { owner, repo, token } = getEncShareParams(req);
+      const notePath = await fetchShareJson(owner, repo, token);
+      await serveContent(res, owner, repo, notePath, encCacheKey(keyId, blob));
+    })
+  );
+
+  app.get(
+    '/v1/git-shares/enc/:keyId/:blob',
+    handleErrors(async (req, res) => {
+      const { owner, repo, token } = getEncShareParams(req);
+      const notePath = await fetchShareJson(owner, repo, token);
+      res.json({ owner, repo, token, path: notePath });
+    })
+  );
+
+  app.get(
+    '/v1/git-shares/enc/:keyId/:blob/assets',
+    handleErrors(async (req, res) => {
+      const params = req.params as Record<string, string | undefined>;
+      const keyId = (params.keyId ?? '').trim();
+      const blob = (params.blob ?? '').trim();
+      const { owner, repo, token } = getEncShareParams(req);
+      const notePath = await fetchShareJson(owner, repo, token);
+      await serveAsset(req, res, owner, repo, notePath, encCacheKey(keyId, blob));
+    })
+  );
+
+  // ==========================================
   // Tier 1 — Open share resolution
   // ==========================================
 
@@ -370,40 +409,4 @@ function gitShareEndpoints(app: express.Express) {
     })
   );
 
-  // ==========================================
-  // Tier 2 — Encrypted share resolution
-  // ==========================================
-
-  app.get(
-    '/v1/git-shares/enc/:keyId/:blob/content',
-    handleErrors(async (req, res) => {
-      const params = req.params as Record<string, string | undefined>;
-      const keyId = (params.keyId ?? '').trim();
-      const blob = (params.blob ?? '').trim();
-      const { owner, repo, token } = getEncShareParams(req);
-      const notePath = await fetchShareJson(owner, repo, token);
-      await serveContent(res, owner, repo, notePath, encCacheKey(keyId, blob));
-    })
-  );
-
-  app.get(
-    '/v1/git-shares/enc/:keyId/:blob',
-    handleErrors(async (req, res) => {
-      const { owner, repo, token } = getEncShareParams(req);
-      const notePath = await fetchShareJson(owner, repo, token);
-      res.json({ owner, repo, token, path: notePath });
-    })
-  );
-
-  app.get(
-    '/v1/git-shares/enc/:keyId/:blob/assets',
-    handleErrors(async (req, res) => {
-      const params = req.params as Record<string, string | undefined>;
-      const keyId = (params.keyId ?? '').trim();
-      const blob = (params.blob ?? '').trim();
-      const { owner, repo, token } = getEncShareParams(req);
-      const notePath = await fetchShareJson(owner, repo, token);
-      await serveAsset(req, res, owner, repo, notePath, encCacheKey(keyId, blob));
-    })
-  );
 }
