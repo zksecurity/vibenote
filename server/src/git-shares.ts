@@ -47,7 +47,10 @@ async function fetchRepoFile(owner: string, repo: string, filePath: string, acce
   const res = await installationRequest(env, installationId, url, { headers: { Accept: accept } });
   if (res.status === 404) throw HttpError(404, 'share not found');
   if (!res.ok) {
-    throw HttpError(502, 'internal error');
+    // Log actual error server-side, return generic 404 to avoid leaking repo existence
+    const text = await res.text().catch(() => '');
+    console.error(`[vibenote] github fetch error: ${res.status} ${text}`);
+    throw HttpError(404, 'share not found');
   }
   return res;
 }
@@ -69,7 +72,8 @@ async function fetchShareJson(owner: string, repo: string, token: string, ref?: 
   if (!p || !p.toLowerCase().endsWith('.md')) throw HttpError(404, GENERIC);
   let sanitized = p.replace(/\\/g, '/').replace(/^\/+/, '');
   if (sanitized.includes('..')) throw HttpError(404, GENERIC);
-  return { path: sanitized, ref: parsed.ref };
+  const parsedRef = typeof parsed.ref === 'string' ? parsed.ref : undefined;
+  return { path: sanitized, ref: parsedRef };
 }
 
 async function fetchCollaboratorPermission(
@@ -398,6 +402,12 @@ function gitShareEndpoints(app: express.Express) {
         throw HttpError(404, REPO_ACCESS_DENIED);
       }
       if (!keyFileContent || keyFileContent.id !== id) {
+        throw HttpError(404, REPO_ACCESS_DENIED);
+      }
+
+      // Reject if keyId already registered for a different repo (prevent DoS via collision)
+      const existing = repoKeyStore.get(id);
+      if (existing && (existing.owner !== owner || existing.repo !== repo)) {
         throw HttpError(404, REPO_ACCESS_DENIED);
       }
 
