@@ -10,6 +10,20 @@ metadata:
 
 VibeNote is a git-native notes app that renders Markdown from GitHub repos. Notes can be shared via secret links.
 
+## Working with Notes (Read/Write)
+
+VibeNote notes are just Markdown files in a GitHub repo. For typical interactions — reading, editing, creating notes — **clone the repo and work with it directly via git**:
+
+```bash
+git clone git@github.com:owner/repo.git
+# read/edit .md files
+git add -A && git commit -m "update notes" && git push
+```
+
+VibeNote will pick up changes automatically on the next sync.
+
+**Important**: VibeNote only shows the `main` branch. Always commit and push to `main` — work on other branches won't be visible in the app.
+
 ## Reading Shared Notes
 
 Shared note links look like: `https://vibenote.dev/s/<share-id>`
@@ -25,9 +39,9 @@ The API returns raw `text/markdown`.
 ### Example
 
 ```
-# User sends: https://vibenote.dev/s/0bTFyBg4vAhE_GaYOBHG867B
+# User sends: https://vibenote.dev/s/-0Fgm7cnqd8yZCfnULdY9oO5
 # Fetch this instead:
-web_fetch https://api.vibenote.dev/v1/share-links/0bTFyBg4vAhE_GaYOBHG867B/content
+web_fetch https://api.vibenote.dev/v1/share-links/-0Fgm7cnqd8yZCfnULdY9oO5/content
 ```
 
 ## Share Link API
@@ -51,9 +65,9 @@ All mutating endpoints require a VibeNote session JWT in the `Authorization: Bea
 
 ```json
 {
-  "owner": "mitschabaude-bot",
-  "repo": "audit-scoping",
-  "path": "SCOPE-stwo-cairo-hedwig.md",
+  "owner": "acme-org",
+  "repo": "team-notes",
+  "path": "notes/weekly-update.md",
   "branch": "main"
 }
 ```
