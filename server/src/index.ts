@@ -14,6 +14,7 @@ import {
 import { createSessionStore } from './session-store.ts';
 import { handleErrors, HttpError, requireSession } from './common.ts';
 import { sharingEndpoints } from './sharing.ts';
+import { gitShareEndpoints } from './git-shares.ts';
 
 declare module 'express-serve-static-core' {
   interface Request {
@@ -138,6 +139,7 @@ app.post('/v1/webhooks/github', (_req, res) => {
 });
 
 sharingEndpoints(app);
+gitShareEndpoints(app);
 
 const server = app.listen(env.PORT, () => {
   console.log(`[vibenote] api listening on :${env.PORT}`);
