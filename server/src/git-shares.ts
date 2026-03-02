@@ -21,15 +21,6 @@ function isValidOwnerRepo(owner: string, repo: string): boolean {
   return seg.test(owner) && seg.test(repo);
 }
 
-function validatePath(p: string): string {
-  if (!p || !p.toLowerCase().endsWith('.md')) {
-    throw HttpError(400, 'share target must be a .md file');
-  }
-  let sanitized = p.replace(/\\/g, '/').replace(/^\/+/, '');
-  if (sanitized.includes('..')) throw HttpError(400, 'invalid path');
-  return sanitized;
-}
-
 // --- Asset cache (same pattern as sharing.ts) ---
 
 const assetCache = new Map<string, { paths: Set<string>; cachedAt: number }>();
@@ -62,18 +53,23 @@ async function fetchRepoFile(owner: string, repo: string, filePath: string, acce
 }
 
 async function fetchShareJson(owner: string, repo: string, token: string, ref?: string): Promise<{ path: string; ref?: string }> {
+  const GENERIC = 'share not found';
   const ghRes = await fetchRepoFile(owner, repo, `.shares/${token}.json`, 'application/vnd.github.raw', ref);
   const raw = await ghRes.text();
   let parsed: { path?: string; ref?: string };
   try {
     parsed = JSON.parse(raw);
   } catch {
-    throw HttpError(502, 'invalid share descriptor');
+    throw HttpError(404, GENERIC);
   }
   if (!parsed || typeof parsed.path !== 'string') {
-    throw HttpError(502, 'share descriptor missing path');
+    throw HttpError(404, GENERIC);
   }
-  return { path: validatePath(parsed.path), ref: parsed.ref };
+  const p = parsed.path;
+  if (!p || !p.toLowerCase().endsWith('.md')) throw HttpError(404, GENERIC);
+  let sanitized = p.replace(/\\/g, '/').replace(/^\/+/, '');
+  if (sanitized.includes('..')) throw HttpError(404, GENERIC);
+  return { path: sanitized, ref: parsed.ref };
 }
 
 async function fetchCollaboratorPermission(
@@ -240,25 +236,32 @@ function openCacheKey(owner: string, repo: string, token: string): string {
 // --- Tier 2 (encrypted) param extraction ---
 
 function getEncShareParams(req: express.Request): { owner: string; repo: string; token: string } {
+  const GENERIC = 'share not found';
   const params = req.params as Record<string, string | undefined>;
   const keyId = (params.keyId ?? '').trim();
   const blob = (params.blob ?? '').trim();
-  if (!keyId || !blob) throw HttpError(400, 'invalid parameters');
+  if (!keyId || !blob) throw HttpError(404, GENERIC);
 
   const keyRecord = repoKeyStore.get(keyId);
   if (!keyRecord) {
     // Dummy decryption to avoid timing side-channel revealing valid keyIds
     try { decryptBlob('0'.repeat(64), blob); } catch {}
-    throw HttpError(404, 'share not found');
+    throw HttpError(404, GENERIC);
   }
 
-  const { owner, repo, token } = decryptBlob(keyRecord.key, blob);
-  if (!isValidOwnerRepo(owner, repo)) throw HttpError(400, 'invalid owner/repo in encrypted payload');
-  if (!isValidToken(token)) throw HttpError(400, 'invalid token in encrypted payload');
+  let decrypted: { owner: string; repo: string; token: string };
+  try {
+    decrypted = decryptBlob(keyRecord.key, blob);
+  } catch {
+    throw HttpError(404, GENERIC);
+  }
 
-  // Verify decrypted owner/repo matches registered key
+  const { owner, repo, token } = decrypted;
+  if (!isValidOwnerRepo(owner, repo) || !isValidToken(token)) {
+    throw HttpError(404, GENERIC);
+  }
   if (keyRecord.owner !== owner || keyRecord.repo !== repo) {
-    throw HttpError(400, 'encrypted payload does not match registered key');
+    throw HttpError(404, GENERIC);
   }
 
   return { owner, repo, token };
@@ -293,8 +296,8 @@ function gitShareEndpoints(app: express.Express) {
     '/v1/git-shares/enc/:keyId/:blob',
     handleErrors(async (req, res) => {
       const { owner, repo, token } = getEncShareParams(req);
-      const { path: notePath } = await fetchShareJson(owner, repo, token);
-      res.json({ path: notePath });
+      await fetchShareJson(owner, repo, token); // validate share exists
+      res.json({ ok: true });
     })
   );
 
@@ -327,8 +330,8 @@ function gitShareEndpoints(app: express.Express) {
     '/v1/git-shares/:owner/:repo/:token',
     handleErrors(async (req, res) => {
       const { owner, repo, token } = getOpenShareParams(req);
-      const { path: notePath } = await fetchShareJson(owner, repo, token);
-      res.json({ owner, repo, token, path: notePath });
+      await fetchShareJson(owner, repo, token); // validate share exists
+      res.json({ owner, repo, token });
     })
   );
 
