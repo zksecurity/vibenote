@@ -10,6 +10,20 @@ metadata:
 
 VibeNote is a git-native notes app that renders Markdown from GitHub repos. Notes can be shared via secret links.
 
+## Working with Notes (Read/Write)
+
+VibeNote notes are just Markdown files in a GitHub repo. For typical interactions — reading, editing, creating notes — **clone the repo and work with it directly via git**:
+
+```bash
+git clone git@github.com:owner/repo.git
+# read/edit .md files
+git add -A && git commit -m "update notes" && git push
+```
+
+VibeNote will pick up changes automatically on the next sync.
+
+**Important**: VibeNote only shows the `main` branch. Always commit and push to `main` — work on other branches won't be visible in the app.
+
 ## Reading Shared Notes
 
 Shared note links look like: `https://vibenote.dev/s/<share-id>`
