@@ -3,7 +3,7 @@ import { env } from './env.ts';
 import { getRepoInstallationId, installationRequest } from './github-app.ts';
 import { resolveAssetPath, encodeAssetPath, collectAssetPaths } from './share-assets.ts';
 import { createRepoIdStore } from './repo-id-store.ts';
-import { handleErrors, HttpError, requireSession } from './common.ts';
+import { handleErrors, HttpError } from './common.ts';
 
 export { gitShareEndpoints };
 
@@ -110,39 +110,6 @@ async function fetchShareJson(
   if (sanitized.includes('..')) throw HttpError(404, GENERIC);
   const parsedRef = typeof parsed.ref === 'string' ? parsed.ref : undefined;
   return { path: sanitized, ref: parsedRef };
-}
-
-async function fetchCollaboratorPermission(
-  installationId: number,
-  owner: string,
-  repo: string,
-  login: string
-): Promise<string | null> {
-  try {
-    const res = await installationRequest(
-      env,
-      installationId,
-      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/collaborators/${encodeURIComponent(
-        login
-      )}/permission`,
-      { headers: { Accept: 'application/vnd.github+json' } }
-    );
-    if (res.status === 404 || res.status === 403) return null;
-    if (!res.ok) {
-      const text = await res.text();
-      throw HttpError(502, `github error ${res.status}: ${text}`);
-    }
-    const json = (await res.json()) as { permission?: string } | null;
-    return json && typeof json.permission === 'string' ? json.permission : null;
-  } catch (error) {
-    if (error instanceof Error && 'status' in error) throw error;
-    const message = error instanceof Error ? error.message : String(error);
-    throw HttpError(502, message);
-  }
-}
-
-function hasWritePermission(permission: string): boolean {
-  return permission === 'admin' || permission === 'maintain' || permission === 'write';
 }
 
 // --- Opaque segment helpers (Tier 2) ---
@@ -357,11 +324,11 @@ function gitShareEndpoints(app: express.Express) {
   // Tier 2 — Repo ID registration
   // ==========================================
 
+  // No session auth required: proof of write access is the presence of .shares/.repo-id
+  // in the repo with matching content, verified below via the GitHub App installation token.
   app.post(
     '/v1/repo-id',
-    requireSession,
     handleErrors(async (req, res) => {
-      const session = req.sessionUser!;
       const body = req.body as Record<string, unknown>;
       const repoId = asTrimmedString(body.repoId);
       const owner = asTrimmedString(body.owner);
@@ -373,7 +340,7 @@ function gitShareEndpoints(app: express.Express) {
 
       const REPO_ACCESS_DENIED = 'repository not found or insufficient permissions';
 
-      // Verify caller has write access to the repo
+      // Resolve the GitHub App installation for this repo.
       let installationId: number;
       try {
         installationId = await getRepoInstallationId(env, owner, repo);
@@ -381,12 +348,9 @@ function gitShareEndpoints(app: express.Express) {
         throw HttpError(404, REPO_ACCESS_DENIED);
       }
 
-      const permission = await fetchCollaboratorPermission(installationId, owner, repo, session.login);
-      if (permission === null || !hasWritePermission(permission)) {
-        throw HttpError(404, REPO_ACCESS_DENIED);
-      }
-
-      // Fetch .shares/.repo-id from repo and verify the repoId matches
+      // Fetch .shares/.repo-id and verify its contents match the submitted repoId.
+      // This is the sole access proof: only someone with write access to the repo
+      // could have committed this file.
       const repoIdFileRes = await installationRequest(
         env,
         installationId,
@@ -421,10 +385,9 @@ function gitShareEndpoints(app: express.Express) {
         owner,
         repo,
         registeredAt: new Date().toISOString(),
-        registeredBy: session.login,
       });
 
-      console.log(`[vibenote] repo id registered for ${owner}/${repo} by ${session.login}`);
+      console.log(`[vibenote] repo id registered for ${owner}/${repo}`);
       res.status(201).json({ ok: true });
     })
   );

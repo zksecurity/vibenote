@@ -131,14 +131,14 @@ The share viewer SPA at `vibenote.dev/s/...` needs to be updated to:
 
 ### Task 4: Agent-friendly repo ID registration
 
-`POST /v1/repo-id` currently requires a web session JWT, which agents can't obtain without a browser.
-Add support for GitHub token auth on this endpoint (PAT or GitHub App installation token) so an agent
-with repo write access can register a repoId without going through the UI.
+`POST /v1/repo-id` requires no authentication. Proof of write access is the presence of
+`.shares/.repo-id` in the repo with matching content, verified server-side via the GitHub App
+installation token. Only someone who could push that file can pass the check.
 After registration, the entire share-creation flow is pure git — no further API calls needed.
 
-- [ ] Accept `Authorization: Bearer <github-token>` on `POST /v1/repo-id` in addition to session JWT
-- [ ] Verify repo write access using the provided GitHub token (same check, different credential source)
-- [ ] Tests
+- [x] Remove session auth requirement from `POST /v1/repo-id`
+- [x] `.shares/.repo-id` file verification is the sole access proof
+- [x] Tests
 
 ### Task 5: Frontend — Share viewer updates
 

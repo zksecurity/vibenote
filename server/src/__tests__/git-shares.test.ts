@@ -9,7 +9,6 @@ import fs from 'node:fs/promises';
 const {
   mockGetRepoInstallationId,
   mockInstallationRequest,
-  mockVerifyBearerSession,
   REPO_ID_FILE,
   TEMP_DIR,
 } = vi.hoisted(() => {
@@ -19,7 +18,6 @@ const {
   return {
     mockGetRepoInstallationId: vi.fn() as any,
     mockInstallationRequest: vi.fn() as any,
-    mockVerifyBearerSession: vi.fn() as any,
     TEMP_DIR: dir,
     REPO_ID_FILE: path.join(dir, 'repo-ids.json'),
   };
@@ -47,10 +45,6 @@ vi.mock('../github-app.ts', () => ({
   getRepoInstallationId: mockGetRepoInstallationId,
   getInstallationToken: vi.fn().mockResolvedValue('fake-token'),
   installationRequest: mockInstallationRequest,
-}));
-
-vi.mock('../api.ts', () => ({
-  verifyBearerSession: mockVerifyBearerSession,
 }));
 
 // --- Now import the modules under test (after mocks are in place) ---
@@ -137,20 +131,16 @@ async function registerTier2Repo(): Promise<{
   mockGetRepoInstallationId.mockResolvedValue(INSTALLATION_ID);
   mockInstallationRequest.mockImplementation(
     async (_env: any, _installationId: number, urlPath: string) => {
-      if (urlPath.includes('/collaborators/')) {
-        return new Response(JSON.stringify({ permission: 'admin' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-      }
       if (urlPath.includes('.shares/.repo-id')) {
         return new Response(REPO_ID, { status: 200 });
       }
       return new Response('not found', { status: 404 });
     },
   );
-  mockVerifyBearerSession.mockResolvedValue({ sessionId: 's', sub: 'u', login: 'testuser', avatarUrl: null, name: 'Test' });
 
   const res = await fetch(`${baseUrl}/v1/repo-id`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer fake-token' },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ repoId: REPO_ID, owner: ENC_OWNER, repo: ENC_REPO }),
   });
   if (res.status !== 201) throw new Error(`registerTier2Repo failed: ${res.status}`);
@@ -290,34 +280,16 @@ describe('Tier 2 — Opaque shares', () => {
     mockGetRepoInstallationId.mockResolvedValue(INSTALLATION_ID);
     mockInstallationRequest.mockImplementation(
       async (_env: any, _installationId: number, urlPath: string) => {
-        // collaborator permission check
-        if (urlPath.includes('/collaborators/')) {
-          return new Response(JSON.stringify({ permission: 'admin' }), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          });
-        }
-        // .shares/.repo-id file
         if (urlPath.includes('.shares/.repo-id')) {
           return new Response(REPO_ID, { status: 200 });
         }
         return new Response('not found', { status: 404 });
       },
     );
-    mockVerifyBearerSession.mockResolvedValue({
-      sessionId: 'test-session',
-      sub: 'user-1',
-      login: 'testuser',
-      avatarUrl: null,
-      name: 'Test User',
-    });
 
     const res = await fetch(`${baseUrl}/v1/repo-id`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer fake-token',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ repoId: REPO_ID, owner: ENC_OWNER, repo: ENC_REPO }),
     });
     expect(res.status).toBe(201);
@@ -388,29 +360,16 @@ describe('Repo keys', () => {
     mockGetRepoInstallationId.mockResolvedValue(INSTALLATION_ID);
     mockInstallationRequest.mockImplementation(
       async (_env: any, _installationId: number, urlPath: string) => {
-        if (urlPath.includes('/collaborators/')) {
-          return new Response(JSON.stringify({ permission: 'admin' }), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          });
-        }
         if (urlPath.includes('.shares/.repo-id')) {
           return new Response(collisionRepoId, { status: 200 });
         }
         return new Response('not found', { status: 404 });
       },
     );
-    mockVerifyBearerSession.mockResolvedValue({
-      sessionId: 'test-session',
-      sub: 'user-1',
-      login: 'testuser',
-      avatarUrl: null,
-      name: 'Test User',
-    });
 
     const res1 = await fetch(`${baseUrl}/v1/repo-id`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer fake-token' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ repoId: collisionRepoId, owner: 'repo-a-owner', repo: 'repo-a' }),
     });
     expect(res1.status).toBe(201);
@@ -418,7 +377,7 @@ describe('Repo keys', () => {
     // Second: try to register same repoId for repo B — should fail
     const res2 = await fetch(`${baseUrl}/v1/repo-id`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer fake-token' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ repoId: collisionRepoId, owner: 'repo-b-owner', repo: 'repo-b' }),
     });
     expect(res2.status).toBe(404);
@@ -501,32 +460,23 @@ describe('Assets', () => {
 // --- POST /v1/repo-id ---
 
 describe('POST /v1/repo-id', () => {
-  function mockRegistration(repoId: string, permissionLevel = 'admin') {
+  function mockRegistration(repoId: string) {
     mockGetRepoInstallationId.mockResolvedValue(INSTALLATION_ID);
     mockInstallationRequest.mockImplementation(
       async (_env: any, _installationId: number, urlPath: string) => {
-        if (urlPath.includes('/collaborators/')) {
-          return new Response(JSON.stringify({ permission: permissionLevel }), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          });
-        }
         if (urlPath.includes('.shares/.repo-id')) {
           return new Response(repoId, { status: 200 });
         }
         return new Response('not found', { status: 404 });
       },
     );
-    mockVerifyBearerSession.mockResolvedValue({
-      sessionId: 's', sub: 'u', login: 'testuser', avatarUrl: null, name: 'Test',
-    });
   }
 
   it('17. missing fields: returns 400', async () => {
     mockRegistration('whatever');
     const res = await fetch(`${baseUrl}/v1/repo-id`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer fake-token' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ owner: 'x', repo: 'y' }), // missing repoId
     });
     expect(res.status).toBe(400);
@@ -536,52 +486,37 @@ describe('POST /v1/repo-id', () => {
     mockRegistration('toolong-not-11chars');
     const res = await fetch(`${baseUrl}/v1/repo-id`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer fake-token' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ repoId: 'toolong-not-11chars', owner: 'x', repo: 'y' }),
     });
     expect(res.status).toBe(400);
   });
 
-  it('19. insufficient permissions: returns 404', async () => {
-    const repoId = crypto.randomBytes(8).toString('base64url');
-    mockRegistration(repoId, 'read');
-    const res = await fetch(`${baseUrl}/v1/repo-id`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer fake-token' },
-      body: JSON.stringify({ repoId, owner: 'x', repo: 'y' }),
-    });
-    expect(res.status).toBe(404);
-  });
-
-  it('20. .shares/.repo-id mismatch: returns 404', async () => {
+  it('19. .shares/.repo-id mismatch: returns 404', async () => {
     const repoId = crypto.randomBytes(8).toString('base64url');
     const differentRepoId = crypto.randomBytes(8).toString('base64url');
     mockGetRepoInstallationId.mockResolvedValue(INSTALLATION_ID);
     mockInstallationRequest.mockImplementation(
       async (_env: any, _installationId: number, urlPath: string) => {
-        if (urlPath.includes('/collaborators/')) {
-          return new Response(JSON.stringify({ permission: 'admin' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-        }
         if (urlPath.includes('.shares/.repo-id')) {
           return new Response(differentRepoId, { status: 200 }); // mismatch
         }
         return new Response('not found', { status: 404 });
       },
     );
-    mockVerifyBearerSession.mockResolvedValue({ sessionId: 's', sub: 'u', login: 'testuser', avatarUrl: null, name: 'Test' });
     const res = await fetch(`${baseUrl}/v1/repo-id`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer fake-token' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ repoId, owner: 'x', repo: 'y' }),
     });
     expect(res.status).toBe(404);
   });
 
-  it('21. idempotent re-registration: same repoId + same repo succeeds', async () => {
+  it('20. idempotent re-registration: same repoId + same repo succeeds', async () => {
     const repoId = crypto.randomBytes(8).toString('base64url');
     mockRegistration(repoId);
     const body = JSON.stringify({ repoId, owner: 'idem-owner', repo: 'idem-repo' });
-    const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer fake-token' };
+    const headers = { 'Content-Type': 'application/json' };
 
     const res1 = await fetch(`${baseUrl}/v1/repo-id`, { method: 'POST', headers, body });
     expect(res1.status).toBe(201);
@@ -590,50 +525,26 @@ describe('POST /v1/repo-id', () => {
     expect(res2.status).toBe(201);
   });
 
-  it('22. different repoId for same repo rejected', async () => {
+  it('21. different repoId for same repo rejected', async () => {
     const repoId1 = crypto.randomBytes(8).toString('base64url');
     const repoId2 = crypto.randomBytes(8).toString('base64url');
     const owner = 'one-repo-owner';
     const repo = 'one-repo';
 
     // Register first repoId
-    mockGetRepoInstallationId.mockResolvedValue(INSTALLATION_ID);
-    mockInstallationRequest.mockImplementation(
-      async (_env: any, _installationId: number, urlPath: string) => {
-        if (urlPath.includes('/collaborators/')) {
-          return new Response(JSON.stringify({ permission: 'admin' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-        }
-        if (urlPath.includes('.shares/.repo-id')) {
-          return new Response(repoId1, { status: 200 });
-        }
-        return new Response('not found', { status: 404 });
-      },
-    );
-    mockVerifyBearerSession.mockResolvedValue({ sessionId: 's', sub: 'u', login: 'testuser', avatarUrl: null, name: 'Test' });
-
+    mockRegistration(repoId1);
     const res1 = await fetch(`${baseUrl}/v1/repo-id`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer fake-token' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ repoId: repoId1, owner, repo }),
     });
     expect(res1.status).toBe(201);
 
     // Try to register a different repoId for the same repo — should fail
-    mockInstallationRequest.mockImplementation(
-      async (_env: any, _installationId: number, urlPath: string) => {
-        if (urlPath.includes('/collaborators/')) {
-          return new Response(JSON.stringify({ permission: 'admin' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-        }
-        if (urlPath.includes('.shares/.repo-id')) {
-          return new Response(repoId2, { status: 200 });
-        }
-        return new Response('not found', { status: 404 });
-      },
-    );
-
+    mockRegistration(repoId2);
     const res2 = await fetch(`${baseUrl}/v1/repo-id`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer fake-token' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ repoId: repoId2, owner, repo }),
     });
     expect(res2.status).toBe(404);

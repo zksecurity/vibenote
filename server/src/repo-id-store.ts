@@ -6,7 +6,6 @@ export type RepoIdRecord = {
   owner: string;
   repo: string;
   registeredAt: string;
-  registeredBy: string;
 };
 
 export type RepoIdStoreOptions = {
