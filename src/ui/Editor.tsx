@@ -128,7 +128,7 @@ export function Editor({ doc, onChange, readOnly = false, slug, loadAsset, onImp
       )}
       <div
         ref={previewRef}
-        className={`preview${readOnly ? ' preview-only' : ''}`}
+        className={`preview markdown-body${readOnly ? ' preview-only' : ''}`}
         dangerouslySetInnerHTML={{ __html: html }}
       />
     </>

@@ -2,6 +2,8 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import './styles.css';
+import 'github-markdown-css/github-markdown-light.css';
+import 'highlight.js/styles/github.css';
 
 const root = createRoot(document.getElementById('root')!);
 root.render(<App />);
