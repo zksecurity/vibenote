@@ -38,7 +38,7 @@ Example: `vibenote.dev/s/acme-org/team-notes/weekly-update`
 
 1. Generate a random repoId locally: `crypto.randomBytes(8).toString('base64url')` (11 chars)
 2. Store in repo: `.shares/.repo-id` → the raw repoId string (11-char base64url, no JSON)
-3. Register with server: `POST /v1/repo-keys` with `{repoId, owner, repo}`
+3. Register with server: `POST /v1/repo-id` with `{repoId, owner, repo}`
 4. Server **verifies**:
    - Caller has write access to the repo (same check as current sharing endpoints)
    - `.shares/.repo-id` exists in the repo and contains matching `repoId`
@@ -115,7 +115,7 @@ The share viewer SPA at `vibenote.dev/s/...` needs to be updated to:
 
 ### Task 2: Server — Tier 2 repo ID registration endpoint
 
-- [x] `POST /v1/repo-keys` — register a repoId for a repo
+- [x] `POST /v1/repo-id` — register a repoId for a repo
   - Requires session auth (write access to repo)
   - Verifies `.shares/.repo-id` exists in repo and contains matching `repoId`
   - Stores `repoId → {owner, repo}` in a key store (JSON file, like session store)

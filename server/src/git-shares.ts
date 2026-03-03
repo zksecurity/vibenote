@@ -2,7 +2,7 @@ import type express from 'express';
 import { env } from './env.ts';
 import { getRepoInstallationId, installationRequest } from './github-app.ts';
 import { resolveAssetPath, encodeAssetPath, collectAssetPaths } from './share-assets.ts';
-import { createRepoKeyStore } from './repo-key-store.ts';
+import { createRepoIdStore } from './repo-id-store.ts';
 import { handleErrors, HttpError, requireSession } from './common.ts';
 
 export { gitShareEndpoints };
@@ -43,8 +43,8 @@ const ASSET_CACHE_TTL_MS = 5 * 60 * 1000;
 
 // --- Repo key store ---
 
-const repoKeyStore = createRepoKeyStore({ filePath: env.REPO_KEY_STORE_FILE });
-await repoKeyStore.init();
+const repoIdStore = createRepoIdStore({ filePath: env.REPO_ID_STORE_FILE });
+await repoIdStore.init();
 
 // --- GitHub helpers ---
 
@@ -263,7 +263,7 @@ function getOpaqueShareParams(req: express.Request): { owner: string; repo: stri
   if (!decoded) throw HttpError(404, GENERIC);
 
   const { repoId, shareId } = decoded;
-  const record = repoKeyStore.get(repoId);
+  const record = repoIdStore.get(repoId);
   if (!record) throw HttpError(404, GENERIC);
 
   if (!isValidShareId(shareId)) throw HttpError(404, GENERIC);
@@ -352,7 +352,7 @@ function gitShareEndpoints(app: express.Express) {
   // ==========================================
 
   app.post(
-    '/v1/repo-keys',
+    '/v1/repo-id',
     requireSession,
     handleErrors(async (req, res) => {
       const session = req.sessionUser!;
@@ -399,12 +399,12 @@ function gitShareEndpoints(app: express.Express) {
       }
 
       // Reject if repoId already registered for a different repo (prevent collision DoS)
-      const existing = repoKeyStore.get(repoId);
+      const existing = repoIdStore.get(repoId);
       if (existing && (existing.owner !== owner || existing.repo !== repo)) {
         throw HttpError(404, REPO_ACCESS_DENIED);
       }
 
-      await repoKeyStore.set({
+      await repoIdStore.set({
         repoId,
         owner,
         repo,

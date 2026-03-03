@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-export type RepoKeyRecord = {
+export type RepoIdRecord = {
   repoId: string;
   owner: string;
   repo: string;
@@ -9,35 +9,35 @@ export type RepoKeyRecord = {
   registeredBy: string;
 };
 
-export type RepoKeyStoreOptions = {
+export type RepoIdStoreOptions = {
   filePath: string;
 };
 
-type RepoKeyStoreData = {
-  records: RepoKeyRecord[];
+type RepoIdStoreData = {
+  records: RepoIdRecord[];
 };
 
 const FILE_MODE = 0o600;
 
-export function createRepoKeyStore(options: RepoKeyStoreOptions): RepoKeyStoreInstance {
-  return new RepoKeyStore(options);
+export function createRepoIdStore(options: RepoIdStoreOptions): RepoIdStoreInstance {
+  return new RepoIdStore(options);
 }
 
-export type RepoKeyStoreInstance = {
+export type RepoIdStoreInstance = {
   init(): Promise<void>;
-  get(repoId: string): RepoKeyRecord | undefined;
-  set(record: RepoKeyRecord): Promise<void>;
+  get(repoId: string): RepoIdRecord | undefined;
+  set(record: RepoIdRecord): Promise<void>;
 };
 
-class RepoKeyStore implements RepoKeyStoreInstance {
+class RepoIdStore implements RepoIdStoreInstance {
   #filePath: string;
   #dirPath: string;
-  #keys: Map<string, RepoKeyRecord>;
+  #keys: Map<string, RepoIdRecord>;
   #persistQueue: Promise<void>;
 
-  constructor(options: RepoKeyStoreOptions) {
+  constructor(options: RepoIdStoreOptions) {
     if (!options.filePath || options.filePath.trim().length === 0) {
-      throw new Error('repo key store requires file path');
+      throw new Error('repo id store requires file path');
     }
     this.#filePath = path.resolve(options.filePath);
     this.#dirPath = path.dirname(this.#filePath);
@@ -49,7 +49,7 @@ class RepoKeyStore implements RepoKeyStoreInstance {
     await fs.mkdir(this.#dirPath, { recursive: true });
     try {
       let raw = await fs.readFile(this.#filePath, 'utf8');
-      let parsed = JSON.parse(raw) as RepoKeyStoreData | RepoKeyRecord[];
+      let parsed = JSON.parse(raw) as RepoIdStoreData | RepoIdRecord[];
       if (Array.isArray(parsed)) {
         this.#hydrate(parsed);
       } else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.records)) {
@@ -66,16 +66,16 @@ class RepoKeyStore implements RepoKeyStoreInstance {
     }
   }
 
-  get(repoId: string): RepoKeyRecord | undefined {
+  get(repoId: string): RepoIdRecord | undefined {
     return this.#keys.get(repoId);
   }
 
-  async set(record: RepoKeyRecord): Promise<void> {
+  async set(record: RepoIdRecord): Promise<void> {
     this.#keys.set(record.repoId, record);
     await this.#persist();
   }
 
-  #hydrate(records: RepoKeyRecord[]): void {
+  #hydrate(records: RepoIdRecord[]): void {
     this.#keys.clear();
     for (let record of records) {
       if (!record || typeof record.repoId !== 'string') continue;
@@ -84,8 +84,8 @@ class RepoKeyStore implements RepoKeyStoreInstance {
   }
 
   async #persist(): Promise<void> {
-    let serialized: RepoKeyRecord[] = Array.from(this.#keys.values());
-    let payload: RepoKeyStoreData = { records: serialized };
+    let serialized: RepoIdRecord[] = Array.from(this.#keys.values());
+    let payload: RepoIdStoreData = { records: serialized };
     this.#persistQueue = this.#persistQueue.then(async () => {
       let tmpPath = `${this.#filePath}.tmp`;
       await fs.writeFile(tmpPath, JSON.stringify(payload, null, 2), { mode: FILE_MODE });

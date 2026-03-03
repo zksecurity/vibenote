@@ -10,7 +10,7 @@ const {
   mockGetRepoInstallationId,
   mockInstallationRequest,
   mockVerifyBearerSession,
-  REPO_KEY_FILE,
+  REPO_ID_FILE,
   TEMP_DIR,
 } = vi.hoisted(() => {
   const path = require('node:path');
@@ -21,7 +21,7 @@ const {
     mockInstallationRequest: vi.fn() as any,
     mockVerifyBearerSession: vi.fn() as any,
     TEMP_DIR: dir,
-    REPO_KEY_FILE: path.join(dir, 'repo-keys.json'),
+    REPO_ID_FILE: path.join(dir, 'repo-ids.json'),
   };
 });
 
@@ -38,7 +38,7 @@ vi.mock('../env.ts', () => ({
     SESSION_STORE_FILE: '/dev/null',
     SESSION_ENCRYPTION_KEY: '0'.repeat(64),
     SHARE_STORE_FILE: '/dev/null',
-    REPO_KEY_STORE_FILE: REPO_KEY_FILE,
+    REPO_ID_STORE_FILE: REPO_ID_FILE,
     PUBLIC_VIEWER_BASE_URL: 'https://test.vibenote.dev',
   },
 }));
@@ -267,7 +267,7 @@ describe('Tier 2 — Opaque shares', () => {
       name: 'Test User',
     });
 
-    const res = await fetch(`${baseUrl}/v1/repo-keys`, {
+    const res = await fetch(`${baseUrl}/v1/repo-id`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -363,7 +363,7 @@ describe('Repo keys', () => {
       name: 'Test User',
     });
 
-    const res1 = await fetch(`${baseUrl}/v1/repo-keys`, {
+    const res1 = await fetch(`${baseUrl}/v1/repo-id`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer fake-token' },
       body: JSON.stringify({ repoId: collisionRepoId, owner: 'repo-a-owner', repo: 'repo-a' }),
@@ -371,7 +371,7 @@ describe('Repo keys', () => {
     expect(res1.status).toBe(201);
 
     // Second: try to register same repoId for repo B — should fail
-    const res2 = await fetch(`${baseUrl}/v1/repo-keys`, {
+    const res2 = await fetch(`${baseUrl}/v1/repo-id`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer fake-token' },
       body: JSON.stringify({ repoId: collisionRepoId, owner: 'repo-b-owner', repo: 'repo-b' }),
