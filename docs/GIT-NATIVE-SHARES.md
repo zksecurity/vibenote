@@ -17,14 +17,14 @@ Two tiers: open (no API needed) and encrypted (one-time API setup per repo).
 
 The filename (minus `.json`) becomes the token / URL slug.
 
-**Share URL**: `vibenote.dev/s/<owner>/<repo>/<token>`
+**Share URL**: `vibenote.dev/s/<owner>/<repo>/<shareId>`
 Example: `vibenote.dev/s/acme-org/team-notes/weekly-update`
 
 **Server resolution**:
 
 1. Parse owner/repo/token from URL
 2. Get GitHub App installation for that repo
-3. Fetch `.shares/<token>.json` from the repo (GitHub Contents API)
+3. Fetch `.shares/<shareId>.json` from the repo (GitHub Contents API)
 4. Read `path` from JSON
 5. Fetch and serve the content at that path
 
@@ -37,23 +37,23 @@ Example: `vibenote.dev/s/acme-org/team-notes/weekly-update`
 **One-time setup**:
 
 1. Generate a 256-bit key locally
-2. Store in repo: `.shares/.key` → `{"id": "<keyId>", "key": "<hex-encoded-256bit>"}`
+2. Store in repo: `.shares/.key` → `{"id": "<repoId>", "key": "<hex-encoded-256bit>"}`
 3. Register with server: `POST /v1/repo-keys` with `{id, key, owner, repo}`
 4. Server **verifies**:
    - Caller has write access to the repo (same check as current sharing endpoints)
    - `.shares/.key` exists in the repo and contains matching `id`
-5. Server stores: `keyId → {key, owner, repo}` (one entry per repo, not per note)
+5. Server stores: `repoId → {key, owner, repo}` (one entry per repo, not per note)
 
-**Creating an encrypted share**: Same as tier 1 — add `.shares/<token>.json`.
+**Creating an encrypted share**: Same as tier 1 — add `.shares/<shareId>.json`.
 
-**Share URL**: `vibenote.dev/s/<keyId>/<encrypted-blob>`
+**Share URL**: `vibenote.dev/s/<repoId>/<encrypted-blob>`
 Where `encrypted-blob = base64url(AES-256-GCM(key, JSON.stringify({owner, repo, token})))`
 
 **Server resolution**:
 
-1. Look up key by `keyId`
+1. Look up key by `repoId`
 2. Decrypt blob → get `{owner, repo, token}`
-3. Fetch `.shares/<token>.json` from repo
+3. Fetch `.shares/<shareId>.json` from repo
 4. Serve content
 
 **Constructing links locally**: Agent/user has the key from `.shares/.key`, so they can compute the encrypted URL without any API call.
@@ -63,7 +63,7 @@ Where `encrypted-blob = base64url(AES-256-GCM(key, JSON.stringify({owner, repo, 
 Both tiers coexist. Server distinguishes by URL structure:
 
 - 3+ path segments after `/s/`: `owner/repo/token` → tier 1
-- 2 path segments after `/s/`: `keyId/blob` → tier 2
+- 2 path segments after `/s/`: `repoId/blob` → tier 2
 
 ### Asset Serving
 
@@ -105,7 +105,7 @@ The share viewer SPA at `vibenote.dev/s/...` needs to be updated to:
 ### Task 1: Server — Tier 1 share resolution
 
 - [x] New Express routes for git-native open shares
-- [x] `GET /v1/git-shares/:owner/:repo/:token/content` — fetch `.shares/<token>.json` from repo, resolve path, serve markdown
+- [x] `GET /v1/git-shares/:owner/:repo/:token/content` — fetch `.shares/<shareId>.json` from repo, resolve path, serve markdown
 - [x] `GET /v1/git-shares/:owner/:repo/:token` — share metadata
 - [x] `GET /v1/git-shares/:owner/:repo/:token/assets?path=...` — relative assets
 - [x] Reuse existing `installationRequest` / `getRepoInstallationId` for GitHub API calls
@@ -116,23 +116,23 @@ The share viewer SPA at `vibenote.dev/s/...` needs to be updated to:
 - [x] `POST /v1/repo-keys` — register a repo key
   - Requires session auth (write access to repo)
   - Verifies `.shares/.key` exists in repo with matching `id`
-  - Stores `keyId → {key, owner, repo}` in a key store (JSON file, like session store)
+  - Stores `repoId → {key, owner, repo}` in a key store (JSON file, like session store)
 - [x] Key store implementation (similar to share-store.ts)
 - [x] Tests
 
 ### Task 3: Server — Tier 2 encrypted share resolution
 
-- [x] `GET /v1/git-shares/enc/:keyId/:blob/content` — decrypt blob, resolve share
-- [x] `GET /v1/git-shares/enc/:keyId/:blob` — metadata
-- [x] `GET /v1/git-shares/enc/:keyId/:blob/assets?path=...` — assets
+- [x] `GET /v1/git-shares/enc/:repoId/:blob/content` — decrypt blob, resolve share
+- [x] `GET /v1/git-shares/enc/:repoId/:blob` — metadata
+- [x] `GET /v1/git-shares/enc/:repoId/:blob/assets?path=...` — assets
 - [x] AES-256-GCM encrypt/decrypt helpers
 - [x] Tests
 
 ### Task 4: Frontend — Share viewer updates
 
 - [ ] Update share viewer to handle new URL formats
-- [ ] Route `/s/<owner>/<repo>/<token>` → tier 1 API
-- [ ] Route `/s/<keyId>/<blob>` → tier 2 API
+- [ ] Route `/s/<owner>/<repo>/<shareId>` → tier 1 API
+- [ ] Route `/s/<repoId>/<blob>` → tier 2 API
 - [ ] Keep backward compat with `/s/<old-id>` → legacy API
 
 ### Task 5: Skill doc & tooling

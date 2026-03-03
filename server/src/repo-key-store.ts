@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 export type RepoKeyRecord = {
-  id: string;
+  repoId: string;
   key: string;
   owner: string;
   repo: string;
@@ -26,7 +26,7 @@ export function createRepoKeyStore(options: RepoKeyStoreOptions): RepoKeyStoreIn
 
 export type RepoKeyStoreInstance = {
   init(): Promise<void>;
-  get(id: string): RepoKeyRecord | undefined;
+  get(repoId: string): RepoKeyRecord | undefined;
   set(record: RepoKeyRecord): Promise<void>;
 };
 
@@ -67,20 +67,20 @@ class RepoKeyStore implements RepoKeyStoreInstance {
     }
   }
 
-  get(id: string): RepoKeyRecord | undefined {
-    return this.#keys.get(id);
+  get(repoId: string): RepoKeyRecord | undefined {
+    return this.#keys.get(repoId);
   }
 
   async set(record: RepoKeyRecord): Promise<void> {
-    this.#keys.set(record.id, record);
+    this.#keys.set(record.repoId, record);
     await this.#persist();
   }
 
   #hydrate(records: RepoKeyRecord[]): void {
     this.#keys.clear();
     for (let record of records) {
-      if (!record || typeof record.id !== 'string') continue;
-      this.#keys.set(record.id, record);
+      if (!record || typeof record.repoId !== 'string') continue;
+      this.#keys.set(record.repoId, record);
     }
   }
 

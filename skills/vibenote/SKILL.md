@@ -35,12 +35,12 @@ vibenote.dev/s/<share-id>  →  api.vibenote.dev/v1/share-links/<share-id>/conte
 
 ### Git-native Tier 1 (open shares — owner/repo/token visible in URL)
 ```
-vibenote.dev/s/<owner>/<repo>/<token>  →  api.vibenote.dev/v1/git-shares/<owner>/<repo>/<token>/content
+vibenote.dev/s/<owner>/<repo>/<shareId>  →  api.vibenote.dev/v1/git-shares/<owner>/<repo>/<shareId>/content
 ```
 
 ### Git-native Tier 2 (encrypted shares — opaque URL, repo identity hidden)
 ```
-vibenote.dev/s/<keyId>/<blob>  →  api.vibenote.dev/v1/git-shares/enc/<keyId>/<blob>/content
+vibenote.dev/s/<repoId>/<blob>  →  api.vibenote.dev/v1/git-shares/enc/<repoId>/<blob>/content
 ```
 
 All content endpoints return raw `text/markdown`.
@@ -58,7 +58,7 @@ web_fetch https://api.vibenote.dev/v1/share-links/-0Fgm7cnqd8yZCfnULdY9oO5/conte
 Shares are created by committing a JSON descriptor to `.shares/` in the repo:
 
 ```json
-// .shares/<token>.json
+// .shares/<shareId>.json
 { "path": "notes/my-note.md" }
 ```
 
@@ -70,7 +70,7 @@ For encrypted (Tier 2) shares, the repo must have a key registered. The share UR
 
 **Tokens on private repos MUST be cryptographically random, regardless of whether Tier 2 encryption is set up.** This is not optional.
 
-Why: The Tier 1 endpoint (`/v1/git-shares/<owner>/<repo>/<token>/content`) is always available. It uses the server's GitHub App credentials — not yours. If an attacker can guess `owner/repo` and `token`, they can:
+Why: The Tier 1 endpoint (`/v1/git-shares/<owner>/<repo>/<shareId>/content`) is always available. It uses the server's GitHub App credentials — not yours. If an attacker can guess `owner/repo` and `token`, they can:
 1. Confirm the private repo exists (GitHub deliberately hides this)
 2. Read the note content without any credentials
 
@@ -87,7 +87,7 @@ Short human-readable tokens (e.g. `weekly-update`) are only safe on **public rep
 
 Base URL: `https://api.vibenote.dev`
 
-All mutating endpoints require a VibeNote session JWT in the `Authorization: Bearer <token>` header. Currently there is no programmatic auth — share creation must be done through the VibeNote web UI.
+All mutating endpoints require a VibeNote session JWT in the `Authorization: Bearer <shareId>` header. Currently there is no programmatic auth — share creation must be done through the VibeNote web UI.
 
 ### Endpoints
 

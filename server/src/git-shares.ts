@@ -10,24 +10,24 @@ export { gitShareEndpoints };
 
 // --- Validation helpers ---
 
-// Token minimum length is 4 to allow readable names, but SHORT TOKENS ARE INSECURE
+// Share ID minimum length is 4 to allow readable names, but SHORT IDs ARE INSECURE
 // for any share on a private repo.
 //
-// IMPORTANT: Tier 2 encryption does NOT make short tokens safe. The token is still
+// IMPORTANT: Tier 2 encryption does NOT make short share IDs safe. The share ID is still
 // a plaintext filename inside .shares/ in the repo. If owner/repo are known or guessable,
-// Tier 1 is always available and a brute-forced token leaks both repo existence AND content.
+// Tier 1 is always available and a brute-forced share ID leaks both repo existence AND content.
 // GitHub deliberately doesn't reveal whether a private repo exists — we must uphold that.
 //
-// Rule: tokens MUST be cryptographically random on private repos, regardless of tier.
-// Use crypto.randomBytes(18).toString('base64url') = 24 chars, 144 bits of entropy.
-// Short human-readable tokens are only safe on public repos (where content is already public).
+// Rule: share IDs MUST be cryptographically random on private repos, regardless of tier.
+// Use crypto.randomBytes(16).toString('base64url') = 22 chars, 128 bits of entropy.
+// Short human-readable IDs are only safe on public repos (where content is already public).
 //
-// DO NOT raise the minimum here to enforce this — short tokens are structurally valid
+// DO NOT raise the minimum here to enforce this — short IDs are structurally valid
 // (e.g. legacy or public repos). Enforce random defaults in the UI/CLI layer.
-const TOKEN_PATTERN = /^[A-Za-z0-9_-]{4,128}$/;
+const SHARE_ID_PATTERN = /^[A-Za-z0-9_-]{4,128}$/;
 
-function isValidToken(token: string): boolean {
-  return TOKEN_PATTERN.test(token);
+function isValidShareId(shareId: string): boolean {
+  return SHARE_ID_PATTERN.test(shareId);
 }
 
 function isValidOwnerRepo(owner: string, repo: string): boolean {
@@ -69,9 +69,9 @@ async function fetchRepoFile(owner: string, repo: string, filePath: string, acce
   return res;
 }
 
-async function fetchShareJson(owner: string, repo: string, token: string, ref?: string): Promise<{ path: string; ref?: string }> {
+async function fetchShareJson(owner: string, repo: string, shareId: string, ref?: string): Promise<{ path: string; ref?: string }> {
   const GENERIC = 'share not found';
-  const ghRes = await fetchRepoFile(owner, repo, `.shares/${token}.json`, 'application/vnd.github.raw', ref);
+  const ghRes = await fetchRepoFile(owner, repo, `.shares/${shareId}.json`, 'application/vnd.github.raw', ref);
   const raw = await ghRes.text();
   let parsed: { path?: string; ref?: string };
   try {
@@ -125,7 +125,7 @@ function hasWritePermission(permission: string): boolean {
 
 // --- AES-256-GCM helpers ---
 
-function decryptBlob(keyHex: string, blobBase64url: string): { owner: string; repo: string; token: string } {
+function decryptBlob(keyHex: string, blobBase64url: string): { owner: string; repo: string; shareId: string } {
   const keyBuf = Buffer.from(keyHex, 'hex');
   if (keyBuf.length !== 32) throw HttpError(400, 'invalid key');
 
@@ -146,7 +146,7 @@ function decryptBlob(keyHex: string, blobBase64url: string): { owner: string; re
     throw HttpError(400, 'decryption failed');
   }
 
-  let parsed: { owner?: string; repo?: string; token?: string };
+  let parsed: { owner?: string; repo?: string; shareId?: string };
   try {
     parsed = JSON.parse(plaintext);
   } catch {
@@ -156,11 +156,11 @@ function decryptBlob(keyHex: string, blobBase64url: string): { owner: string; re
     !parsed ||
     typeof parsed.owner !== 'string' ||
     typeof parsed.repo !== 'string' ||
-    typeof parsed.token !== 'string'
+    typeof parsed.shareId !== 'string'
   ) {
     throw HttpError(400, 'invalid decrypted payload');
   }
-  return { owner: parsed.owner, repo: parsed.repo, token: parsed.token };
+  return { owner: parsed.owner, repo: parsed.repo, shareId: parsed.shareId };
 }
 
 // --- Shared response helpers ---
@@ -238,56 +238,56 @@ function asTrimmedString(input: unknown): string {
 
 // --- Tier 1 param extraction ---
 
-function getOpenShareParams(req: express.Request): { owner: string; repo: string; token: string } {
+function getOpenShareParams(req: express.Request): { owner: string; repo: string; shareId: string } {
   const params = req.params as Record<string, string | undefined>;
   const owner = (params.owner ?? '').trim();
   const repo = (params.repo ?? '').trim();
-  const token = (params.token ?? '').trim();
+  const shareId = (params.shareId ?? '').trim();
   if (!isValidOwnerRepo(owner, repo)) throw HttpError(400, 'invalid owner/repo');
-  if (!isValidToken(token)) throw HttpError(400, 'invalid token');
-  return { owner, repo, token };
+  if (!isValidShareId(shareId)) throw HttpError(400, 'invalid share id');
+  return { owner, repo, shareId };
 }
 
-function openCacheKey(owner: string, repo: string, token: string): string {
-  return `git:${owner}/${repo}/${token}`;
+function openCacheKey(owner: string, repo: string, shareId: string): string {
+  return `git:${owner}/${repo}/${shareId}`;
 }
 
 // --- Tier 2 (encrypted) param extraction ---
 
-function getEncShareParams(req: express.Request): { owner: string; repo: string; token: string } {
+function getEncShareParams(req: express.Request): { owner: string; repo: string; shareId: string } {
   const GENERIC = 'share not found';
   const params = req.params as Record<string, string | undefined>;
-  const keyId = (params.keyId ?? '').trim();
+  const repoId = (params.repoId ?? '').trim();
   const blob = (params.blob ?? '').trim();
-  if (!keyId || !blob) throw HttpError(404, GENERIC);
+  if (!repoId || !blob) throw HttpError(404, GENERIC);
 
-  const keyRecord = repoKeyStore.get(keyId);
+  const keyRecord = repoKeyStore.get(repoId);
   if (!keyRecord) {
-    // Dummy decryption to avoid timing side-channel revealing valid keyIds
+    // Dummy decryption to avoid timing side-channel revealing valid repoIds
     try { decryptBlob('0'.repeat(64), blob); } catch {}
     throw HttpError(404, GENERIC);
   }
 
-  let decrypted: { owner: string; repo: string; token: string };
+  let decrypted: { owner: string; repo: string; shareId: string };
   try {
     decrypted = decryptBlob(keyRecord.key, blob);
   } catch {
     throw HttpError(404, GENERIC);
   }
 
-  const { owner, repo, token } = decrypted;
-  if (!isValidOwnerRepo(owner, repo) || !isValidToken(token)) {
+  const { owner, repo, shareId } = decrypted;
+  if (!isValidOwnerRepo(owner, repo) || !isValidShareId(shareId)) {
     throw HttpError(404, GENERIC);
   }
   if (keyRecord.owner !== owner || keyRecord.repo !== repo) {
     throw HttpError(404, GENERIC);
   }
 
-  return { owner, repo, token };
+  return { owner, repo, shareId };
 }
 
-function encCacheKey(keyId: string, blob: string): string {
-  return `enc:${keyId}/${blob}`;
+function encCacheKey(repoId: string, blob: string): string {
+  return `enc:${repoId}/${blob}`;
 }
 
 // --- Endpoints ---
@@ -296,39 +296,39 @@ function gitShareEndpoints(app: express.Express) {
   // ==========================================
   // Tier 2 — Encrypted share resolution
   // (must be registered before Tier 1 so that
-  //  /enc/:keyId/:blob doesn't match :owner/:repo/:token)
+  //  /enc/:repoId/:blob doesn't match :owner/:repo/:shareId)
   // ==========================================
 
   app.get(
-    '/v1/git-shares/enc/:keyId/:blob/content',
+    '/v1/git-shares/enc/:repoId/:blob/content',
     handleErrors(async (req, res) => {
       const params = req.params as Record<string, string | undefined>;
-      const keyId = (params.keyId ?? '').trim();
+      const repoId = (params.repoId ?? '').trim();
       const blob = (params.blob ?? '').trim();
-      const { owner, repo, token } = getEncShareParams(req);
-      const { path: notePath, ref } = await fetchShareJson(owner, repo, token);
-      await serveContent(res, owner, repo, notePath, encCacheKey(keyId, blob), ref);
+      const { owner, repo, shareId } = getEncShareParams(req);
+      const { path: notePath, ref } = await fetchShareJson(owner, repo, shareId);
+      await serveContent(res, owner, repo, notePath, encCacheKey(repoId, blob), ref);
     })
   );
 
   app.get(
-    '/v1/git-shares/enc/:keyId/:blob',
+    '/v1/git-shares/enc/:repoId/:blob',
     handleErrors(async (req, res) => {
-      const { owner, repo, token } = getEncShareParams(req);
-      await fetchShareJson(owner, repo, token); // validate share exists
+      const { owner, repo, shareId } = getEncShareParams(req);
+      await fetchShareJson(owner, repo, shareId); // validate share exists
       res.json({ ok: true });
     })
   );
 
   app.get(
-    '/v1/git-shares/enc/:keyId/:blob/assets',
+    '/v1/git-shares/enc/:repoId/:blob/assets',
     handleErrors(async (req, res) => {
       const params = req.params as Record<string, string | undefined>;
-      const keyId = (params.keyId ?? '').trim();
+      const repoId = (params.repoId ?? '').trim();
       const blob = (params.blob ?? '').trim();
-      const { owner, repo, token } = getEncShareParams(req);
-      const { path: notePath, ref } = await fetchShareJson(owner, repo, token);
-      await serveAsset(req, res, owner, repo, notePath, encCacheKey(keyId, blob), ref);
+      const { owner, repo, shareId } = getEncShareParams(req);
+      const { path: notePath, ref } = await fetchShareJson(owner, repo, shareId);
+      await serveAsset(req, res, owner, repo, notePath, encCacheKey(repoId, blob), ref);
     })
   );
 
@@ -337,34 +337,34 @@ function gitShareEndpoints(app: express.Express) {
   // ==========================================
 
   app.get(
-    '/v1/git-shares/:owner/:repo/:token/content',
+    '/v1/git-shares/:owner/:repo/:shareId/content',
     handleErrors(async (req, res) => {
-      const { owner, repo, token } = getOpenShareParams(req);
-      const { path: notePath, ref } = await fetchShareJson(owner, repo, token);
-      await serveContent(res, owner, repo, notePath, openCacheKey(owner, repo, token), ref);
+      const { owner, repo, shareId } = getOpenShareParams(req);
+      const { path: notePath, ref } = await fetchShareJson(owner, repo, shareId);
+      await serveContent(res, owner, repo, notePath, openCacheKey(owner, repo, shareId), ref);
     })
   );
 
   app.get(
-    '/v1/git-shares/:owner/:repo/:token',
+    '/v1/git-shares/:owner/:repo/:shareId',
     handleErrors(async (req, res) => {
-      const { owner, repo, token } = getOpenShareParams(req);
-      await fetchShareJson(owner, repo, token); // validate share exists
-      res.json({ owner, repo, token });
+      const { owner, repo, shareId } = getOpenShareParams(req);
+      await fetchShareJson(owner, repo, shareId); // validate share exists
+      res.json({ owner, repo, shareId });
     })
   );
 
   app.get(
-    '/v1/git-shares/:owner/:repo/:token/assets',
+    '/v1/git-shares/:owner/:repo/:shareId/assets',
     handleErrors(async (req, res) => {
-      const { owner, repo, token } = getOpenShareParams(req);
-      const { path: notePath, ref } = await fetchShareJson(owner, repo, token);
-      await serveAsset(req, res, owner, repo, notePath, openCacheKey(owner, repo, token), ref);
+      const { owner, repo, shareId } = getOpenShareParams(req);
+      const { path: notePath, ref } = await fetchShareJson(owner, repo, shareId);
+      await serveAsset(req, res, owner, repo, notePath, openCacheKey(owner, repo, shareId), ref);
     })
   );
 
   // ==========================================
-  // Tier 2 — Repo keys registration
+  // Tier 2 — Repo ID registration
   // ==========================================
 
   app.post(
@@ -373,14 +373,14 @@ function gitShareEndpoints(app: express.Express) {
     handleErrors(async (req, res) => {
       const session = req.sessionUser!;
       const body = req.body as Record<string, unknown>;
-      const id = asTrimmedString(body.id);
+      const repoId = asTrimmedString(body.repoId);
       const key = asTrimmedString(body.key);
       const owner = asTrimmedString(body.owner);
       const repo = asTrimmedString(body.repo);
 
-      if (!id || !key || !owner || !repo) throw HttpError(400, 'missing required fields: id, key, owner, repo');
+      if (!repoId || !key || !owner || !repo) throw HttpError(400, 'missing required fields: repoId, key, owner, repo');
       if (!isValidOwnerRepo(owner, repo)) throw HttpError(400, 'invalid owner/repo');
-      if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) throw HttpError(400, 'invalid key id');
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(repoId)) throw HttpError(400, 'invalid repo id');
       if (!/^[0-9a-f]{64}$/i.test(key)) throw HttpError(400, 'key must be 64 hex characters (256-bit)');
 
       const REPO_ACCESS_DENIED = 'repository not found or insufficient permissions';
@@ -398,7 +398,7 @@ function gitShareEndpoints(app: express.Express) {
         throw HttpError(404, REPO_ACCESS_DENIED);
       }
 
-      // Fetch .shares/.key from repo and verify matching id
+      // Fetch .shares/.key from repo and verify matching repoId
       const keyFileRes = await installationRequest(
         env,
         installationId,
@@ -410,24 +410,24 @@ function gitShareEndpoints(app: express.Express) {
       if (keyFileRes.status === 404) throw HttpError(404, REPO_ACCESS_DENIED);
       if (!keyFileRes.ok) throw HttpError(404, REPO_ACCESS_DENIED);
 
-      let keyFileContent: { id?: string; key?: string };
+      let keyFileContent: { repoId?: string; key?: string };
       try {
         keyFileContent = JSON.parse(await keyFileRes.text());
       } catch {
         throw HttpError(404, REPO_ACCESS_DENIED);
       }
-      if (!keyFileContent || keyFileContent.id !== id || keyFileContent.key !== key) {
+      if (!keyFileContent || keyFileContent.repoId !== repoId || keyFileContent.key !== key) {
         throw HttpError(404, REPO_ACCESS_DENIED);
       }
 
-      // Reject if keyId already registered for a different repo (prevent DoS via collision)
-      const existing = repoKeyStore.get(id);
+      // Reject if repoId already registered for a different repo (prevent DoS via collision)
+      const existing = repoKeyStore.get(repoId);
       if (existing && (existing.owner !== owner || existing.repo !== repo)) {
         throw HttpError(404, REPO_ACCESS_DENIED);
       }
 
       await repoKeyStore.set({
-        id,
+        repoId,
         key,
         owner,
         repo,
@@ -435,7 +435,7 @@ function gitShareEndpoints(app: express.Express) {
         registeredBy: session.login,
       });
 
-      console.log(`[vibenote] repo key registered for ${owner}/${repo} by ${session.login}`);
+      console.log(`[vibenote] repo id registered for ${owner}/${repo} by ${session.login}`);
       res.status(201).json({ ok: true });
     })
   );
