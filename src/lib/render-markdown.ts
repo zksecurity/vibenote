@@ -124,6 +124,8 @@ function configureMarkedOnce() {
     },
     tokenizer(src) {
       if (src[0] !== '$' || src[1] === '$') return undefined;
+      // Don't match currency: $ followed by a digit or comma (e.g. $1,200)
+      if (src[1] !== undefined && /[\d,]/.test(src[1])) return undefined;
       let index = 1;
       let closing = -1;
       while (index < src.length) {
