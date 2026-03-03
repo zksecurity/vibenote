@@ -38,10 +38,11 @@ vibenote.dev/s/<share-id>  →  api.vibenote.dev/v1/share-links/<share-id>/conte
 vibenote.dev/s/<owner>/<repo>/<shareId>  →  api.vibenote.dev/v1/git-shares/<owner>/<repo>/<shareId>/content
 ```
 
-### Git-native Tier 2 (encrypted shares — opaque URL, repo identity hidden)
+### Git-native Tier 2 (opaque shares — repo identity hidden)
 ```
-vibenote.dev/s/<repoId>/<blob>  →  api.vibenote.dev/v1/git-shares/enc/<repoId>/<blob>/content
+vibenote.dev/s/<segment>  →  api.vibenote.dev/v1/git-shares/<segment>/content
 ```
+Where `<segment>` is a single 32-char base64url string encoding both repoId (8 bytes) and shareId (16 bytes).
 
 All content endpoints return raw `text/markdown`.
 
@@ -64,7 +65,7 @@ Shares are created by committing a JSON descriptor to `.shares/` in the repo:
 
 The token becomes part of the share URL. **See the security rules below before choosing a token.**
 
-For encrypted (Tier 2) shares, the repo must have a key registered. The share URL is then constructed by encrypting `{owner, repo, token}` with AES-256-GCM using the repo key.
+For opaque (Tier 2) shares, the repo must have a repoId registered with the server. The share URL segment is then `base64url(repoId_bytes[8] || shareId_bytes[16])`, constructable locally without a server round-trip.
 
 ### ⚠️ Security: Token Entropy is MANDATORY on Private Repos
 

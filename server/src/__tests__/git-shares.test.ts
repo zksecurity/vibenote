@@ -106,22 +106,11 @@ function setupRepoMock(
 }
 
 /**
- * Encrypt a share payload into a base64url blob (inverse of decryptBlob).
+ * Build a Tier 2 opaque URL segment from raw repoId and shareId bytes.
+ * segment = base64url(repoIdBytes[8] || shareIdBytes[16])
  */
-function encryptBlob(
-  keyHex: string,
-  payload: { owner: string; repo: string; shareId: string },
-): string {
-  const key = Buffer.from(keyHex, 'hex');
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-  const plaintext = JSON.stringify(payload);
-  const encrypted = Buffer.concat([
-    cipher.update(plaintext, 'utf8'),
-    cipher.final(),
-  ]);
-  const authTag = cipher.getAuthTag();
-  return Buffer.concat([iv, encrypted, authTag]).toString('base64url');
+function makeOpaqueSegment(repoIdBytes: Buffer, shareIdBytes: Buffer): string {
+  return Buffer.concat([repoIdBytes, shareIdBytes]).toString('base64url');
 }
 
 // --- Test server setup ---
@@ -240,20 +229,19 @@ describe('Tier 1 — Open shares', () => {
   });
 });
 
-// --- Tier 2: Encrypted shares ---
+// --- Tier 2: Opaque shares ---
 
-describe('Tier 2 — Encrypted shares', () => {
-  const KEY_HEX = crypto.randomBytes(32).toString('hex');
-  const REPO_ID = 'test-repo-id';
+describe('Tier 2 — Opaque shares', () => {
+  const REPO_ID_BYTES = crypto.randomBytes(8);
+  const REPO_ID = REPO_ID_BYTES.toString('base64url'); // 11 chars
+  const SHARE_ID_BYTES = crypto.randomBytes(16);
+  const SHARE_ID = SHARE_ID_BYTES.toString('base64url'); // 22 chars
+  const SEGMENT = makeOpaqueSegment(REPO_ID_BYTES, SHARE_ID_BYTES); // 32 chars
   const ENC_OWNER = 'enc-owner';
   const ENC_REPO = 'enc-repo';
-  const ENC_SHARE_ID = 'enc-share-id';
 
-  // Register a repo id in the repo key store before tier 2 tests
+  // Register the repoId in the key store before tier 2 tests
   beforeAll(async () => {
-    // We need to register the repo id. Since the store is internal to git-shares.ts,
-    // we go through the POST /v1/repo-keys endpoint.
-    // Set up mocks for the registration flow.
     mockGetRepoInstallationId.mockResolvedValue(INSTALLATION_ID);
     mockInstallationRequest.mockImplementation(
       async (_env: any, _installationId: number, urlPath: string) => {
@@ -267,7 +255,7 @@ describe('Tier 2 — Encrypted shares', () => {
         // .shares/.key file
         if (urlPath.includes('.shares/.key')) {
           return new Response(
-            JSON.stringify({ repoId: REPO_ID, key: KEY_HEX }),
+            JSON.stringify({ repoId: REPO_ID }),
             { status: 200, headers: { 'Content-Type': 'application/json' } },
           );
         }
@@ -288,29 +276,18 @@ describe('Tier 2 — Encrypted shares', () => {
         'Content-Type': 'application/json',
         Authorization: 'Bearer fake-token',
       },
-      body: JSON.stringify({
-        repoId: REPO_ID,
-        key: KEY_HEX,
-        owner: ENC_OWNER,
-        repo: ENC_REPO,
-      }),
+      body: JSON.stringify({ repoId: REPO_ID, owner: ENC_OWNER, repo: ENC_REPO }),
     });
     expect(res.status).toBe(201);
   });
 
-  it('7. happy path: encrypted share serves markdown', async () => {
-    const blob = encryptBlob(KEY_HEX, {
-      owner: ENC_OWNER,
-      repo: ENC_REPO,
-      shareId: ENC_SHARE_ID,
-    });
-
+  it('7. happy path: opaque share serves markdown', async () => {
     setupRepoMock(ENC_OWNER, ENC_REPO, {
-      [`.shares/${ENC_SHARE_ID}.json`]: JSON.stringify({ path: 'notes/encrypted.md' }),
-      'notes/encrypted.md': MARKDOWN_BODY,
+      [`.shares/${SHARE_ID}.json`]: JSON.stringify({ path: 'notes/private.md' }),
+      'notes/private.md': MARKDOWN_BODY,
     });
 
-    const res = await fetch(`${baseUrl}/v1/git-shares/enc/${REPO_ID}/${blob}/content`);
+    const res = await fetch(`${baseUrl}/v1/git-shares/${SEGMENT}/content`);
 
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/markdown');
@@ -318,24 +295,23 @@ describe('Tier 2 — Encrypted shares', () => {
     expect(body).toBe(MARKDOWN_BODY);
   });
 
-  it('8. invalid repoId: returns 404', async () => {
-    const blob = encryptBlob(KEY_HEX, {
-      owner: ENC_OWNER,
-      repo: ENC_REPO,
-      shareId: ENC_SHARE_ID,
-    });
+  it('8. invalid repoId in segment: returns 404', async () => {
+    // Construct a segment with an unregistered repoId
+    const unknownRepoId = crypto.randomBytes(8);
+    const segment = makeOpaqueSegment(unknownRepoId, SHARE_ID_BYTES);
 
-    const res = await fetch(`${baseUrl}/v1/git-shares/enc/nonexistent-repo-id/${blob}/content`);
+    const res = await fetch(`${baseUrl}/v1/git-shares/${segment}/content`);
 
     expect(res.status).toBe(404);
     const json = await res.json();
     expect(json.error).toBe('share not found');
   });
 
-  it('9. tampered blob: returns 404 not 400', async () => {
-    const res = await fetch(
-      `${baseUrl}/v1/git-shares/enc/${REPO_ID}/dGhpc2lzZ2FyYmxlZGRhdGFub3RyZWFsbHllbmNyeXB0ZWQ/content`,
-    );
+  it('9. wrong segment length: returns 404', async () => {
+    // A segment that doesn't decode to exactly 24 bytes
+    const shortSegment = crypto.randomBytes(12).toString('base64url');
+
+    const res = await fetch(`${baseUrl}/v1/git-shares/${shortSegment}/content`);
 
     expect(res.status).toBe(404);
     const json = await res.json();
@@ -343,52 +319,30 @@ describe('Tier 2 — Encrypted shares', () => {
   });
 
   it('10. metadata does not leak internal details', async () => {
-    const blob = encryptBlob(KEY_HEX, {
-      owner: ENC_OWNER,
-      repo: ENC_REPO,
-      shareId: ENC_SHARE_ID,
-    });
-
     setupRepoMock(ENC_OWNER, ENC_REPO, {
-      [`.shares/${ENC_SHARE_ID}.json`]: JSON.stringify({ path: 'notes/encrypted.md' }),
-      'notes/encrypted.md': MARKDOWN_BODY,
+      [`.shares/${SHARE_ID}.json`]: JSON.stringify({ path: 'notes/private.md' }),
+      'notes/private.md': MARKDOWN_BODY,
     });
 
-    const res = await fetch(`${baseUrl}/v1/git-shares/enc/${REPO_ID}/${blob}`);
+    const res = await fetch(`${baseUrl}/v1/git-shares/${SEGMENT}`);
 
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json).toEqual({ ok: true });
     expect(json).not.toHaveProperty('owner');
     expect(json).not.toHaveProperty('repo');
-    expect(json).not.toHaveProperty('path');
     expect(json).not.toHaveProperty('shareId');
-  });
-
-  it('11. wrong repo in blob: returns 404', async () => {
-    // Encrypt blob with a different owner/repo than what's registered for this repoId
-    const blob = encryptBlob(KEY_HEX, {
-      owner: 'wrong-owner',
-      repo: 'wrong-repo',
-      shareId: ENC_SHARE_ID,
-    });
-
-    const res = await fetch(`${baseUrl}/v1/git-shares/enc/${REPO_ID}/${blob}/content`);
-
-    expect(res.status).toBe(404);
-    const json = await res.json();
-    expect(json.error).toBe('share not found');
   });
 });
 
 // --- Repo keys ---
 
 describe('Repo keys', () => {
-  it('12. repoId collision rejected for different repo', async () => {
-    const collisionRepoId = 'collision-repo-id';
-    const collisionKeyHex = crypto.randomBytes(32).toString('hex');
+  it('11. repoId collision rejected for different repo', async () => {
+    const collisionRepoIdBytes = crypto.randomBytes(8);
+    const collisionRepoId = collisionRepoIdBytes.toString('base64url');
 
-    // First: register repo id for repo A
+    // First: register repoId for repo A
     mockGetRepoInstallationId.mockResolvedValue(INSTALLATION_ID);
     mockInstallationRequest.mockImplementation(
       async (_env: any, _installationId: number, urlPath: string) => {
@@ -399,10 +353,7 @@ describe('Repo keys', () => {
           });
         }
         if (urlPath.includes('.shares/.key')) {
-          return new Response(
-            JSON.stringify({ repoId: collisionRepoId, key: collisionKeyHex }),
-            { status: 200 },
-          );
+          return new Response(JSON.stringify({ repoId: collisionRepoId }), { status: 200 });
         }
         return new Response('not found', { status: 404 });
       },
@@ -417,32 +368,16 @@ describe('Repo keys', () => {
 
     const res1 = await fetch(`${baseUrl}/v1/repo-keys`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer fake-token',
-      },
-      body: JSON.stringify({
-        repoId: collisionRepoId,
-        key: collisionKeyHex,
-        owner: 'repo-a-owner',
-        repo: 'repo-a',
-      }),
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer fake-token' },
+      body: JSON.stringify({ repoId: collisionRepoId, owner: 'repo-a-owner', repo: 'repo-a' }),
     });
     expect(res1.status).toBe(201);
 
     // Second: try to register same repoId for repo B — should fail
     const res2 = await fetch(`${baseUrl}/v1/repo-keys`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer fake-token',
-      },
-      body: JSON.stringify({
-        repoId: collisionRepoId,
-        key: collisionKeyHex,
-        owner: 'repo-b-owner',
-        repo: 'repo-b',
-      }),
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer fake-token' },
+      body: JSON.stringify({ repoId: collisionRepoId, owner: 'repo-b-owner', repo: 'repo-b' }),
     });
     expect(res2.status).toBe(404);
     const json = await res2.json();
@@ -453,7 +388,7 @@ describe('Repo keys', () => {
 // --- Error indistinguishability ---
 
 describe('Error indistinguishability', () => {
-  it('13. all error responses have identical status and message', async () => {
+  it('12. all error responses have identical status and message', async () => {
     // Collect error responses from different failure modes
 
     // a) Invalid share id (share file not found)

@@ -3,7 +3,6 @@ import path from 'node:path';
 
 export type RepoKeyRecord = {
   repoId: string;
-  key: string;
   owner: string;
   repo: string;
   registeredAt: string;
