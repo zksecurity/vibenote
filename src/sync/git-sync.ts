@@ -21,6 +21,7 @@ import {
   moveFilePath,
   debugLog,
   computeSyncedHash,
+  kindFromPath,
 } from '../storage/local';
 import { mergeMarkdown } from '../merge/merge';
 import { readCachedBlob, writeCachedBlob } from '../storage/blob-cache';
@@ -34,7 +35,6 @@ type RemoteConfig = { owner: string; repo: string; branch: string };
 type CommitResponse = { commitSha: string; blobShas: Record<string, string> };
 
 const GITHUB_API_BASE = 'https://api.github.com';
-const BINARY_EXTENSIONS = new Set<string>(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif']);
 
 type RepoFileEntry = { path: string; sha: string; kind: FileKind };
 
@@ -67,7 +67,7 @@ export async function repoExists(owner: string, repo: string): Promise<boolean> 
 }
 
 export async function pullRepoFile(config: RemoteConfig, path: string): Promise<RemoteFile | null> {
-  const kind = fileKindFromPath(path);
+  const kind = kindFromPath(path);
   if (!kind) return null;
   let branch = config.branch || 'main';
   let token = await ensureFreshAccessToken();
@@ -243,8 +243,8 @@ export async function listRepoFiles(config: RemoteConfig): Promise<RepoFileEntry
       let path = e.path;
       let sha = e.sha;
       if (type !== 'blob' || !path || !sha) continue;
-      const kind = fileKindFromPath(path);
-      // file is filtered out, because it is not a supported file type
+      const kind = kindFromPath(path);
+      // file is filtered out if its type is unrecognised (unknown extension)
       if (!kind) continue;
       results.push({ path, sha, kind });
     }
@@ -705,19 +705,7 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return btoa(binary);
 }
 
-function fileKindFromPath(path: string): FileKind | null {
-  // .shares/ files are plain-text share descriptors (share files and .repo-id)
-  if (path.startsWith('.shares/')) return 'text';
-  const idx = path.lastIndexOf('.');
-  if (idx < 0 || idx === path.length - 1) return null;
-  const ext = path
-    .slice(idx + 1)
-    .toLowerCase()
-    .trim();
-  if (ext === 'md') return 'markdown';
-  if (BINARY_EXTENSIONS.has(ext)) return 'binary';
-  return null;
-}
+
 
 function hashText(text: string): string {
   let h = 5381;
