@@ -155,7 +155,7 @@ Simpler for agents and humans to create — `echo "notes/foo.md" > .shares/<shar
 - [x] Update share viewer to handle new URL formats
 - [x] Route `/s/<owner>/<repo>/<shareId>` → tier 1 API
 - [x] Route `/s/<segment>` → tier 2 API
-- [ ] Delete legacy API which is no longer supported by the UI
+- [x] Delete legacy API which is no longer supported by the UI
 
 ### Task 7: Frontend — Git-native share creation
 
@@ -180,14 +180,13 @@ Share creation flow:
 
 Once Task 7 is complete, the old server-side share store is fully superseded.
 
-- [ ] Remove `getShareLinkForNote`, `createShareLink`, `revokeShareLink` from `src/lib/backend.ts`
-- [ ] Remove old share state management from `src/data.ts`
-- [ ] Remove old `/v1/shares` and `/v1/share-links/:id` endpoints from `server/src/sharing.ts`
-- [ ] Remove `server/src/share-store.ts`
-- [ ] Remove `server/data/shares.json`
+- [x] Remove `getShareLinkForNote`, `createShareLink`, `revokeShareLink` from `src/lib/backend.ts`
+- [x] Remove old share state management from `src/data.ts`
+- [x] Remove old `/v1/shares` and `/v1/share-links/:id` endpoints from `server/src/sharing.ts`
+- [x] Remove `server/src/share-store.ts`
+- [x] Remove `server/data/shares.json`
 
 ### Task 10: Skill doc & tooling
 
-- [ ] Update `skills/vibenote/SKILL.md` with new sharing workflow
-- [ ] Helper script or instructions for generating `.shares/.repo-id` and opaque URLs
-- [ ] Document how agents can create shares purely via git
+- [x] Update `skills/vibenote/SKILL.md` with new sharing workflow
+- [x] Document how agents can create shares purely via git (covered in SKILL.md)
