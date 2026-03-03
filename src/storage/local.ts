@@ -959,7 +959,8 @@ function normalizeMeta(raw: unknown): FileMeta | null {
   let path = stored.path.replace(/^\/+/g, '').replace(/\/+$/g, '') || stored.path;
   let updatedAt =
     typeof stored.updatedAt === 'number' && Number.isFinite(stored.updatedAt) ? stored.updatedAt : Date.now();
-  let inferredKind = typeof stored.kind === 'string' ? stored.kind : 'markdown';
+  // Fall back to path-based inference when no kind is stored (e.g. legacy data).
+  let inferredKind = typeof stored.kind === 'string' ? stored.kind : inferKindFromPath(path);
   return { id: stored.id, path, updatedAt, kind: inferredKind };
 }
 
