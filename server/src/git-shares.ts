@@ -247,7 +247,8 @@ function gitShareEndpoints(app: express.Express) {
     handleErrors(async (req, res) => {
       const { owner, repo, shareId } = getOpaqueShareParams(req);
       await fetchSharePath(owner, repo, shareId); // validate share exists
-      res.json({ ok: true });
+      // Return owner (repo owner name) but not repo or shareId — URL stays opaque.
+      res.json({ owner });
     })
   );
 

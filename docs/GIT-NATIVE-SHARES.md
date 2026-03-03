@@ -152,10 +152,10 @@ Simpler for agents and humans to create — `echo "notes/foo.md" > .shares/<shar
 
 ### Task 6: Frontend — Share viewer updates
 
-- [ ] Update share viewer to handle new URL formats
-- [ ] Route `/s/<owner>/<repo>/<shareId>` → tier 1 API
-- [ ] Route `/s/<segment>` → tier 2 API
-- [ ] Delete legacy API which is no longer supported by the UI
+- [x] Update share viewer to handle new URL formats
+- [x] Route `/s/<owner>/<repo>/<shareId>` → tier 1 API
+- [x] Route `/s/<segment>` → tier 2 API
+- [x] Delete legacy API which is no longer supported by the UI
 
 ### Task 7: Skill doc & tooling
 
