@@ -104,16 +104,3 @@ curl -X POST https://api.vibenote.dev/v1/repo-id \
 
 The opaque URL segment is then `base64url(repoId_bytes[8] || shareId_bytes[16])`, constructable locally without further server calls.
 
-## Share Content API
-
-Base URL: `https://api.vibenote.dev` — all endpoints are unauthenticated.
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/v1/git-shares/<owner>/<repo>/<shareId>` | Share metadata (owner field) |
-| `GET` | `/v1/git-shares/<owner>/<repo>/<shareId>/content` | Raw markdown of the shared note |
-| `GET` | `/v1/git-shares/<owner>/<repo>/<shareId>/assets?path=<rel>` | Assets (images) referenced in the note |
-| `GET` | `/v1/git-shares/<segment>` | Tier 2: share metadata |
-| `GET` | `/v1/git-shares/<segment>/content` | Tier 2: raw markdown |
-| `GET` | `/v1/git-shares/<segment>/assets?path=<rel>` | Tier 2: assets |
-| `POST` | `/v1/repo-id` | Register a repoId for Tier 2 opaque URLs |
