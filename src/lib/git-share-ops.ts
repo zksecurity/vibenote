@@ -7,12 +7,13 @@
 // Opaque share URLs: <origin>/s/<segment>
 //   segment = base64url(repoIdBytes[8] ∥ shareIdBytes[16]) = 32 chars
 //
-// Known share info is cached in localStorage to avoid re-reading from GitHub on
-// every note selection. Shares created on other devices won't appear until the
-// user explicitly creates a new one (acceptable limitation for now).
+// Share files participate in the regular git sync (FileKind 'text'), so the
+// local store is always up to date after a sync. lookupCachedShare is a pure
+// in-memory scan — no network call needed.
 
 import { ensureFreshAccessToken, getApiBase } from '../auth/app-auth';
 import { normalizePath } from './util';
+import { getRepoStore, markSynced, hashText } from '../storage/local';
 
 export type { GitShareLink };
 export { createGitShare, revokeGitShare, lookupCachedShare };
@@ -57,76 +58,34 @@ function computeOpaqueSegment(repoId: string, shareId: string): string {
   return toBase64url(combined);
 }
 
-// --- localStorage share cache ---
-//
-// Key:   vibenote:share-cache:<owner>/<repo>  (lowercase)
-// Value: { repoId: string; shares: { [normalizedNotePath]: shareId } }
+// --- Local store share lookup ---
+// Scans .shares/ files in the local store (populated and kept fresh by the
+// regular git sync) to find an existing share for a given note path.
+// Entirely in-memory — no network call.
 
-type ShareCache = {
-  repoId: string;
-  shares: Record<string, string>;
-};
-
-function shareCacheKey(owner: string, repo: string): string {
-  return `vibenote:share-cache:${owner.toLowerCase()}/${repo.toLowerCase()}`;
-}
-
-function readShareCache(owner: string, repo: string): ShareCache | null {
-  try {
-    const raw = localStorage.getItem(shareCacheKey(owner, repo));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as unknown;
-    if (
-      !parsed ||
-      typeof parsed !== 'object' ||
-      typeof (parsed as Record<string, unknown>).repoId !== 'string' ||
-      typeof (parsed as Record<string, unknown>).shares !== 'object'
-    ) {
-      return null;
-    }
-    return parsed as ShareCache;
-  } catch {
-    return null;
-  }
-}
-
-function writeShareCache(owner: string, repo: string, cache: ShareCache): void {
-  try {
-    localStorage.setItem(shareCacheKey(owner, repo), JSON.stringify(cache));
-  } catch {
-    // ignore (storage quota exceeded, private browsing, etc.)
-  }
-}
-
-// Returns the GitShareLink for a note if one is cached, otherwise null.
-// Synchronous — safe to call on every note selection.
 function lookupCachedShare(owner: string, repo: string, notePath: string): GitShareLink | null {
-  const cache = readShareCache(owner, repo);
-  if (!cache) return null;
-  const shareId = cache.shares[normalizePath(notePath)];
-  if (!shareId) return null;
-  const segment = computeOpaqueSegment(cache.repoId, shareId);
-  return { shareId, url: `${window.location.origin}/s/${segment}` };
-}
+  const store = getRepoStore(`${owner}/${repo}`);
+  const files = store.listFiles();
+  const normalized = normalizePath(notePath);
 
-function setCachedShare(
-  owner: string,
-  repo: string,
-  repoId: string,
-  notePath: string,
-  shareId: string
-): void {
-  const cache = readShareCache(owner, repo) ?? { repoId, shares: {} };
-  cache.repoId = repoId;
-  cache.shares[normalizePath(notePath)] = shareId;
-  writeShareCache(owner, repo, cache);
-}
+  // Find .shares/.repo-id first — needed to compute the opaque URL.
+  const repoIdMeta = files.find((f) => f.path === '.shares/.repo-id');
+  if (!repoIdMeta) return null;
+  const repoIdFile = store.loadFileById(repoIdMeta.id);
+  if (!repoIdFile) return null;
+  const repoId = repoIdFile.content.trim();
 
-function deleteCachedShare(owner: string, repo: string, notePath: string): void {
-  const cache = readShareCache(owner, repo);
-  if (!cache) return;
-  delete cache.shares[normalizePath(notePath)];
-  writeShareCache(owner, repo, cache);
+  // Find the share file whose content matches the note path.
+  for (const meta of files) {
+    if (!meta.path.startsWith('.shares/') || meta.path === '.shares/.repo-id') continue;
+    const file = store.loadFileById(meta.id);
+    if (!file) continue;
+    if (normalizePath(file.content.trim()) !== normalized) continue;
+    const shareId = meta.path.slice('.shares/'.length);
+    const url = `${window.location.origin}/s/${computeOpaqueSegment(repoId, shareId)}`;
+    return { shareId, url };
+  }
+  return null;
 }
 
 // --- GitHub Contents API helpers ---
@@ -177,6 +136,7 @@ async function readRepoFile(
   return { text: base64ToText(content), sha };
 }
 
+// Returns the blob SHA of the newly created file.
 async function putRepoFile(
   token: string,
   owner: string,
@@ -184,7 +144,7 @@ async function putRepoFile(
   path: string,
   text: string,
   message: string
-): Promise<void> {
+): Promise<string> {
   const res = await fetch(repoContentsUrl(owner, repo, path), {
     method: 'PUT',
     headers: {
@@ -195,6 +155,14 @@ async function putRepoFile(
     body: JSON.stringify({ message, content: textToBase64(text) }),
   });
   if (!res.ok) throw new Error(`GitHub write failed (${res.status}): ${path}`);
+  const json = await res.json() as Record<string, unknown>;
+  // GitHub returns { content: { sha } } — the blob SHA of the created file
+  const contentObj = json.content;
+  const sha =
+    contentObj && typeof contentObj === 'object' && typeof (contentObj as Record<string, unknown>).sha === 'string'
+      ? (contentObj as Record<string, unknown>).sha as string
+      : '';
+  return sha;
 }
 
 async function deleteRepoFile(
@@ -230,27 +198,35 @@ async function registerRepoId(repoId: string, owner: string, repo: string): Prom
 }
 
 // --- Ensure repoId ---
-// Read .shares/.repo-id from the repo; generate and commit one if absent.
-// Updates the localStorage cache with the repoId.
+// Read .shares/.repo-id from the local store (preferred, populated by sync) or
+// directly from the GitHub API. If absent, generate and commit a fresh one.
 
 async function ensureRepoId(token: string, owner: string, repo: string): Promise<string> {
-  // Check cache first to avoid a round-trip when possible
-  const cache = readShareCache(owner, repo);
-  if (cache?.repoId) return cache.repoId;
+  const slug = `${owner}/${repo}`;
+  const store = getRepoStore(slug);
 
+  // Fast path: already in local store from a previous sync or creation
+  const localMeta = store.findMetaByPath('.shares/.repo-id');
+  if (localMeta) {
+    const local = store.loadFileById(localMeta.id);
+    if (local?.content) return local.content.trim();
+  }
+
+  // Slow path: try to read from GitHub (another device may have committed it)
   const existing = await readRepoFile(token, owner, repo, '.shares/.repo-id');
   if (existing) {
     const repoId = existing.text.trim();
-    const updated = cache ?? { repoId, shares: {} };
-    updated.repoId = repoId;
-    writeShareCache(owner, repo, updated);
+    // Add to local store so future lookups are instant
+    const id = store.createFile('.shares/.repo-id', repoId, { kind: 'text' });
+    markSynced(slug, id, { remoteSha: existing.sha, syncedHash: hashText(repoId) });
     return repoId;
   }
 
-  // First share ever in this repo — generate and commit a fresh repoId
+  // First share ever in this repo — generate, commit, and store locally
   const repoId = generateRepoId();
-  await putRepoFile(token, owner, repo, '.shares/.repo-id', repoId, 'shares: initialize repo id');
-  writeShareCache(owner, repo, { repoId, shares: {} });
+  const sha = await putRepoFile(token, owner, repo, '.shares/.repo-id', repoId, 'shares: initialize repo id');
+  const id = store.createFile('.shares/.repo-id', repoId, { kind: 'text' });
+  markSynced(slug, id, { remoteSha: sha, syncedHash: hashText(repoId) });
   return repoId;
 }
 
@@ -259,17 +235,19 @@ async function ensureRepoId(token: string, owner: string, repo: string): Promise
 async function createGitShare(owner: string, repo: string, notePath: string): Promise<GitShareLink> {
   const token = await ensureFreshAccessToken();
   if (!token) throw new Error('Not authenticated — sign in to share notes.');
+  const slug = `${owner}/${repo}`;
 
   // Ensure .shares/.repo-id exists in the repo and is registered with the backend
   const repoId = await ensureRepoId(token, owner, repo);
   await registerRepoId(repoId, owner, repo);
 
-  // Commit a new share file for this note
+  // Commit a new share file and mirror it to the local store immediately
   const shareId = generateShareId();
-  await putRepoFile(token, owner, repo, `.shares/${shareId}`, notePath, `share: ${notePath}`);
+  const sha = await putRepoFile(token, owner, repo, `.shares/${shareId}`, notePath, `share: ${notePath}`);
+  const store = getRepoStore(slug);
+  const id = store.createFile(`.shares/${shareId}`, notePath, { kind: 'text' });
+  markSynced(slug, id, { remoteSha: sha, syncedHash: hashText(notePath) });
 
-  // Cache locally and return the opaque URL
-  setCachedShare(owner, repo, repoId, notePath, shareId);
   const url = `${window.location.origin}/s/${computeOpaqueSegment(repoId, shareId)}`;
   return { shareId, url };
 }
@@ -295,5 +273,9 @@ async function revokeGitShare(
       `share: revoke ${notePath}`
     );
   }
-  deleteCachedShare(owner, repo, notePath);
+
+  // Remove from local store — sync tombstone will be a no-op since the file
+  // is already gone from GitHub (the sync handles missing remote gracefully).
+  const store = getRepoStore(`${owner}/${repo}`);
+  store.deleteFile(`.shares/${shareId}`);
 }

@@ -174,7 +174,7 @@ Share creation flow:
 - [x] Implement share creation flow as above
 - [x] Update `ShareDialog` to show the computed opaque URL
 - [x] Revoking a share: delete `.shares/<shareId>` from the repo via GitHub Contents API
-- [x] Looking up an existing share: check localStorage cache (synchronous, no network call)
+- [x] Looking up an existing share: scan local store (populated by sync, in-memory, no network call)
 
 ### Task 8: Frontend — Remove legacy sharing system
 

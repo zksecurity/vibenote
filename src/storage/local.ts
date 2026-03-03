@@ -1,9 +1,9 @@
-// Local storage persistence for repo files (markdown notes plus binary assets).
+// Local storage persistence for repo files (markdown notes, binary assets, and plain-text share descriptors).
 import { normalizePath } from '../lib/util';
 import { logError } from '../lib/logging';
 import type { RemoteFile } from '../sync/git-sync';
 
-export type { FileKind, FileMeta, RepoFile, MarkdownFile, BinaryFile, AssetUrlFile, RepoStoreSnapshot };
+export type { FileKind, FileMeta, RepoFile, MarkdownFile, BinaryFile, AssetUrlFile, TextFile, RepoStoreSnapshot };
 
 export {
   basename,
@@ -12,11 +12,12 @@ export {
   isMarkdownFile,
   isBinaryFile,
   isAssetUrlFile,
+  isTextFile,
   debugLog,
   setDebugEnabled,
 };
 
-type FileKind = 'markdown' | 'binary' | 'asset-url';
+type FileKind = 'markdown' | 'binary' | 'asset-url' | 'text';
 
 /**
  * Backwards-compatible serialized format for file metadata
@@ -53,6 +54,8 @@ type RepoFile = FileMeta & {
 type MarkdownFile = RepoFile & { kind: 'markdown' };
 type BinaryFile = RepoFile & { kind: 'binary' };
 type AssetUrlFile = RepoFile & { kind: 'asset-url' };
+// Plain-text files — used for .shares/ share descriptors and .shares/.repo-id.
+type TextFile = RepoFile & { kind: 'text' };
 
 function isMarkdownFile(doc: RepoFile): doc is MarkdownFile {
   return doc.kind === 'markdown';
@@ -64,6 +67,10 @@ function isBinaryFile(doc: RepoFile): doc is BinaryFile {
 
 function isAssetUrlFile(doc: RepoFile): doc is AssetUrlFile {
   return doc.kind === 'asset-url';
+}
+
+function isTextFile(doc: RepoFile): doc is TextFile {
+  return doc.kind === 'text';
 }
 
 function serializeIndex(index: FileMeta[]): string {
@@ -940,6 +947,7 @@ function extractExtensionWithDot(baseName: string): string {
 }
 
 function inferKindFromPath(path: string): FileKind {
+  if (path.startsWith('.shares/')) return 'text';
   return /\.md$/i.test(path) ? 'markdown' : 'binary';
 }
 
