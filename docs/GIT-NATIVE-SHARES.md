@@ -160,14 +160,21 @@ Simpler for agents and humans to create — `echo "notes/foo.md" > .shares/<shar
 ### Task 7: Frontend — Git-native share creation
 
 Replace the server-side share creation flow with a pure-git one. Instead of `POST /v1/shares`,
-the UI writes `.shares/<shareId>` directly to the repo via the GitHub Contents API, computes the
-opaque URL client-side, and registers the repoId on first use.
+the UI writes `.shares/<shareId>` directly to the repo via the GitHub Contents API and computes
+the opaque URL client-side. `POST /v1/repo-id` is idempotent, so the UI always calls it when
+creating a share — no need to track whether the repo was previously registered.
 
-- [ ] On first share in a repo: generate a random repoId, commit `.shares/.repo-id`, call `POST /v1/repo-id`
-- [ ] Generate a random shareId, compute the opaque URL segment client-side
-- [ ] Commit `.shares/<shareId>` containing the note path via GitHub Contents API
-- [ ] Update `ShareDialog` to show the computed opaque URL immediately (no server round-trip for the link)
+Share creation flow:
+1. Read `.shares/.repo-id` from the repo. If absent, generate a random repoId and commit the file.
+2. Call `POST /v1/repo-id` with the repoId (always — it's a no-op if already registered).
+3. Generate a random shareId, compute the opaque URL segment client-side.
+4. Commit `.shares/<shareId>` containing the note path.
+5. Return the opaque URL to the UI immediately — no further server round-trip needed.
+
+- [ ] Implement share creation flow as above
+- [ ] Update `ShareDialog` to show the computed opaque URL
 - [ ] Revoking a share: delete `.shares/<shareId>` from the repo via GitHub Contents API
+- [ ] Looking up an existing share: check for `.shares/<shareId>` in the repo
 
 ### Task 8: Frontend — Remove legacy sharing system
 
