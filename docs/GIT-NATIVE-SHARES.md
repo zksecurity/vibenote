@@ -129,14 +129,25 @@ The share viewer SPA at `vibenote.dev/s/...` needs to be updated to:
 - [x] `GET /v1/git-shares/:segment/assets?path=...` — assets
 - [x] Tests
 
-### Task 4: Frontend — Share viewer updates
+### Task 4: Agent-friendly repo ID registration
+
+`POST /v1/repo-id` currently requires a web session JWT, which agents can't obtain without a browser.
+Add support for GitHub token auth on this endpoint (PAT or GitHub App installation token) so an agent
+with repo write access can register a repoId without going through the UI.
+After registration, the entire share-creation flow is pure git — no further API calls needed.
+
+- [ ] Accept `Authorization: Bearer <github-token>` on `POST /v1/repo-id` in addition to session JWT
+- [ ] Verify repo write access using the provided GitHub token (same check, different credential source)
+- [ ] Tests
+
+### Task 5: Frontend — Share viewer updates
 
 - [ ] Update share viewer to handle new URL formats
 - [ ] Route `/s/<owner>/<repo>/<shareId>` → tier 1 API
 - [ ] Route `/s/<segment>` → tier 2 API
 - [ ] Delete legacy API which is no longer supported by the UI
 
-### Task 5: Skill doc & tooling
+### Task 6: Skill doc & tooling
 
 - [ ] Update `skills/vibenote/SKILL.md` with new sharing workflow
 - [ ] Helper script or instructions for generating `.shares/.repo-id` and opaque URLs
