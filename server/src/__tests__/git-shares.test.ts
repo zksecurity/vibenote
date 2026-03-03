@@ -191,7 +191,7 @@ beforeEach(() => {
 describe('Tier 1 — Open shares', () => {
   it('1. happy path: serves markdown content', async () => {
     setupRepoMock('owner', 'repo', {
-      '.shares/test-note.json': JSON.stringify({ path: 'notes/hello.md' }),
+      '.shares/test-note': 'notes/hello.md',
       'notes/hello.md': MARKDOWN_BODY,
     });
 
@@ -213,12 +213,12 @@ describe('Tier 1 — Open shares', () => {
     expect(json.error).toBe('share not found');
   });
 
-  it('3. malformed share descriptor: returns 404 not 502', async () => {
+  it('3. empty share file: returns 404', async () => {
     setupRepoMock('owner', 'repo', {
-      '.shares/bad-json.json': '{not valid json!!!',
+      '.shares/empty-share': '',
     });
 
-    const res = await fetch(`${baseUrl}/v1/git-shares/owner/repo/bad-json/content`);
+    const res = await fetch(`${baseUrl}/v1/git-shares/owner/repo/empty-share/content`);
 
     expect(res.status).toBe(404);
     const json = await res.json();
@@ -227,7 +227,7 @@ describe('Tier 1 — Open shares', () => {
 
   it('4. path traversal rejected', async () => {
     setupRepoMock('owner', 'repo', {
-      '.shares/evil.json': JSON.stringify({ path: '../../../etc/passwd' }),
+      '.shares/evil': '../../../etc/passwd',
     });
 
     const res = await fetch(`${baseUrl}/v1/git-shares/owner/repo/evil/content`);
@@ -239,7 +239,7 @@ describe('Tier 1 — Open shares', () => {
 
   it('5. non-.md path rejected', async () => {
     setupRepoMock('owner', 'repo', {
-      '.shares/evil2.json': JSON.stringify({ path: 'notes/secret.txt' }),
+      '.shares/evil2': 'notes/secret.txt',
     });
 
     const res = await fetch(`${baseUrl}/v1/git-shares/owner/repo/evil2/content`);
@@ -251,7 +251,7 @@ describe('Tier 1 — Open shares', () => {
 
   it('6. metadata endpoint does not leak path', async () => {
     setupRepoMock('owner', 'repo', {
-      '.shares/test-note.json': JSON.stringify({ path: 'notes/hello.md' }),
+      '.shares/test-note': 'notes/hello.md',
       'notes/hello.md': MARKDOWN_BODY,
     });
 
@@ -297,7 +297,7 @@ describe('Tier 2 — Opaque shares', () => {
 
   it('7. happy path: opaque share serves markdown', async () => {
     setupRepoMock(ENC_OWNER, ENC_REPO, {
-      [`.shares/${SHARE_ID}.json`]: JSON.stringify({ path: 'notes/private.md' }),
+      [`.shares/${SHARE_ID}`]: 'notes/private.md',
       'notes/private.md': MARKDOWN_BODY,
     });
 
@@ -334,7 +334,7 @@ describe('Tier 2 — Opaque shares', () => {
 
   it('10. metadata does not leak internal details', async () => {
     setupRepoMock(ENC_OWNER, ENC_REPO, {
-      [`.shares/${SHARE_ID}.json`]: JSON.stringify({ path: 'notes/private.md' }),
+      [`.shares/${SHARE_ID}`]: 'notes/private.md',
       'notes/private.md': MARKDOWN_BODY,
     });
 
@@ -392,7 +392,7 @@ describe('Assets', () => {
   it('13. tier 1: serves asset referenced in note', async () => {
     const imageData = Buffer.from('fake-png-data');
     setupRepoMock('owner', 'repo', {
-      '.shares/note-with-img.json': JSON.stringify({ path: 'notes/hello.md' }),
+      '.shares/note-with-img': 'notes/hello.md',
       'notes/hello.md': '# Hello\n\n![img](./image.png)',
       'notes/image.png': imageData.toString('binary'),
     });
@@ -405,7 +405,7 @@ describe('Assets', () => {
 
   it('14. tier 1: rejects asset not referenced in note', async () => {
     setupRepoMock('owner', 'repo', {
-      '.shares/note-no-assets.json': JSON.stringify({ path: 'notes/hello.md' }),
+      '.shares/note-no-assets': 'notes/hello.md',
       'notes/hello.md': '# Hello, no images here',
     });
 
@@ -418,7 +418,7 @@ describe('Assets', () => {
     const { REPO_ID_BYTES, SHARE_ID_BYTES, SEGMENT, ENC_OWNER, ENC_REPO, SHARE_ID } = await registerTier2Repo();
     const imageData = Buffer.from('fake-png-data');
     setupRepoMock(ENC_OWNER, ENC_REPO, {
-      [`.shares/${SHARE_ID}.json`]: JSON.stringify({ path: 'notes/private.md' }),
+      [`.shares/${SHARE_ID}`]: 'notes/private.md',
       'notes/private.md': '# Private\n\n![img](./photo.jpg)',
       'notes/photo.jpg': imageData.toString('binary'),
     });
@@ -432,7 +432,7 @@ describe('Assets', () => {
   it('16. asset cache bypassed when share descriptor changes notePath', async () => {
     // First request: note points to notes/v1.md with one image
     setupRepoMock('owner', 'repo', {
-      '.shares/changing-note.json': JSON.stringify({ path: 'notes/v1.md' }),
+      '.shares/changing-note': 'notes/v1.md',
       'notes/v1.md': '# V1\n\n![img](./old.png)',
       'notes/old.png': 'old',
       'notes/new.png': 'new',
@@ -441,7 +441,7 @@ describe('Assets', () => {
 
     // Simulate descriptor change: now points to notes/v2.md with a different image
     setupRepoMock('owner', 'repo', {
-      '.shares/changing-note.json': JSON.stringify({ path: 'notes/v2.md' }),
+      '.shares/changing-note': 'notes/v2.md',
       'notes/v2.md': '# V2\n\n![img](./new.png)',
       'notes/old.png': 'old',
       'notes/new.png': 'new',
@@ -584,21 +584,21 @@ describe('Error indistinguishability', () => {
     setupRepoMock('owner', 'repo', {});
     const resA = await fetch(`${baseUrl}/v1/git-shares/owner/repo/nonexistent/content`);
 
-    // b) Malformed JSON
+    // b) Empty share file
     setupRepoMock('owner', 'repo', {
-      '.shares/bad-json.json': 'not json at all {{{',
+      '.shares/bad-content': '',
     });
-    const resB = await fetch(`${baseUrl}/v1/git-shares/owner/repo/bad-json/content`);
+    const resB = await fetch(`${baseUrl}/v1/git-shares/owner/repo/bad-content/content`);
 
     // c) Bad path (traversal)
     setupRepoMock('owner', 'repo', {
-      '.shares/bad-path.json': JSON.stringify({ path: '../../etc/passwd' }),
+      '.shares/bad-path': '../../etc/passwd',
     });
     const resC = await fetch(`${baseUrl}/v1/git-shares/owner/repo/bad-path/content`);
 
     // d) Non-.md extension
     setupRepoMock('owner', 'repo', {
-      '.shares/bad-ext.json': JSON.stringify({ path: 'notes/file.txt' }),
+      '.shares/bad-ext': 'notes/file.txt',
     });
     const resD = await fetch(`${baseUrl}/v1/git-shares/owner/repo/bad-ext/content`);
 

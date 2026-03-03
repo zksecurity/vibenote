@@ -38,10 +38,10 @@ function isValidRepoId(repoId: string): boolean {
 
 // --- Asset cache (same pattern as sharing.ts) ---
 
-// notePath and ref are stored alongside paths so we can detect when the share
-// descriptor has changed (e.g. .shares/<id>.json pointing to a new file) and
-// avoid serving stale allowlists.
-type AssetCacheEntry = { paths: Set<string>; cachedAt: number; notePath: string; ref: string | undefined };
+// notePath is stored alongside paths so we can detect when the share descriptor
+// changed (e.g. .shares/<id> now points to a different file) and avoid serving
+// stale allowlists.
+type AssetCacheEntry = { paths: Set<string>; cachedAt: number; notePath: string };
 const assetCache = new Map<string, AssetCacheEntry>();
 const ASSET_CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -56,8 +56,7 @@ async function fetchRepoFile(
   owner: string,
   repo: string,
   filePath: string,
-  accept: string,
-  ref?: string
+  accept: string
 ): Promise<Response> {
   let installationId: number;
   try {
@@ -65,10 +64,7 @@ async function fetchRepoFile(
   } catch {
     throw HttpError(404, 'share not found');
   }
-  const pathSegment = encodeAssetPath(filePath);
-  const url = ref
-    ? `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${pathSegment}?ref=${encodeURIComponent(ref)}`
-    : `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${pathSegment}`;
+  const url = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodeAssetPath(filePath)}`;
   const res = await installationRequest(env, installationId, url, { headers: { Accept: accept } });
   if (res.status === 404) throw HttpError(404, 'share not found');
   if (!res.ok) {
@@ -80,36 +76,16 @@ async function fetchRepoFile(
   return res;
 }
 
-async function fetchShareJson(
-  owner: string,
-  repo: string,
-  shareId: string,
-  ref?: string
-): Promise<{ path: string; ref?: string }> {
+// Fetch .shares/<shareId> and return the note path it contains.
+// Share files are plain text — the entire content is just the note path.
+async function fetchSharePath(owner: string, repo: string, shareId: string): Promise<string> {
   const GENERIC = 'share not found';
-  const ghRes = await fetchRepoFile(
-    owner,
-    repo,
-    `.shares/${shareId}.json`,
-    'application/vnd.github.raw',
-    ref
-  );
-  const raw = await ghRes.text();
-  let parsed: { path?: string; ref?: string };
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw HttpError(404, GENERIC);
-  }
-  if (!parsed || typeof parsed.path !== 'string') {
-    throw HttpError(404, GENERIC);
-  }
-  const p = parsed.path;
-  if (!p || !p.toLowerCase().endsWith('.md')) throw HttpError(404, GENERIC);
-  let sanitized = p.replace(/\\/g, '/').replace(/^\/+/, '');
+  const ghRes = await fetchRepoFile(owner, repo, `.shares/${shareId}`, 'application/vnd.github.raw');
+  const raw = (await ghRes.text()).trim();
+  if (!raw || !raw.toLowerCase().endsWith('.md')) throw HttpError(404, GENERIC);
+  let sanitized = raw.replace(/\\/g, '/').replace(/^\/+/, '');
   if (sanitized.includes('..')) throw HttpError(404, GENERIC);
-  const parsedRef = typeof parsed.ref === 'string' ? parsed.ref : undefined;
-  return { path: sanitized, ref: parsedRef };
+  return sanitized;
 }
 
 // --- Opaque segment helpers (Tier 2) ---
@@ -135,9 +111,9 @@ function decodeOpaqueSegment(segment: string): { repoId: string; shareId: string
 
 // --- Shared response helpers ---
 
-function cacheAssets(cacheKey: string, notePath: string, ref: string | undefined, markdown: string): Set<string> {
+function cacheAssets(cacheKey: string, notePath: string, markdown: string): Set<string> {
   const paths = collectAssetPaths(notePath, markdown);
-  assetCache.set(cacheKey, { paths, cachedAt: Date.now(), notePath, ref });
+  assetCache.set(cacheKey, { paths, cachedAt: Date.now(), notePath });
   return paths;
 }
 
@@ -145,17 +121,16 @@ async function ensureAssetsLoaded(
   cacheKey: string,
   owner: string,
   repo: string,
-  notePath: string,
-  ref?: string
+  notePath: string
 ): Promise<Set<string>> {
   const cached = assetCache.get(cacheKey);
-  // Bypass cache if the share descriptor changed (different notePath or ref)
-  if (cached && Date.now() - cached.cachedAt <= ASSET_CACHE_TTL_MS && cached.notePath === notePath && cached.ref === ref) {
+  // Bypass cache if the share descriptor changed (different notePath)
+  if (cached && Date.now() - cached.cachedAt <= ASSET_CACHE_TTL_MS && cached.notePath === notePath) {
     return cached.paths;
   }
-  const ghRes = await fetchRepoFile(owner, repo, notePath, 'application/vnd.github.raw', ref);
+  const ghRes = await fetchRepoFile(owner, repo, notePath, 'application/vnd.github.raw');
   const markdown = await ghRes.text();
-  return cacheAssets(cacheKey, notePath, ref, markdown);
+  return cacheAssets(cacheKey, notePath, markdown);
 }
 
 async function serveContent(
@@ -163,12 +138,11 @@ async function serveContent(
   owner: string,
   repo: string,
   notePath: string,
-  cacheKey: string,
-  ref?: string
+  cacheKey: string
 ): Promise<void> {
-  const ghRes = await fetchRepoFile(owner, repo, notePath, 'application/vnd.github.raw', ref);
+  const ghRes = await fetchRepoFile(owner, repo, notePath, 'application/vnd.github.raw');
   const text = await ghRes.text();
-  cacheAssets(cacheKey, notePath, ref, text);
+  cacheAssets(cacheKey, notePath, text);
   res
     .status(200)
     .setHeader('Content-Type', 'text/markdown; charset=utf-8')
@@ -182,17 +156,16 @@ async function serveAsset(
   owner: string,
   repo: string,
   notePath: string,
-  cacheKey: string,
-  ref?: string
+  cacheKey: string
 ): Promise<void> {
   const rawPathParam = decodeURIComponent(asTrimmedString(req.query.path));
   const pathCandidate = resolveAssetPath(notePath, rawPathParam);
   if (!pathCandidate) throw HttpError(400, 'invalid asset path');
 
-  const allowedPaths = await ensureAssetsLoaded(cacheKey, owner, repo, notePath, ref);
+  const allowedPaths = await ensureAssetsLoaded(cacheKey, owner, repo, notePath);
   if (!allowedPaths.has(pathCandidate)) throw HttpError(404, 'asset not found');
 
-  const ghRes = await fetchRepoFile(owner, repo, pathCandidate, 'application/vnd.github.raw', ref);
+  const ghRes = await fetchRepoFile(owner, repo, pathCandidate, 'application/vnd.github.raw');
   const buffer = Buffer.from(await ghRes.arrayBuffer());
   const contentType = ghRes.headers.get('Content-Type') ?? 'application/octet-stream';
   const headers: Record<string, string> = {
@@ -264,8 +237,8 @@ function gitShareEndpoints(app: express.Express) {
       const params = req.params as Record<string, string | undefined>;
       const segment = (params.segment ?? '').trim();
       const { owner, repo, shareId } = getOpaqueShareParams(req);
-      const { path: notePath, ref } = await fetchShareJson(owner, repo, shareId);
-      await serveContent(res, owner, repo, notePath, opaqueCacheKey(segment), ref);
+      const notePath = await fetchSharePath(owner, repo, shareId);
+      await serveContent(res, owner, repo, notePath, opaqueCacheKey(segment));
     })
   );
 
@@ -273,7 +246,7 @@ function gitShareEndpoints(app: express.Express) {
     '/v1/git-shares/:segment',
     handleErrors(async (req, res) => {
       const { owner, repo, shareId } = getOpaqueShareParams(req);
-      await fetchShareJson(owner, repo, shareId); // validate share exists
+      await fetchSharePath(owner, repo, shareId); // validate share exists
       res.json({ ok: true });
     })
   );
@@ -284,8 +257,8 @@ function gitShareEndpoints(app: express.Express) {
       const params = req.params as Record<string, string | undefined>;
       const segment = (params.segment ?? '').trim();
       const { owner, repo, shareId } = getOpaqueShareParams(req);
-      const { path: notePath, ref } = await fetchShareJson(owner, repo, shareId);
-      await serveAsset(req, res, owner, repo, notePath, opaqueCacheKey(segment), ref);
+      const notePath = await fetchSharePath(owner, repo, shareId);
+      await serveAsset(req, res, owner, repo, notePath, opaqueCacheKey(segment));
     })
   );
 
@@ -297,8 +270,8 @@ function gitShareEndpoints(app: express.Express) {
     '/v1/git-shares/:owner/:repo/:shareId/content',
     handleErrors(async (req, res) => {
       const { owner, repo, shareId } = getOpenShareParams(req);
-      const { path: notePath, ref } = await fetchShareJson(owner, repo, shareId);
-      await serveContent(res, owner, repo, notePath, openCacheKey(owner, repo, shareId), ref);
+      const notePath = await fetchSharePath(owner, repo, shareId);
+      await serveContent(res, owner, repo, notePath, openCacheKey(owner, repo, shareId));
     })
   );
 
@@ -306,7 +279,7 @@ function gitShareEndpoints(app: express.Express) {
     '/v1/git-shares/:owner/:repo/:shareId',
     handleErrors(async (req, res) => {
       const { owner, repo, shareId } = getOpenShareParams(req);
-      await fetchShareJson(owner, repo, shareId); // validate share exists
+      await fetchSharePath(owner, repo, shareId); // validate share exists
       res.json({ owner, repo, shareId });
     })
   );
@@ -315,8 +288,8 @@ function gitShareEndpoints(app: express.Express) {
     '/v1/git-shares/:owner/:repo/:shareId/assets',
     handleErrors(async (req, res) => {
       const { owner, repo, shareId } = getOpenShareParams(req);
-      const { path: notePath, ref } = await fetchShareJson(owner, repo, shareId);
-      await serveAsset(req, res, owner, repo, notePath, openCacheKey(owner, repo, shareId), ref);
+      const notePath = await fetchSharePath(owner, repo, shareId);
+      await serveAsset(req, res, owner, repo, notePath, openCacheKey(owner, repo, shareId));
     })
   );
 
