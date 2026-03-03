@@ -145,10 +145,10 @@ After registration, the entire share-creation flow is pure git — no further AP
 Replace the JSON share descriptor with a plain-text file containing just the note path.
 Simpler for agents and humans to create — `echo "notes/foo.md" > .shares/<shareId>`.
 
-- [ ] Server: fetch `.shares/<shareId>` (no `.json` extension) and read content as the path directly
-- [ ] Drop the `ref` field (was JSON-only; always serve latest)
-- [ ] Update tests
-- [ ] Migrate existing `.shares/*.json` files in the repo
+- [x] Server: fetch `.shares/<shareId>` (no `.json` extension) and read content as the path directly
+- [x] Drop the `ref` field (was JSON-only; always serve latest)
+- [x] Update tests
+- [x] Migrate existing `.shares/*.json` files in the repo
 
 ### Task 6: Frontend — Share viewer updates
 
