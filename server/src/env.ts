@@ -19,7 +19,6 @@ type Env = {
   SESSION_JWT_SECRET: string;
   SESSION_STORE_FILE: string;
   SESSION_ENCRYPTION_KEY: string;
-  SHARE_STORE_FILE: string;
   REPO_ID_STORE_FILE: string;
   PUBLIC_VIEWER_BASE_URL: string;
 };
@@ -52,7 +51,6 @@ function getEnv(): Env {
   const SESSION_JWT_SECRET = process.env.SESSION_JWT_SECRET ?? 'dev-session-secret-change-me';
   const SESSION_STORE_FILE = process.env.SESSION_STORE_FILE ?? './server/data/sessions.json';
   const SESSION_ENCRYPTION_KEY = must('SESSION_ENCRYPTION_KEY');
-  const SHARE_STORE_FILE = process.env.SHARE_STORE_FILE ?? './server/data/shares.json';
   const REPO_ID_STORE_FILE = process.env.REPO_ID_STORE_FILE ?? './server/data/repo-ids.json';
   const PUBLIC_VIEWER_BASE_URL = process.env.PUBLIC_VIEWER_BASE_URL ?? 'https://vibenote.dev';
   const GITHUB_APP_ID = Number(must('GITHUB_APP_ID'));
@@ -74,7 +72,6 @@ function getEnv(): Env {
     SESSION_JWT_SECRET,
     SESSION_STORE_FILE,
     SESSION_ENCRYPTION_KEY,
-    SHARE_STORE_FILE,
     REPO_ID_STORE_FILE,
     PUBLIC_VIEWER_BASE_URL,
   };

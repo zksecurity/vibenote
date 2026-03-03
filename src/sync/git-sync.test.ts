@@ -182,12 +182,15 @@ describe.each(remoteScenarios)('syncBidirectional: $label', ({ configure }) => {
   });
 
   test('syncs tracked image files while ignoring unrelated blobs', async () => {
-    remote.setFile('data.json', '{"keep":true}');
+    // .xyz is an unknown extension — should be ignored by the sync
+    remote.setFile('data.xyz', 'ignored');
     remote.setFile('image.png', 'asset');
     store.createFile('OnlyNote.md', '# hello');
     await syncBidirectional(store, 'user/repo');
     const snapshot = remote.snapshot();
-    expect(snapshot.get('data.json')).toBe('{"keep":true}');
+    // Unknown extension stays on remote but is not pulled to local store
+    expect(snapshot.get('data.xyz')).toBe('ignored');
+    expect(store.listFiles().find((f) => f.path === 'data.xyz')).toBeUndefined();
     expect(snapshot.get('image.png')).toBe('asset');
     expect(snapshot.get('OnlyNote.md')).toBe('# hello');
     const files = store.listFiles();

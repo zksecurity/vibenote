@@ -8,7 +8,7 @@ metadata:
 
 # VibeNote Skill
 
-VibeNote is a git-native notes app that renders Markdown from GitHub repos. Notes can be shared via secret links.
+VibeNote is a git-native notes app that renders Markdown from GitHub repos. Notes can be shared via secret links stored directly in the repo.
 
 ## Working with Notes (Read/Write)
 
@@ -26,19 +26,14 @@ VibeNote will pick up changes automatically on the next sync.
 
 ## Reading Shared Notes
 
-There are three share URL formats. All are client-side rendered — rewrite to the API to fetch content.
+There are two share URL formats. All are client-side rendered — rewrite to the API to fetch content directly.
 
-### Legacy shares (old format)
-```
-vibenote.dev/s/<share-id>  →  api.vibenote.dev/v1/share-links/<share-id>/content
-```
-
-### Git-native Tier 1 (open shares — owner/repo/shareId visible in URL)
+### Tier 1 — open shares (owner/repo visible in URL)
 ```
 vibenote.dev/s/<owner>/<repo>/<shareId>  →  api.vibenote.dev/v1/git-shares/<owner>/<repo>/<shareId>/content
 ```
 
-### Git-native Tier 2 (opaque shares — repo identity hidden)
+### Tier 2 — opaque shares (repo identity hidden)
 ```
 vibenote.dev/s/<segment>  →  api.vibenote.dev/v1/git-shares/<segment>/content
 ```
@@ -49,67 +44,63 @@ All content endpoints return raw `text/markdown`.
 ### Example
 
 ```
-# User sends: https://vibenote.dev/s/-0Fgm7cnqd8yZCfnULdY9oO5
-# Fetch this instead:
-web_fetch https://api.vibenote.dev/v1/share-links/-0Fgm7cnqd8yZCfnULdY9oO5/content
+# User sends: https://vibenote.dev/s/BR6IvcSC4zqhpdi7QE4gw5L-1n3N3m-k
+# Fetch the content directly:
+web_fetch https://api.vibenote.dev/v1/git-shares/BR6IvcSC4zqhpdi7QE4gw5L-1n3N3m-k/content
 ```
 
 ## Creating Git-Native Shares
 
-Shares are created by committing a JSON descriptor to `.shares/` in the repo:
+Shares are plain-text files committed to the `.shares/` folder of the repo. No server interaction required — just a git commit.
 
-```json
-// .shares/<shareId>.json
-{ "path": "notes/my-note.md" }
+```bash
+# Content is just the note path (plain text, no JSON)
+echo "notes/my-note.md" > .shares/<shareId>
+git add .shares/<shareId> && git commit -m "share: notes/my-note.md" && git push
 ```
 
-The shareId becomes part of the share URL. **See the security rules below before choosing a shareId.**
-
-For opaque (Tier 2) shares, the repo must have a repoId registered with the server. The share URL segment is then `base64url(repoId_bytes[8] || shareId_bytes[16])`, constructable locally without a server round-trip.
+The shareId becomes part of the share URL:
+- **Tier 1 URL**: `https://vibenote.dev/s/<owner>/<repo>/<shareId>`
+- **Tier 2 URL**: requires the repo to have a repoId registered (see below)
 
 ### ⚠️ Security: ShareId Entropy is MANDATORY on Private Repos
 
 **ShareIds on private repos MUST be cryptographically random.** This is not optional.
 
-Why: The Tier 1 endpoint (`/v1/git-shares/<owner>/<repo>/<shareId>/content`) is always available. It uses the server's GitHub App credentials — not yours. If an attacker can guess `owner/repo` and `shareId`, they can:
-1. Confirm the private repo exists (GitHub deliberately hides this)
-2. Read the note content without any credentials
-
-Tier 2 opaque URLs hide the shareId inside the URL segment, but the shareId is still a plaintext filename in `.shares/` in the repo. Tier 1 is always open and accessible to anyone who knows all three values.
+Why: The Tier 1 endpoint (`/v1/git-shares/<owner>/<repo>/<shareId>/content`) is always publicly accessible via the server's GitHub App credentials. If an attacker can guess `owner/repo/shareId`, they can read private note content without credentials.
 
 **Always generate shareIds like this:**
 ```js
-crypto.randomBytes(16).toString('base64url') // 22 chars, 128 bits
+crypto.randomBytes(16).toString('base64url') // 22 chars, 128 bits of entropy
 ```
 
-Short human-readable shareIds (e.g. `weekly-update`) are only safe on **public repos**, where the content is already public.
+Short human-readable shareIds (e.g. `weekly-update`) are only safe on **public repos**.
 
-## Share Link API
+## Revoking Shares
 
-Base URL: `https://api.vibenote.dev`
+Delete the `.shares/<shareId>` file and push:
 
-All mutating endpoints require a VibeNote session JWT in the `Authorization: Bearer <token>` header, where `<token>` is the session JWT obtained after authenticating via the VibeNote web UI. Currently there is no programmatic auth — share creation must be done through the VibeNote web UI.
-
-### Endpoints
-
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| `GET` | `/v1/share-links/:id/content` | None | Raw markdown of a shared note |
-| `GET` | `/v1/share-links/:id/assets?path=<relative>` | None | Assets (images) referenced in a shared note |
-| `GET` | `/v1/share-links/:id` | None | Share metadata (id, creator login) |
-| `POST` | `/v1/shares` | Session | Create a share link |
-| `GET` | `/v1/shares?owner=&repo=&path=` | Session | Look up existing share for a note |
-| `DELETE` | `/v1/shares/:id` | Session | Revoke a share link |
-
-### Create Share Body (POST /v1/shares)
-
-```json
-{
-  "owner": "acme-org",
-  "repo": "team-notes",
-  "path": "notes/weekly-update.md",
-  "branch": "main"
-}
+```bash
+git rm .shares/<shareId>
+git commit -m "revoke share" && git push
 ```
 
-Response includes the share `url` field with the public link.
+## Tier 2 Opaque URLs
+
+To use Tier 2 (opaque) share URLs, the repo needs a repoId registered with the server. The repoId is stored as a plain-text file in the repo itself:
+
+```bash
+# .shares/.repo-id contains an 11-char base64url string, e.g. "BR6IvcSC4zo"
+cat .shares/.repo-id
+```
+
+Register it with the server (no auth required — file presence in the repo is proof of write access):
+
+```bash
+curl -X POST https://api.vibenote.dev/v1/repo-id \
+  -H "Content-Type: application/json" \
+  -d '{"repoId":"BR6IvcSC4zo","owner":"zksecurity","repo":"vibenote"}'
+```
+
+The opaque URL segment is then `base64url(repoId_bytes[8] || shareId_bytes[16])`, constructable locally without further server calls.
+

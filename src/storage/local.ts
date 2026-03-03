@@ -1,9 +1,18 @@
-// Local storage persistence for repo files (markdown notes plus binary assets).
+// Local storage persistence for repo files (markdown notes, binary assets, and plain-text share descriptors).
 import { normalizePath } from '../lib/util';
 import { logError } from '../lib/logging';
 import type { RemoteFile } from '../sync/git-sync';
 
-export type { FileKind, FileMeta, RepoFile, MarkdownFile, BinaryFile, AssetUrlFile, RepoStoreSnapshot };
+export type {
+  FileKind,
+  FileMeta,
+  RepoFile,
+  MarkdownFile,
+  BinaryFile,
+  AssetUrlFile,
+  TextFile,
+  RepoStoreSnapshot,
+};
 
 export {
   basename,
@@ -12,11 +21,13 @@ export {
   isMarkdownFile,
   isBinaryFile,
   isAssetUrlFile,
+  isTextFile,
+  kindFromPath,
   debugLog,
   setDebugEnabled,
 };
 
-type FileKind = 'markdown' | 'binary' | 'asset-url';
+type FileKind = 'markdown' | 'binary' | 'asset-url' | 'text';
 
 /**
  * Backwards-compatible serialized format for file metadata
@@ -53,6 +64,7 @@ type RepoFile = FileMeta & {
 type MarkdownFile = RepoFile & { kind: 'markdown' };
 type BinaryFile = RepoFile & { kind: 'binary' };
 type AssetUrlFile = RepoFile & { kind: 'asset-url' };
+type TextFile = RepoFile & { kind: 'text' };
 
 function isMarkdownFile(doc: RepoFile): doc is MarkdownFile {
   return doc.kind === 'markdown';
@@ -64,6 +76,10 @@ function isBinaryFile(doc: RepoFile): doc is BinaryFile {
 
 function isAssetUrlFile(doc: RepoFile): doc is AssetUrlFile {
   return doc.kind === 'asset-url';
+}
+
+function isTextFile(doc: RepoFile): doc is TextFile {
+  return doc.kind === 'text';
 }
 
 function serializeIndex(index: FileMeta[]): string {
@@ -318,7 +334,7 @@ export class LocalStore {
   createFile(path: string, content: string, params: { kind?: FileKind } = {}): string {
     let id = crypto.randomUUID();
     path = normalizePath(path);
-    let kind = params.kind ?? inferKindFromPath(path);
+    let kind = params.kind ?? kindFromPath(path) ?? 'binary';
     let updatedAt = Date.now();
     let dir = extractDir(path);
     let safeName = ensureValidFileName(basename(path));
@@ -939,8 +955,96 @@ function extractExtensionWithDot(baseName: string): string {
   return baseName.slice(idx);
 }
 
-function inferKindFromPath(path: string): FileKind {
-  return /\.md$/i.test(path) ? 'markdown' : 'binary';
+// True binary formats — everything else with an extension is treated as text.
+const BINARY_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif']);
+
+// Common plain-text file extensions found in GitHub repos.
+const TEXT_EXTENSIONS = new Set([
+  // code
+  'ts',
+  'tsx',
+  'js',
+  'jsx',
+  'mjs',
+  'cjs',
+  'py',
+  'rb',
+  'rs',
+  'go',
+  'java',
+  'kt',
+  'scala',
+  'c',
+  'cpp',
+  'cc',
+  'h',
+  'hpp',
+  'cs',
+  'swift',
+  'php',
+  'lua',
+  'ex',
+  'exs',
+  'clj',
+  'cljs',
+  'hs',
+  'ml',
+  'mli',
+  'r',
+  // config / data
+  'json',
+  'jsonc',
+  'yaml',
+  'yml',
+  'toml',
+  'ini',
+  'cfg',
+  'conf',
+  'env',
+  'xml',
+  'csv',
+  'sql',
+  'graphql',
+  'proto',
+  // web
+  'html',
+  'htm',
+  'css',
+  'scss',
+  'sass',
+  'less',
+  // shell
+  'sh',
+  'bash',
+  'zsh',
+  'fish',
+  // docs
+  'txt',
+  'rst',
+  'tex',
+  'adoc',
+  // misc
+  'diff',
+  'patch',
+]);
+
+// Map a repo file path to its FileKind, or null if the file should be ignored.
+// - .md          → 'markdown'
+// - known binary → 'binary'
+// - known text   → 'text'
+// - no extension → 'text'  (Makefile, Dockerfile, LICENSE, .gitignore, .shares/… )
+// - unknown ext  → null (skip)
+function kindFromPath(path: string): FileKind | null {
+  const lastSlash = path.lastIndexOf('/');
+  const filename = path.slice(lastSlash + 1);
+  const dotIdx = filename.lastIndexOf('.');
+  // No dot at all, or dot is only at position 0 (hidden file like .gitignore) → no extension
+  const ext = dotIdx > 0 ? filename.slice(dotIdx + 1).toLowerCase() : '';
+  if (ext === '') return 'text';
+  if (ext === 'md') return 'markdown';
+  if (BINARY_EXTENSIONS.has(ext)) return 'binary';
+  if (TEXT_EXTENSIONS.has(ext)) return 'text';
+  return null;
 }
 
 function normalizeMeta(raw: unknown): FileMeta | null {
@@ -951,7 +1055,9 @@ function normalizeMeta(raw: unknown): FileMeta | null {
   let path = stored.path.replace(/^\/+/g, '').replace(/\/+$/g, '') || stored.path;
   let updatedAt =
     typeof stored.updatedAt === 'number' && Number.isFinite(stored.updatedAt) ? stored.updatedAt : Date.now();
-  let inferredKind = typeof stored.kind === 'string' ? stored.kind : 'markdown';
+  // Fall back to path-based inference for legacy data without a stored kind.
+  // Unknown extensions default to 'binary' — the safest assumption.
+  let inferredKind = typeof stored.kind === 'string' ? stored.kind : (kindFromPath(path) ?? 'binary');
   return { id: stored.id, path, updatedAt, kind: inferredKind };
 }
 

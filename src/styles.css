@@ -871,6 +871,11 @@ textarea:focus-visible {
   font: var(--code-font);
 }
 
+/* Full-page text editor — fills the visible workspace area */
+.workspace-panels textarea.text-editor {
+  min-height: calc(100vh - var(--topbar-height) - 64px);
+}
+
 .workspace-panels .preview {
   overflow: auto;
   line-height: 1.68;

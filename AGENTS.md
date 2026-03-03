@@ -20,17 +20,38 @@ This document captures developer-focused guidelines and conventions, and is VERY
 - `src/test/setup.ts` loads automatically via Vitest to expose browser-like globals (localStorage, fetch, atob/btoa). Keep new hook/UI tests compatible with that environment instead of redefining globals in each file.
 - `src/test/mock-remote.ts` is a GitHub REST stub that powers sync-heavy tests (e.g. `useRepoData` flows). Prefer it when you need to exercise `syncBidirectional` without network calls.
 
+### E2E / Browser Testing
+
+When shipping a UI feature, verify the full flow end-to-end in the browser using `npx agent-browser` before calling it done. This catches wiring and UI bugs that unit tests won't catch.
+
+Typical workflow:
+
+1. The dev server must be running (`npm start` — the human developer usually has this up).
+2. **First run requires auth**: open headed, ask the user to sign in, then save state so future runs are headless:
+   ```bash
+   npx agent-browser --headed open http://localhost:3000
+   # ask user to sign in, then:
+   npx agent-browser state save .browser-auth.json
+   ```
+   The file is gitignored and persists across restarts — you only need to do this once.
+3. **Subsequent runs**: load saved state and test headlessly:
+   ```bash
+   npx agent-browser state load .browser-auth.json
+   npx agent-browser open http://localhost:3000
+   ```
+4. Always clean up: `npx agent-browser close`
+
+The dev frontend talks to the **production backend** (see `VITE_VIBENOTE_API_BASE` in `.env`), so e2e tests exercise real API flows — shares get committed to GitHub, sync hits the real server, etc.
+
 ### Commit Conventions
 
 - Do NOT commit unless asked. Even if you were asked to commit within a session, don't commit more changes in the same session without being asked.
 
-### Details you might not need
+### Other dev notes
 
-- Run the frontend: `npm start` (Vite on `http://localhost:3000`)
-  - Human developer will have this running. He can provide feedback on UI changes and test changes manually if necessary.
-- (Typically not needed) Run the backend: `npm run server:start`
-  - We usually set `VITE_VIBENOTE_API_BASE` to the _production backend_ when developing the frontend, so we don't have to start the backend.
-- Env: Human developer manually fills `.env` with GitHub App variables. Coding agents MUST NEVER read or write `.env`, actual secrets may be stored there, even in development.
+- Run the frontend: `npm start` (Vite on `http://localhost:3000`). The human developer usually has this running.
+- Run the backend: `npm run server:start` — typically not needed since `VITE_VIBENOTE_API_BASE` points to the production backend.
+- **IMPORTANT — Env**: The human developer manually fills `.env` with GitHub App secrets. Coding agents MUST NEVER read or write `.env`, even in development.
 - Node runs TypeScript directly (2025+): use `node path/to/file.ts` for quick scripts; no ts-node/tsx needed.
 
 ## Product and architecture
@@ -88,11 +109,3 @@ See `.env.example` and `docs/AUTH.md` for a detailed breakdown of variables and 
   - example: do NOT use `useMemo()` when the logic just filters an array
 - React: Do not use `useCallback()` (unless you have a strong reason). Just recreating callbacks on every render is usually fast, and will ensure they are never stale.
 - Prefer putting dense logic into simple top-level `function`s, instead of creating spaghetti of inline declared callbacks that implicitly depend on in-scope variables.
-
-## NO GAMBIARRA POLICY - ASK FOR FEEDBACK INSTEAD
-
-This is meant to be a high-quality, production codebase maintained over a long time horizon and solving difficult problems by careful engineering. In order to maintain quality, we must strive to keep the code clean, modular, simple and functional. Quick and dirty solutions must be completely avoided, in favor of robust, well-designed, general solutions.
-
-In some case, you will be asked to perform a seemingly impossible task, either because the user is unaware, or because you don't grasp how to do it properly. In these cases, DO NOT ATTEMPT TO IMPLEMENT A HALF-BAKED SOLUTION JUST TO SATISFY THE USER'S REQUEST. If the task seems to hard, be honest that you couldn't solve it in the proper way, leave the code unchanged, explain the situation to the user and ask for further feedback and clarifications.
-
-Similarly, sometimes a task together with other specifications will naturally lead you to a complex or ugly-looking solution. In that case, STOP AND ASK FOR FEEDBACK. It could be entirely possible that in order to complete the task cleanly, some higher-level aspect of the codebase needs to be refactored, a data type changed, or an entire new module created. Discuss this with the user instead of trying to force an ugly solution into the existing codebase.

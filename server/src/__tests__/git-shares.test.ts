@@ -332,7 +332,7 @@ describe('Tier 2 — Opaque shares', () => {
     expect(json.error).toBe('share not found');
   });
 
-  it('10. metadata does not leak internal details', async () => {
+  it('10. metadata exposes owner but not repo or shareId', async () => {
     setupRepoMock(ENC_OWNER, ENC_REPO, {
       [`.shares/${SHARE_ID}`]: 'notes/private.md',
       'notes/private.md': MARKDOWN_BODY,
@@ -342,8 +342,7 @@ describe('Tier 2 — Opaque shares', () => {
 
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json).toEqual({ ok: true });
-    expect(json).not.toHaveProperty('owner');
+    expect(json).toEqual({ owner: ENC_OWNER });
     expect(json).not.toHaveProperty('repo');
     expect(json).not.toHaveProperty('shareId');
   });

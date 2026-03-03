@@ -1,18 +1,18 @@
-// Public share viewer entry that resolves the share id and renders the note.
+// Public share viewer entry that resolves the share ref and renders the note.
 import React, { useEffect, useMemo, useState } from 'react';
 import { renderMarkdown } from '../lib/render-markdown';
-import { fetchShareContent, fetchShareMeta, getApiBase, type ShareMetaResponse } from './api';
+import { fetchShareContent, fetchShareMeta, buildAssetUrl, parseShareUrl, type ShareRef, type ShareMetaResponse } from './api';
 
 type ViewerState =
-  | { status: 'loading'; id: string }
-  | { status: 'ready'; id: string; meta: ShareMetaResponse; markdown: string }
+  | { status: 'loading'; ref: ShareRef }
+  | { status: 'ready'; ref: ShareRef; meta: ShareMetaResponse; markdown: string }
   | { status: 'error'; message: string }
   | { status: 'not-found' };
 
 export function ShareApp() {
-  const shareId = useMemo(resolveShareId, []);
+  const shareRef = useMemo(parseShareUrl, []);
   const [state, setState] = useState<ViewerState>(() =>
-    shareId ? { status: 'loading', id: shareId } : { status: 'error', message: 'Missing share id.' }
+    shareRef ? { status: 'loading', ref: shareRef } : { status: 'error', message: 'Missing share id.' }
   );
 
   useEffect(() => {
@@ -32,13 +32,13 @@ export function ShareApp() {
   }, []);
 
   useEffect(() => {
-    if (!shareId) return;
+    if (!shareRef) return;
     let cancelled = false;
     (async () => {
       try {
-        setState({ status: 'loading', id: shareId });
-        const contentPromise = fetchShareContent(shareId);
-        const metaRes = await fetchShareMeta(shareId);
+        setState({ status: 'loading', ref: shareRef });
+        const contentPromise = fetchShareContent(shareRef);
+        const metaRes = await fetchShareMeta(shareRef);
         if (cancelled) return;
         if (metaRes.status === 404) {
           setState({ status: 'not-found' });
@@ -59,7 +59,7 @@ export function ShareApp() {
         }
         const markdown = await contentRes.text();
         if (cancelled) return;
-        setState({ status: 'ready', id: shareId, meta, markdown });
+        setState({ status: 'ready', ref: shareRef, meta, markdown });
       } catch (error) {
         if (cancelled) return;
         setState({ status: 'error', message: formatError(error) });
@@ -68,11 +68,11 @@ export function ShareApp() {
     return () => {
       cancelled = true;
     };
-  }, [shareId]);
+  }, [shareRef]);
 
   const renderedHtml = useMemo(() => {
     if (state.status !== 'ready') return '';
-    return renderShareMarkdown(state.markdown, { shareId: state.id });
+    return renderShareMarkdown(state.markdown, { shareRef: state.ref });
   }, [state]);
 
   if (state.status === 'loading') {
@@ -115,7 +115,7 @@ export function ShareApp() {
         <article className="share-article">
           <header className="share-article-header">
             <p className="share-shared-by">
-              Shared by <span>@{meta.createdBy.login}</span> on{' '}
+              Shared by <span>@{meta.owner}</span> on{' '}
               <a href="https://vibenote.dev" target="_blank" rel="noopener noreferrer">
                 VibeNote
               </a>
@@ -128,18 +128,7 @@ export function ShareApp() {
   );
 }
 
-function resolveShareId(): string | null {
-  try {
-    let pathname = window.location.pathname;
-    let match = pathname.match(/\/s\/([A-Za-z0-9_-]{6,})/);
-    if (match && match[1]) return match[1];
-  } catch {
-    // ignore and fall through
-  }
-  return null;
-}
-
-function renderShareMarkdown(markdown: string, options: { shareId: string }): string {
+function renderShareMarkdown(markdown: string, options: { shareRef: ShareRef }): string {
   const sanitized = renderMarkdown(markdown, 'share');
   try {
     return rewriteAssetUrls(sanitized, options);
@@ -149,7 +138,7 @@ function renderShareMarkdown(markdown: string, options: { shareId: string }): st
   }
 }
 
-function rewriteAssetUrls(html: string, options: { shareId: string }): string {
+function rewriteAssetUrls(html: string, options: { shareRef: ShareRef }): string {
   if (typeof window === 'undefined') return html;
   const container = document.createElement('div');
   container.innerHTML = html;
@@ -169,7 +158,7 @@ function rewriteAssetUrls(html: string, options: { shareId: string }): string {
         }
         continue;
       }
-      node.setAttribute(attr, buildAssetUrl(options.shareId, trimmed));
+      node.setAttribute(attr, buildAssetUrl(options.shareRef, trimmed));
     }
   }
   return container.innerHTML;
@@ -185,11 +174,6 @@ function isRelativeAssetUrl(value: string): boolean {
     return false;
   if (lowered.startsWith('//')) return false;
   return true;
-}
-
-function buildAssetUrl(shareId: string, relativePath: string): string {
-  const params = new URLSearchParams({ path: relativePath });
-  return `${getApiBase()}/v1/share-links/${encodeURIComponent(shareId)}/assets?${params.toString()}`;
 }
 
 function formatError(error: unknown): string {
