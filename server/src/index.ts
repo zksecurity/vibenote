@@ -13,7 +13,6 @@ import {
 } from './api.ts';
 import { createSessionStore } from './session-store.ts';
 import { handleErrors, HttpError, requireSession } from './common.ts';
-import { sharingEndpoints } from './sharing.ts';
 import { gitShareEndpoints } from './git-shares.ts';
 
 declare module 'express-serve-static-core' {
@@ -138,7 +137,6 @@ app.post('/v1/webhooks/github', (_req, res) => {
   res.status(204).end();
 });
 
-sharingEndpoints(app);
 gitShareEndpoints(app);
 
 const server = app.listen(env.PORT, () => {
