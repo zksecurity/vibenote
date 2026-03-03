@@ -22,7 +22,7 @@ This document captures developer-focused guidelines and conventions, and is VERY
 
 ### E2E / Browser Testing
 
-When shipping a UI feature, verify the full flow end-to-end in the browser using `npx agent-browser` before calling it done. This catches wiring bugs (wrong API URL, missing state update, broken route) that unit tests won't catch.
+When shipping a UI feature, verify the full flow end-to-end in the browser using `npx agent-browser` before calling it done. This catches wiring and UI bugs that unit tests won't catch.
 
 Typical workflow:
 
@@ -109,11 +109,3 @@ See `.env.example` and `docs/AUTH.md` for a detailed breakdown of variables and 
   - example: do NOT use `useMemo()` when the logic just filters an array
 - React: Do not use `useCallback()` (unless you have a strong reason). Just recreating callbacks on every render is usually fast, and will ensure they are never stale.
 - Prefer putting dense logic into simple top-level `function`s, instead of creating spaghetti of inline declared callbacks that implicitly depend on in-scope variables.
-
-## NO GAMBIARRA POLICY - ASK FOR FEEDBACK INSTEAD
-
-This is meant to be a high-quality, production codebase maintained over a long time horizon and solving difficult problems by careful engineering. In order to maintain quality, we must strive to keep the code clean, modular, simple and functional. Quick and dirty solutions must be completely avoided, in favor of robust, well-designed, general solutions.
-
-In some case, you will be asked to perform a seemingly impossible task, either because the user is unaware, or because you don't grasp how to do it properly. In these cases, DO NOT ATTEMPT TO IMPLEMENT A HALF-BAKED SOLUTION JUST TO SATISFY THE USER'S REQUEST. If the task seems to hard, be honest that you couldn't solve it in the proper way, leave the code unchanged, explain the situation to the user and ask for further feedback and clarifications.
-
-Similarly, sometimes a task together with other specifications will naturally lead you to a complex or ugly-looking solution. In that case, STOP AND ASK FOR FEEDBACK. It could be entirely possible that in order to complete the task cleanly, some higher-level aspect of the codebase needs to be refactored, a data type changed, or an entire new module created. Discuss this with the user instead of trying to force an ugly solution into the existing codebase.
