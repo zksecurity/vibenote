@@ -17,7 +17,7 @@ export { gitShareEndpoints };
 // Short human-readable IDs are only safe on public repos (where content is already public).
 //
 // DO NOT raise the minimum here to enforce this — short IDs are structurally valid
-// (e.g. legacy or public repos). Enforce random defaults in the UI/CLI layer.
+// (e.g. public repos or notes intended to become fully public). Enforce random defaults in the UI/CLI layer.
 const SHARE_ID_PATTERN = /^[A-Za-z0-9_-]{4,128}$/;
 
 function isValidShareId(shareId: string): boolean {
