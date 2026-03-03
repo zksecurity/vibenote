@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .env
+.browser-auth.json
 .DS_Store
 tsconfig.tsbuildinfo
 *.pem
