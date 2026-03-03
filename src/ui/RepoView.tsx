@@ -2,6 +2,7 @@
 import { useMemo, useState, useEffect, useRef } from 'react';
 import { FileTree, type FileEntry } from './FileTree';
 import { Editor } from './Editor';
+import { TextEditor } from './TextEditor';
 import { AssetViewer } from './AssetViewer';
 import { RepoSwitcher } from './RepoSwitcher';
 import { Toggle } from './Toggle';
@@ -14,6 +15,7 @@ import {
   isMarkdownFile,
   isBinaryFile,
   isAssetUrlFile,
+  isTextFile,
   basename,
   extractDir,
   stripExtension,
@@ -377,6 +379,15 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
                   />
                 ) : isBinaryFile(activeFile) || isAssetUrlFile(activeFile) ? (
                   <AssetViewer key={activeFile.id} file={activeFile} />
+                ) : isTextFile(activeFile) ? (
+                  <TextEditor
+                    key={activeFile.id}
+                    doc={activeFile}
+                    readOnly={!canEdit}
+                    onChange={(path, text) => {
+                      actions.saveFile(path, text);
+                    }}
+                  />
                 ) : null}
               </div>
             ) : needsUserAction ? (
