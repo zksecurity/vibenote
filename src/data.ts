@@ -27,12 +27,14 @@ import {
 import {
   getRepoMetadata as apiGetRepoMetadata,
   getInstallUrl as apiGetInstallUrl,
-  getShareLinkForNote as apiGetShareLinkForNote,
-  createShareLink as apiCreateShareLink,
-  revokeShareLink as apiRevokeShareLink,
   type RepoMetadata,
-  type ShareLink,
 } from './lib/backend';
+import {
+  createGitShare,
+  revokeGitShare,
+  lookupCachedShare,
+  type GitShareLink,
+} from './lib/git-share-ops';
 import {
   buildRemoteConfig,
   syncBidirectional,
@@ -67,7 +69,7 @@ const AUTO_SYNC_POLL_INTERVAL_MS = 180_000;
 
 type ShareState = {
   status: 'idle' | 'loading' | 'ready' | 'error';
-  link?: ShareLink;
+  link?: GitShareLink;
   error?: string;
 };
 
@@ -286,27 +288,11 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   let initialPullRef = useRef({ done: false });
   let shareRequestRef = useRef<{ owner: string; repo: string; path: string } | null>(null);
 
-  const loadShareForTarget = useCallback(async (target: { owner: string; repo: string; path: string }) => {
+  // Synchronous localStorage lookup — no network call needed.
+  const loadShareForTarget = useCallback((target: { owner: string; repo: string; path: string }) => {
     shareRequestRef.current = target;
-    setShareState((prev) => {
-      if (prev.status === 'ready' && prev.link && shareMatchesTarget(prev.link, target)) {
-        return prev;
-      }
-      return { status: 'loading' };
-    });
-    try {
-      const link = await apiGetShareLinkForNote(target.owner, target.repo, target.path);
-      if (shareRequestRef.current && !shareTargetEquals(shareRequestRef.current, target)) return;
-      if (link) {
-        setShareState({ status: 'ready', link });
-      } else {
-        setShareState({ status: 'ready' });
-      }
-    } catch (error) {
-      if (shareRequestRef.current && !shareTargetEquals(shareRequestRef.current, target)) return;
-      logError(error);
-      setShareState({ status: 'error', error: formatError(error) });
-    }
+    const link = lookupCachedShare(target.owner, target.repo, target.path);
+    setShareState(link ? { status: 'ready', link } : { status: 'ready' });
   }, []);
 
   // Kick off the one-time remote import when visiting a writable repo we have not linked yet.
@@ -655,21 +641,11 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       setShareState({ status: 'error', error: 'Select a note to share.' });
       return;
     }
-    const target = { owner: repoOwner, repo: repoName, path: activePath };
-    shareRequestRef.current = target;
+    shareRequestRef.current = { owner: repoOwner, repo: repoName, path: activePath };
     setShareState({ status: 'loading' });
     try {
-      const branch = defaultBranch ?? 'main';
-      const share = await apiCreateShareLink({
-        owner: target.owner,
-        repo: target.repo,
-        path: target.path,
-        branch,
-      });
-      if (!shareMatchesTarget(share, target)) {
-        return;
-      }
-      setShareState({ status: 'ready', link: share });
+      const link = await createGitShare(repoOwner, repoName, activePath);
+      setShareState({ status: 'ready', link });
     } catch (error) {
       logError(error);
       setShareState({ status: 'error', error: formatError(error) });
@@ -679,10 +655,10 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
 
   const revokeShare = async () => {
     const existing = shareState.link;
-    if (!existing) return;
+    if (!existing || !repoOwner || !repoName || !activePath) return;
     setShareState({ status: 'loading' });
     try {
-      await apiRevokeShareLink(existing.id);
+      await revokeGitShare(repoOwner, repoName, activePath, existing.shareId);
       setShareState({ status: 'ready' });
     } catch (error) {
       logError(error);
@@ -1066,14 +1042,6 @@ function remapPathForMovedFolder(path: string, fromDir: string, toDir: string): 
   if (normalizedTo === '') return remainder === '' ? undefined : remainder;
   if (remainder === '') return normalizedTo;
   return `${normalizedTo}/${remainder}`;
-}
-
-function shareMatchesTarget(link: ShareLink, target: { owner: string; repo: string; path: string }): boolean {
-  return (
-    link.owner.toLowerCase() === target.owner.toLowerCase() &&
-    link.repo.toLowerCase() === target.repo.toLowerCase() &&
-    normalizePath(link.path) === normalizePath(target.path)
-  );
 }
 
 function shareTargetEquals(

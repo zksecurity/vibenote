@@ -171,10 +171,10 @@ Share creation flow:
 4. Commit `.shares/<shareId>` containing the note path.
 5. Return the opaque URL to the UI immediately — no further server round-trip needed.
 
-- [ ] Implement share creation flow as above
-- [ ] Update `ShareDialog` to show the computed opaque URL
-- [ ] Revoking a share: delete `.shares/<shareId>` from the repo via GitHub Contents API
-- [ ] Looking up an existing share: check for `.shares/<shareId>` in the repo
+- [x] Implement share creation flow as above
+- [x] Update `ShareDialog` to show the computed opaque URL
+- [x] Revoking a share: delete `.shares/<shareId>` from the repo via GitHub Contents API
+- [x] Looking up an existing share: check localStorage cache (synchronous, no network call)
 
 ### Task 8: Frontend — Remove legacy sharing system
 
