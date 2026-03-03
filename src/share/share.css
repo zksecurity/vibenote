@@ -89,20 +89,12 @@ body {
   display: block;
 }
 
-.share-article img {
-  max-width: 100%;
-  display: block;
-  margin: 16px auto;
-  border-radius: 12px;
-}
-
-.share-article a {
-  color: #0969da;
-  text-decoration: none;
-}
-
-.share-article a:hover {
-  text-decoration: underline;
+/* Fit github-markdown-css inside our card — neutralise its own box model */
+.share-content.markdown-body {
+  background: transparent;
+  font-family: inherit;
+  font-size: 1rem;
+  color: inherit;
 }
 
 @media (max-width: 600px) {
