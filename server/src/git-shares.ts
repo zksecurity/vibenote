@@ -266,8 +266,6 @@ function getOpaqueShareParams(req: express.Request): { owner: string; repo: stri
   const record = repoIdStore.get(repoId);
   if (!record) throw HttpError(404, GENERIC);
 
-  if (!isValidShareId(shareId)) throw HttpError(404, GENERIC);
-
   return { owner: record.owner, repo: record.repo, shareId };
 }
 
@@ -281,8 +279,6 @@ function gitShareEndpoints(app: express.Express) {
   // ==========================================
   // Tier 2 — Opaque share resolution
   // Single base64url segment encodes repoId (8 bytes) + shareId (16 bytes).
-  // Registered before Tier 1 to avoid :segment matching :owner/:repo/:shareId.
-  // (No conflict in practice since segment counts differ, but explicit ordering is clearer.)
   // ==========================================
 
   app.get(
