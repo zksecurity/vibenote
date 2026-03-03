@@ -9,13 +9,13 @@ Two tiers: open (no API needed) and opaque (one-time API setup per repo).
 
 ### Tier 1 — Open Shares (pure git)
 
-**Creating a share**: Add a JSON file to `.shares/` in the repo:
+**Creating a share**: Add a plain-text file to `.shares/` in the repo:
 
 ```
-.shares/weekly-update.json → {"path": "notes/weekly-update.md"}
+.shares/weekly-update → notes/weekly-update.md
 ```
 
-The filename (minus `.json`) becomes the shareId / URL slug.
+The filename becomes the shareId / URL slug. The file content is just the note path — no JSON wrapper.
 
 **Share URL**: `vibenote.dev/s/<owner>/<repo>/<shareId>`
 Example: `vibenote.dev/s/acme-org/team-notes/weekly-update`
@@ -24,8 +24,8 @@ Example: `vibenote.dev/s/acme-org/team-notes/weekly-update`
 
 1. Parse owner/repo/shareId from URL
 2. Get GitHub App installation for that repo
-3. Fetch `.shares/<shareId>.json` from the repo (GitHub Contents API)
-4. Read `path` from JSON
+3. Fetch `.shares/<shareId>` from the repo (GitHub Contents API)
+4. Read the file content as the note path (plain text)
 5. Fetch and serve the content at that path
 
 **No server-side state.** Security: for private repos, the shareId is the ONLY access credential in the URL. The UI/CLI must default to generating cryptographically random shareIds (e.g. `crypto.randomBytes(16).toString('base64url')` → 22 chars, 128 bits of entropy). Short human-readable names (like `weekly-update`) are fine if the user wants to make the note effectively public.
@@ -44,7 +44,7 @@ Example: `vibenote.dev/s/acme-org/team-notes/weekly-update`
    - `.shares/.repo-id` exists in the repo and contains matching `repoId`
 5. Server stores: `repoId → {owner, repo}` (one entry per repo, not per note)
 
-**Creating an opaque share**: Same as tier 1 — add `.shares/<shareId>.json`. Generate a random shareId: `crypto.randomBytes(16).toString('base64url')` (22 chars, 128 bits).
+**Creating an opaque share**: Same as tier 1 — add `.shares/<shareId>`. Generate a random shareId: `crypto.randomBytes(16).toString('base64url')` (22 chars, 128 bits).
 
 **Share URL**: `vibenote.dev/s/<segment>`
 Where `segment = base64url(repoId_bytes[8] || shareId_bytes[16])` — a single 32-char opaque string.
@@ -107,7 +107,7 @@ The share viewer SPA at `vibenote.dev/s/...` needs to be updated to:
 ### Task 1: Server — Tier 1 share resolution
 
 - [x] New Express routes for git-native open shares
-- [x] `GET /v1/git-shares/:owner/:repo/:shareId/content` — fetch `.shares/<shareId>.json` from repo, resolve path, serve markdown
+- [x] `GET /v1/git-shares/:owner/:repo/:shareId/content` — fetch `.shares/<shareId>` from repo, resolve path, serve markdown
 - [x] `GET /v1/git-shares/:owner/:repo/:shareId` — share metadata
 - [x] `GET /v1/git-shares/:owner/:repo/:shareId/assets?path=...` — relative assets
 - [x] Reuse existing `installationRequest` / `getRepoInstallationId` for GitHub API calls
@@ -140,14 +140,24 @@ After registration, the entire share-creation flow is pure git — no further AP
 - [x] `.shares/.repo-id` file verification is the sole access proof
 - [x] Tests
 
-### Task 5: Frontend — Share viewer updates
+### Task 5: Refactor `.shares` file format
+
+Replace the JSON share descriptor with a plain-text file containing just the note path.
+Simpler for agents and humans to create — `echo "notes/foo.md" > .shares/<shareId>`.
+
+- [x] Server: fetch `.shares/<shareId>` (no `.json` extension) and read content as the path directly
+- [x] Drop the `ref` field (was JSON-only; always serve latest)
+- [x] Update tests
+- [x] Migrate existing `.shares/*.json` files in the repo
+
+### Task 6: Frontend — Share viewer updates
 
 - [ ] Update share viewer to handle new URL formats
 - [ ] Route `/s/<owner>/<repo>/<shareId>` → tier 1 API
 - [ ] Route `/s/<segment>` → tier 2 API
 - [ ] Delete legacy API which is no longer supported by the UI
 
-### Task 6: Skill doc & tooling
+### Task 7: Skill doc & tooling
 
 - [ ] Update `skills/vibenote/SKILL.md` with new sharing workflow
 - [ ] Helper script or instructions for generating `.shares/.repo-id` and opaque URLs
