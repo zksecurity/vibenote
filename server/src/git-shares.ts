@@ -38,7 +38,11 @@ function isValidRepoId(repoId: string): boolean {
 
 // --- Asset cache (same pattern as sharing.ts) ---
 
-const assetCache = new Map<string, { paths: Set<string>; cachedAt: number }>();
+// notePath and ref are stored alongside paths so we can detect when the share
+// descriptor has changed (e.g. .shares/<id>.json pointing to a new file) and
+// avoid serving stale allowlists.
+type AssetCacheEntry = { paths: Set<string>; cachedAt: number; notePath: string; ref: string | undefined };
+const assetCache = new Map<string, AssetCacheEntry>();
 const ASSET_CACHE_TTL_MS = 5 * 60 * 1000;
 
 // --- Repo ID store ---
@@ -143,15 +147,20 @@ function hasWritePermission(permission: string): boolean {
 
 // --- Opaque segment helpers (Tier 2) ---
 
-// A Tier 2 URL segment is base64url(repoId_bytes[8] || shareId_bytes[16]) = 32 chars.
+// A Tier 2 URL segment is base64url(repoId_bytes[8] || shareId_bytes[16]) = exactly 32 chars.
 // The repoId (8 bytes) maps to owner/repo server-side; the shareId (16 bytes) is the
 // .shares/<shareId>.json filename. Neither is visible in the URL.
 const OPAQUE_SEGMENT_BYTE_LENGTH = 24; // 8 (repoId) + 16 (shareId)
 const REPO_ID_BYTE_LENGTH = 8;
+// Exactly 32 base64url characters (no padding, no standard base64 +/ chars).
+const OPAQUE_SEGMENT_PATTERN = /^[A-Za-z0-9_-]{32}$/;
 
 function decodeOpaqueSegment(segment: string): { repoId: string; shareId: string } | null {
+  if (!OPAQUE_SEGMENT_PATTERN.test(segment)) return null;
   const decoded = Buffer.from(segment, 'base64url');
   if (decoded.length !== OPAQUE_SEGMENT_BYTE_LENGTH) return null;
+  // Canonical roundtrip: reject non-canonical encodings (e.g. stray padding or non-url chars)
+  if (decoded.toString('base64url') !== segment) return null;
   const repoId = decoded.subarray(0, REPO_ID_BYTE_LENGTH).toString('base64url');
   const shareId = decoded.subarray(REPO_ID_BYTE_LENGTH).toString('base64url');
   return { repoId, shareId };
@@ -159,9 +168,9 @@ function decodeOpaqueSegment(segment: string): { repoId: string; shareId: string
 
 // --- Shared response helpers ---
 
-function cacheAssets(cacheKey: string, notePath: string, markdown: string): Set<string> {
+function cacheAssets(cacheKey: string, notePath: string, ref: string | undefined, markdown: string): Set<string> {
   const paths = collectAssetPaths(notePath, markdown);
-  assetCache.set(cacheKey, { paths, cachedAt: Date.now() });
+  assetCache.set(cacheKey, { paths, cachedAt: Date.now(), notePath, ref });
   return paths;
 }
 
@@ -173,12 +182,13 @@ async function ensureAssetsLoaded(
   ref?: string
 ): Promise<Set<string>> {
   const cached = assetCache.get(cacheKey);
-  if (cached && Date.now() - cached.cachedAt <= ASSET_CACHE_TTL_MS) {
+  // Bypass cache if the share descriptor changed (different notePath or ref)
+  if (cached && Date.now() - cached.cachedAt <= ASSET_CACHE_TTL_MS && cached.notePath === notePath && cached.ref === ref) {
     return cached.paths;
   }
   const ghRes = await fetchRepoFile(owner, repo, notePath, 'application/vnd.github.raw', ref);
   const markdown = await ghRes.text();
-  return cacheAssets(cacheKey, notePath, markdown);
+  return cacheAssets(cacheKey, notePath, ref, markdown);
 }
 
 async function serveContent(
@@ -191,7 +201,7 @@ async function serveContent(
 ): Promise<void> {
   const ghRes = await fetchRepoFile(owner, repo, notePath, 'application/vnd.github.raw', ref);
   const text = await ghRes.text();
-  cacheAssets(cacheKey, notePath, text);
+  cacheAssets(cacheKey, notePath, ref, text);
   res
     .status(200)
     .setHeader('Content-Type', 'text/markdown; charset=utf-8')
@@ -397,6 +407,12 @@ function gitShareEndpoints(app: express.Express) {
       // Reject if repoId already registered for a different repo (prevent collision DoS)
       const existing = repoIdStore.get(repoId);
       if (existing && (existing.owner !== owner || existing.repo !== repo)) {
+        throw HttpError(404, REPO_ACCESS_DENIED);
+      }
+
+      // Enforce one repoId per repo — reject if this repo already has a different repoId
+      const existingByRepo = repoIdStore.getByRepo(owner, repo);
+      if (existingByRepo && existingByRepo.repoId !== repoId) {
         throw HttpError(404, REPO_ACCESS_DENIED);
       }
 

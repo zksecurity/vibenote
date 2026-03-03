@@ -113,6 +113,51 @@ function makeOpaqueSegment(repoIdBytes: Buffer, shareIdBytes: Buffer): string {
   return Buffer.concat([repoIdBytes, shareIdBytes]).toString('base64url');
 }
 
+/**
+ * Register a fresh Tier 2 repo with the server and return its identifiers.
+ * Uses unique random bytes each time to avoid conflicts with other tests.
+ */
+async function registerTier2Repo(): Promise<{
+  REPO_ID_BYTES: Buffer;
+  SHARE_ID_BYTES: Buffer;
+  REPO_ID: string;
+  SHARE_ID: string;
+  SEGMENT: string;
+  ENC_OWNER: string;
+  ENC_REPO: string;
+}> {
+  const REPO_ID_BYTES = crypto.randomBytes(8);
+  const SHARE_ID_BYTES = crypto.randomBytes(16);
+  const REPO_ID = REPO_ID_BYTES.toString('base64url');
+  const SHARE_ID = SHARE_ID_BYTES.toString('base64url');
+  const SEGMENT = makeOpaqueSegment(REPO_ID_BYTES, SHARE_ID_BYTES);
+  const ENC_OWNER = `assets-owner-${REPO_ID}`;
+  const ENC_REPO = `assets-repo-${REPO_ID}`;
+
+  mockGetRepoInstallationId.mockResolvedValue(INSTALLATION_ID);
+  mockInstallationRequest.mockImplementation(
+    async (_env: any, _installationId: number, urlPath: string) => {
+      if (urlPath.includes('/collaborators/')) {
+        return new Response(JSON.stringify({ permission: 'admin' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (urlPath.includes('.shares/.repo-id')) {
+        return new Response(REPO_ID, { status: 200 });
+      }
+      return new Response('not found', { status: 404 });
+    },
+  );
+  mockVerifyBearerSession.mockResolvedValue({ sessionId: 's', sub: 'u', login: 'testuser', avatarUrl: null, name: 'Test' });
+
+  const res = await fetch(`${baseUrl}/v1/repo-id`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer fake-token' },
+    body: JSON.stringify({ repoId: REPO_ID, owner: ENC_OWNER, repo: ENC_REPO }),
+  });
+  if (res.status !== 201) throw new Error(`registerTier2Repo failed: ${res.status}`);
+
+  return { REPO_ID_BYTES, SHARE_ID_BYTES, REPO_ID, SHARE_ID, SEGMENT, ENC_OWNER, ENC_REPO };
+}
+
 // --- Test server setup ---
 
 let baseUrl: string;
@@ -379,6 +424,242 @@ describe('Repo keys', () => {
     expect(res2.status).toBe(404);
     const json = await res2.json();
     expect(json.error).toBe('repository not found or insufficient permissions');
+  });
+});
+
+// --- Assets ---
+
+describe('Assets', () => {
+  it('13. tier 1: serves asset referenced in note', async () => {
+    const imageData = Buffer.from('fake-png-data');
+    setupRepoMock('owner', 'repo', {
+      '.shares/note-with-img.json': JSON.stringify({ path: 'notes/hello.md' }),
+      'notes/hello.md': '# Hello\n\n![img](./image.png)',
+      'notes/image.png': imageData.toString('binary'),
+    });
+
+    const res = await fetch(`${baseUrl}/v1/git-shares/owner/repo/note-with-img/assets?path=./image.png`);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-security-policy')).toBe("default-src 'none'");
+  });
+
+  it('14. tier 1: rejects asset not referenced in note', async () => {
+    setupRepoMock('owner', 'repo', {
+      '.shares/note-no-assets.json': JSON.stringify({ path: 'notes/hello.md' }),
+      'notes/hello.md': '# Hello, no images here',
+    });
+
+    const res = await fetch(`${baseUrl}/v1/git-shares/owner/repo/note-no-assets/assets?path=./secret.png`);
+
+    expect(res.status).toBe(404);
+  });
+
+  it('15. tier 2: serves asset referenced in note', async () => {
+    const { REPO_ID_BYTES, SHARE_ID_BYTES, SEGMENT, ENC_OWNER, ENC_REPO, SHARE_ID } = await registerTier2Repo();
+    const imageData = Buffer.from('fake-png-data');
+    setupRepoMock(ENC_OWNER, ENC_REPO, {
+      [`.shares/${SHARE_ID}.json`]: JSON.stringify({ path: 'notes/private.md' }),
+      'notes/private.md': '# Private\n\n![img](./photo.jpg)',
+      'notes/photo.jpg': imageData.toString('binary'),
+    });
+
+    const res = await fetch(`${baseUrl}/v1/git-shares/${SEGMENT}/assets?path=./photo.jpg`);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-security-policy')).toBe("default-src 'none'");
+  });
+
+  it('16. asset cache bypassed when share descriptor changes notePath', async () => {
+    // First request: note points to notes/v1.md with one image
+    setupRepoMock('owner', 'repo', {
+      '.shares/changing-note.json': JSON.stringify({ path: 'notes/v1.md' }),
+      'notes/v1.md': '# V1\n\n![img](./old.png)',
+      'notes/old.png': 'old',
+      'notes/new.png': 'new',
+    });
+    await fetch(`${baseUrl}/v1/git-shares/owner/repo/changing-note/content`);
+
+    // Simulate descriptor change: now points to notes/v2.md with a different image
+    setupRepoMock('owner', 'repo', {
+      '.shares/changing-note.json': JSON.stringify({ path: 'notes/v2.md' }),
+      'notes/v2.md': '# V2\n\n![img](./new.png)',
+      'notes/old.png': 'old',
+      'notes/new.png': 'new',
+    });
+
+    // old image should be rejected (wrong notePath in cache)
+    const resOld = await fetch(`${baseUrl}/v1/git-shares/owner/repo/changing-note/assets?path=./old.png`);
+    expect(resOld.status).toBe(404);
+
+    // new image should be served after cache is refreshed
+    const resNew = await fetch(`${baseUrl}/v1/git-shares/owner/repo/changing-note/assets?path=./new.png`);
+    expect(resNew.status).toBe(200);
+  });
+});
+
+// --- POST /v1/repo-id ---
+
+describe('POST /v1/repo-id', () => {
+  function mockRegistration(repoId: string, permissionLevel = 'admin') {
+    mockGetRepoInstallationId.mockResolvedValue(INSTALLATION_ID);
+    mockInstallationRequest.mockImplementation(
+      async (_env: any, _installationId: number, urlPath: string) => {
+        if (urlPath.includes('/collaborators/')) {
+          return new Response(JSON.stringify({ permission: permissionLevel }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        if (urlPath.includes('.shares/.repo-id')) {
+          return new Response(repoId, { status: 200 });
+        }
+        return new Response('not found', { status: 404 });
+      },
+    );
+    mockVerifyBearerSession.mockResolvedValue({
+      sessionId: 's', sub: 'u', login: 'testuser', avatarUrl: null, name: 'Test',
+    });
+  }
+
+  it('17. missing fields: returns 400', async () => {
+    mockRegistration('whatever');
+    const res = await fetch(`${baseUrl}/v1/repo-id`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer fake-token' },
+      body: JSON.stringify({ owner: 'x', repo: 'y' }), // missing repoId
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('18. invalid repoId format: returns 400', async () => {
+    mockRegistration('toolong-not-11chars');
+    const res = await fetch(`${baseUrl}/v1/repo-id`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer fake-token' },
+      body: JSON.stringify({ repoId: 'toolong-not-11chars', owner: 'x', repo: 'y' }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('19. insufficient permissions: returns 404', async () => {
+    const repoId = crypto.randomBytes(8).toString('base64url');
+    mockRegistration(repoId, 'read');
+    const res = await fetch(`${baseUrl}/v1/repo-id`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer fake-token' },
+      body: JSON.stringify({ repoId, owner: 'x', repo: 'y' }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it('20. .shares/.repo-id mismatch: returns 404', async () => {
+    const repoId = crypto.randomBytes(8).toString('base64url');
+    const differentRepoId = crypto.randomBytes(8).toString('base64url');
+    mockGetRepoInstallationId.mockResolvedValue(INSTALLATION_ID);
+    mockInstallationRequest.mockImplementation(
+      async (_env: any, _installationId: number, urlPath: string) => {
+        if (urlPath.includes('/collaborators/')) {
+          return new Response(JSON.stringify({ permission: 'admin' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+        if (urlPath.includes('.shares/.repo-id')) {
+          return new Response(differentRepoId, { status: 200 }); // mismatch
+        }
+        return new Response('not found', { status: 404 });
+      },
+    );
+    mockVerifyBearerSession.mockResolvedValue({ sessionId: 's', sub: 'u', login: 'testuser', avatarUrl: null, name: 'Test' });
+    const res = await fetch(`${baseUrl}/v1/repo-id`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer fake-token' },
+      body: JSON.stringify({ repoId, owner: 'x', repo: 'y' }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it('21. idempotent re-registration: same repoId + same repo succeeds', async () => {
+    const repoId = crypto.randomBytes(8).toString('base64url');
+    mockRegistration(repoId);
+    const body = JSON.stringify({ repoId, owner: 'idem-owner', repo: 'idem-repo' });
+    const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer fake-token' };
+
+    const res1 = await fetch(`${baseUrl}/v1/repo-id`, { method: 'POST', headers, body });
+    expect(res1.status).toBe(201);
+
+    const res2 = await fetch(`${baseUrl}/v1/repo-id`, { method: 'POST', headers, body });
+    expect(res2.status).toBe(201);
+  });
+
+  it('22. different repoId for same repo rejected', async () => {
+    const repoId1 = crypto.randomBytes(8).toString('base64url');
+    const repoId2 = crypto.randomBytes(8).toString('base64url');
+    const owner = 'one-repo-owner';
+    const repo = 'one-repo';
+
+    // Register first repoId
+    mockGetRepoInstallationId.mockResolvedValue(INSTALLATION_ID);
+    mockInstallationRequest.mockImplementation(
+      async (_env: any, _installationId: number, urlPath: string) => {
+        if (urlPath.includes('/collaborators/')) {
+          return new Response(JSON.stringify({ permission: 'admin' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+        if (urlPath.includes('.shares/.repo-id')) {
+          return new Response(repoId1, { status: 200 });
+        }
+        return new Response('not found', { status: 404 });
+      },
+    );
+    mockVerifyBearerSession.mockResolvedValue({ sessionId: 's', sub: 'u', login: 'testuser', avatarUrl: null, name: 'Test' });
+
+    const res1 = await fetch(`${baseUrl}/v1/repo-id`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer fake-token' },
+      body: JSON.stringify({ repoId: repoId1, owner, repo }),
+    });
+    expect(res1.status).toBe(201);
+
+    // Try to register a different repoId for the same repo — should fail
+    mockInstallationRequest.mockImplementation(
+      async (_env: any, _installationId: number, urlPath: string) => {
+        if (urlPath.includes('/collaborators/')) {
+          return new Response(JSON.stringify({ permission: 'admin' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+        if (urlPath.includes('.shares/.repo-id')) {
+          return new Response(repoId2, { status: 200 });
+        }
+        return new Response('not found', { status: 404 });
+      },
+    );
+
+    const res2 = await fetch(`${baseUrl}/v1/repo-id`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer fake-token' },
+      body: JSON.stringify({ repoId: repoId2, owner, repo }),
+    });
+    expect(res2.status).toBe(404);
+  });
+});
+
+// --- Opaque segment strictness ---
+
+describe('Opaque segment strictness', () => {
+  it('23. too short: returns 404', async () => {
+    const short = crypto.randomBytes(12).toString('base64url'); // 16 chars, not 32
+    const res = await fetch(`${baseUrl}/v1/git-shares/${short}/content`);
+    expect(res.status).toBe(404);
+  });
+
+  it('24. too long: returns 404', async () => {
+    const long = crypto.randomBytes(32).toString('base64url'); // 43 chars, not 32
+    const res = await fetch(`${baseUrl}/v1/git-shares/${long}/content`);
+    expect(res.status).toBe(404);
+  });
+
+  it('25. standard base64 chars (+ and /) rejected', async () => {
+    // Replace a char with standard base64 '+' — not valid base64url
+    const segment = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA+'; // 32 chars but contains +
+    const res = await fetch(`${baseUrl}/v1/git-shares/${segment}/content`);
+    expect(res.status).toBe(404);
   });
 });
 

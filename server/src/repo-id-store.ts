@@ -26,13 +26,17 @@ export function createRepoIdStore(options: RepoIdStoreOptions): RepoIdStoreInsta
 export type RepoIdStoreInstance = {
   init(): Promise<void>;
   get(repoId: string): RepoIdRecord | undefined;
+  // Reverse lookup: find the registered repoId for a given owner/repo.
+  getByRepo(owner: string, repo: string): RepoIdRecord | undefined;
   set(record: RepoIdRecord): Promise<void>;
 };
 
 class RepoIdStore implements RepoIdStoreInstance {
   #filePath: string;
   #dirPath: string;
-  #keys: Map<string, RepoIdRecord>;
+  #records: Map<string, RepoIdRecord>;
+  // Reverse map: "<owner>/<repo>" → repoId, for one-repoId-per-repo enforcement.
+  #repos: Map<string, string>;
   #persistQueue: Promise<void>;
 
   constructor(options: RepoIdStoreOptions) {
@@ -41,7 +45,8 @@ class RepoIdStore implements RepoIdStoreInstance {
     }
     this.#filePath = path.resolve(options.filePath);
     this.#dirPath = path.dirname(this.#filePath);
-    this.#keys = new Map();
+    this.#records = new Map();
+    this.#repos = new Map();
     this.#persistQueue = Promise.resolve();
   }
 
@@ -67,24 +72,32 @@ class RepoIdStore implements RepoIdStoreInstance {
   }
 
   get(repoId: string): RepoIdRecord | undefined {
-    return this.#keys.get(repoId);
+    return this.#records.get(repoId);
+  }
+
+  getByRepo(owner: string, repo: string): RepoIdRecord | undefined {
+    const repoId = this.#repos.get(`${owner}/${repo}`);
+    return repoId !== undefined ? this.#records.get(repoId) : undefined;
   }
 
   async set(record: RepoIdRecord): Promise<void> {
-    this.#keys.set(record.repoId, record);
+    this.#records.set(record.repoId, record);
+    this.#repos.set(`${record.owner}/${record.repo}`, record.repoId);
     await this.#persist();
   }
 
   #hydrate(records: RepoIdRecord[]): void {
-    this.#keys.clear();
+    this.#records.clear();
+    this.#repos.clear();
     for (let record of records) {
       if (!record || typeof record.repoId !== 'string') continue;
-      this.#keys.set(record.repoId, record);
+      this.#records.set(record.repoId, record);
+      this.#repos.set(`${record.owner}/${record.repo}`, record.repoId);
     }
   }
 
   async #persist(): Promise<void> {
-    let serialized: RepoIdRecord[] = Array.from(this.#keys.values());
+    let serialized: RepoIdRecord[] = Array.from(this.#records.values());
     let payload: RepoIdStoreData = { records: serialized };
     this.#persistQueue = this.#persistQueue.then(async () => {
       let tmpPath = `${this.#filePath}.tmp`;
