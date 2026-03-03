@@ -155,9 +155,31 @@ Simpler for agents and humans to create — `echo "notes/foo.md" > .shares/<shar
 - [x] Update share viewer to handle new URL formats
 - [x] Route `/s/<owner>/<repo>/<shareId>` → tier 1 API
 - [x] Route `/s/<segment>` → tier 2 API
-- [x] Delete legacy API which is no longer supported by the UI
+- [ ] Delete legacy API which is no longer supported by the UI
 
-### Task 7: Skill doc & tooling
+### Task 7: Frontend — Git-native share creation
+
+Replace the server-side share creation flow with a pure-git one. Instead of `POST /v1/shares`,
+the UI writes `.shares/<shareId>` directly to the repo via the GitHub Contents API, computes the
+opaque URL client-side, and registers the repoId on first use.
+
+- [ ] On first share in a repo: generate a random repoId, commit `.shares/.repo-id`, call `POST /v1/repo-id`
+- [ ] Generate a random shareId, compute the opaque URL segment client-side
+- [ ] Commit `.shares/<shareId>` containing the note path via GitHub Contents API
+- [ ] Update `ShareDialog` to show the computed opaque URL immediately (no server round-trip for the link)
+- [ ] Revoking a share: delete `.shares/<shareId>` from the repo via GitHub Contents API
+
+### Task 8: Frontend — Remove legacy sharing system
+
+Once Task 7 is complete, the old server-side share store is fully superseded.
+
+- [ ] Remove `getShareLinkForNote`, `createShareLink`, `revokeShareLink` from `src/lib/backend.ts`
+- [ ] Remove old share state management from `src/data.ts`
+- [ ] Remove old `/v1/shares` and `/v1/share-links/:id` endpoints from `server/src/sharing.ts`
+- [ ] Remove `server/src/share-store.ts`
+- [ ] Remove `server/data/shares.json`
+
+### Task 10: Skill doc & tooling
 
 - [ ] Update `skills/vibenote/SKILL.md` with new sharing workflow
 - [ ] Helper script or instructions for generating `.shares/.repo-id` and opaque URLs
