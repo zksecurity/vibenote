@@ -252,12 +252,9 @@ describe('Tier 2 — Opaque shares', () => {
             headers: { 'Content-Type': 'application/json' },
           });
         }
-        // .shares/.key file
-        if (urlPath.includes('.shares/.key')) {
-          return new Response(
-            JSON.stringify({ repoId: REPO_ID }),
-            { status: 200, headers: { 'Content-Type': 'application/json' } },
-          );
+        // .shares/.repo-id file
+        if (urlPath.includes('.shares/.repo-id')) {
+          return new Response(REPO_ID, { status: 200 });
         }
         return new Response('not found', { status: 404 });
       },
@@ -352,8 +349,8 @@ describe('Repo keys', () => {
             headers: { 'Content-Type': 'application/json' },
           });
         }
-        if (urlPath.includes('.shares/.key')) {
-          return new Response(JSON.stringify({ repoId: collisionRepoId }), { status: 200 });
+        if (urlPath.includes('.shares/.repo-id')) {
+          return new Response(collisionRepoId, { status: 200 });
         }
         return new Response('not found', { status: 404 });
       },

@@ -37,11 +37,11 @@ Example: `vibenote.dev/s/acme-org/team-notes/weekly-update`
 **One-time setup**:
 
 1. Generate a random repoId locally: `crypto.randomBytes(8).toString('base64url')` (11 chars)
-2. Store in repo: `.shares/.key` → `{"repoId": "<11-char base64url>"}`
+2. Store in repo: `.shares/.repo-id` → the raw repoId string (11-char base64url, no JSON)
 3. Register with server: `POST /v1/repo-keys` with `{repoId, owner, repo}`
 4. Server **verifies**:
    - Caller has write access to the repo (same check as current sharing endpoints)
-   - `.shares/.key` exists in the repo and contains matching `repoId`
+   - `.shares/.repo-id` exists in the repo and contains matching `repoId`
 5. Server stores: `repoId → {owner, repo}` (one entry per repo, not per note)
 
 **Creating an opaque share**: Same as tier 1 — add `.shares/<shareId>.json`. Generate a random shareId: `crypto.randomBytes(16).toString('base64url')` (22 chars, 128 bits).
@@ -56,7 +56,7 @@ Where `segment = base64url(repoId_bytes[8] || shareId_bytes[16])` — a single 3
 3. Fetch `.shares/<shareId>.json` from repo
 4. Serve content
 
-**Constructing links locally**: The client has the raw repoId bytes (from `.shares/.key`) and generates a random shareId. The opaque URL segment can be computed without any server round-trip.
+**Constructing links locally**: The client has the repoId (from `.shares/.repo-id`) and generates a random shareId. The opaque URL segment can be computed without any server round-trip.
 
 ### URL Routing
 
@@ -113,7 +113,7 @@ The share viewer SPA at `vibenote.dev/s/...` needs to be updated to:
 
 - [x] `POST /v1/repo-keys` — register a repoId for a repo
   - Requires session auth (write access to repo)
-  - Verifies `.shares/.key` exists in repo with matching `repoId`
+  - Verifies `.shares/.repo-id` exists in repo and contains matching `repoId`
   - Stores `repoId → {owner, repo}` in a key store (JSON file, like session store)
 - [x] Key store implementation (similar to share-store.ts)
 - [x] Tests
@@ -135,7 +135,7 @@ The share viewer SPA at `vibenote.dev/s/...` needs to be updated to:
 ### Task 5: Skill doc & tooling
 
 - [ ] Update `skills/vibenote/SKILL.md` with new sharing workflow
-- [ ] Helper script or instructions for generating `.shares/.key` and opaque URLs
+- [ ] Helper script or instructions for generating `.shares/.repo-id` and opaque URLs
 - [ ] Document how agents can create shares purely via git
 
 ### Task 6: Legacy compatibility

@@ -48,7 +48,13 @@ await repoKeyStore.init();
 
 // --- GitHub helpers ---
 
-async function fetchRepoFile(owner: string, repo: string, filePath: string, accept: string, ref?: string): Promise<Response> {
+async function fetchRepoFile(
+  owner: string,
+  repo: string,
+  filePath: string,
+  accept: string,
+  ref?: string
+): Promise<Response> {
   let installationId: number;
   try {
     installationId = await getRepoInstallationId(env, owner, repo);
@@ -70,9 +76,20 @@ async function fetchRepoFile(owner: string, repo: string, filePath: string, acce
   return res;
 }
 
-async function fetchShareJson(owner: string, repo: string, shareId: string, ref?: string): Promise<{ path: string; ref?: string }> {
+async function fetchShareJson(
+  owner: string,
+  repo: string,
+  shareId: string,
+  ref?: string
+): Promise<{ path: string; ref?: string }> {
   const GENERIC = 'share not found';
-  const ghRes = await fetchRepoFile(owner, repo, `.shares/${shareId}.json`, 'application/vnd.github.raw', ref);
+  const ghRes = await fetchRepoFile(
+    owner,
+    repo,
+    `.shares/${shareId}.json`,
+    'application/vnd.github.raw',
+    ref
+  );
   const raw = await ghRes.text();
   let parsed: { path?: string; ref?: string };
   try {
@@ -148,7 +165,13 @@ function cacheAssets(cacheKey: string, notePath: string, markdown: string): Set<
   return paths;
 }
 
-async function ensureAssetsLoaded(cacheKey: string, owner: string, repo: string, notePath: string, ref?: string): Promise<Set<string>> {
+async function ensureAssetsLoaded(
+  cacheKey: string,
+  owner: string,
+  repo: string,
+  notePath: string,
+  ref?: string
+): Promise<Set<string>> {
   const cached = assetCache.get(cacheKey);
   if (cached && Date.now() - cached.cachedAt <= ASSET_CACHE_TTL_MS) {
     return cached.paths;
@@ -357,25 +380,21 @@ function gitShareEndpoints(app: express.Express) {
         throw HttpError(404, REPO_ACCESS_DENIED);
       }
 
-      // Fetch .shares/.key from repo and verify the repoId matches
-      const keyFileRes = await installationRequest(
+      // Fetch .shares/.repo-id from repo and verify the repoId matches
+      const repoIdFileRes = await installationRequest(
         env,
         installationId,
         `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodeAssetPath(
-          '.shares/.key'
+          '.shares/.repo-id'
         )}`,
         { headers: { Accept: 'application/vnd.github.raw' } }
       );
-      if (keyFileRes.status === 404) throw HttpError(404, REPO_ACCESS_DENIED);
-      if (!keyFileRes.ok) throw HttpError(404, REPO_ACCESS_DENIED);
+      if (repoIdFileRes.status === 404) throw HttpError(404, REPO_ACCESS_DENIED);
+      if (!repoIdFileRes.ok) throw HttpError(404, REPO_ACCESS_DENIED);
 
-      let keyFileContent: { repoId?: string };
-      try {
-        keyFileContent = JSON.parse(await keyFileRes.text());
-      } catch {
-        throw HttpError(404, REPO_ACCESS_DENIED);
-      }
-      if (!keyFileContent || keyFileContent.repoId !== repoId) {
+      // File contains just the raw repoId string, no JSON wrapper
+      const storedRepoId = (await repoIdFileRes.text()).trim();
+      if (storedRepoId !== repoId) {
         throw HttpError(404, REPO_ACCESS_DENIED);
       }
 
@@ -397,5 +416,4 @@ function gitShareEndpoints(app: express.Express) {
       res.status(201).json({ ok: true });
     })
   );
-
 }
