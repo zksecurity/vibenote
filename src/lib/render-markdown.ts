@@ -4,6 +4,7 @@ import type { TokenizerAndRendererExtension } from 'marked';
 import DOMPurify from 'dompurify';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
+import hljs from 'highlight.js';
 
 export type { MarkdownRenderMode };
 export { renderMarkdown };
@@ -159,7 +160,19 @@ function configureMarkedOnce() {
       }
     },
   };
-  marked.use({ extensions: [blockMathExtension, inlineMathExtension] });
+  // Syntax-highlight fenced code blocks using highlight.js.
+  // Falls back to plain text for unknown languages.
+  const codeRenderer = {
+    code(code: string, infostring: string | undefined): string {
+      let lang = (infostring ?? '').split(/\s/)[0] ?? '';
+      let valid = lang !== '' && hljs.getLanguage(lang) !== undefined;
+      let highlighted = (valid && lang !== '')
+        ? hljs.highlight(code, { language: lang as string }).value
+        : hljs.highlightAuto(code).value;
+      return `<pre><code class="hljs${valid ? ` language-${lang}` : ''}">${highlighted}</code></pre>\n`;
+    },
+  };
+  marked.use({ extensions: [blockMathExtension, inlineMathExtension], renderer: codeRenderer });
   markedConfigured = true;
 }
 

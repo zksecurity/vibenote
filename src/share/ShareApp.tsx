@@ -2,6 +2,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { renderMarkdown } from '../lib/render-markdown';
 import 'github-markdown-css/github-markdown-light.css';
+import 'highlight.js/styles/github.css';
 import { fetchShareContent, fetchShareMeta, buildAssetUrl, parseShareUrl, type ShareRef, type ShareMetaResponse } from './api';
 
 type ViewerState =

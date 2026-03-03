@@ -30,6 +30,7 @@
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "github-markdown-css": "^5.9.0",
+    "highlight.js": "^11.11.1",
     "jose": "^5.9.3",
     "katex": "^0.16.22",
     "lucide-react": "^0.546.0",
