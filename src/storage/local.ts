@@ -3,7 +3,16 @@ import { normalizePath } from '../lib/util';
 import { logError } from '../lib/logging';
 import type { RemoteFile } from '../sync/git-sync';
 
-export type { FileKind, FileMeta, RepoFile, MarkdownFile, BinaryFile, AssetUrlFile, TextFile, RepoStoreSnapshot };
+export type {
+  FileKind,
+  FileMeta,
+  RepoFile,
+  MarkdownFile,
+  BinaryFile,
+  AssetUrlFile,
+  TextFile,
+  RepoStoreSnapshot,
+};
 
 export {
   basename,
@@ -55,7 +64,6 @@ type RepoFile = FileMeta & {
 type MarkdownFile = RepoFile & { kind: 'markdown' };
 type BinaryFile = RepoFile & { kind: 'binary' };
 type AssetUrlFile = RepoFile & { kind: 'asset-url' };
-// Plain-text files — used for .shares/ share descriptors and .shares/.repo-id.
 type TextFile = RepoFile & { kind: 'text' };
 
 function isMarkdownFile(doc: RepoFile): doc is MarkdownFile {
@@ -953,21 +961,71 @@ const BINARY_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', '
 // Common plain-text file extensions found in GitHub repos.
 const TEXT_EXTENSIONS = new Set([
   // code
-  'ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs',
-  'py', 'rb', 'rs', 'go', 'java', 'kt', 'scala',
-  'c', 'cpp', 'cc', 'h', 'hpp', 'cs', 'swift', 'php', 'lua',
-  'ex', 'exs', 'clj', 'cljs', 'hs', 'ml', 'mli', 'r',
+  'ts',
+  'tsx',
+  'js',
+  'jsx',
+  'mjs',
+  'cjs',
+  'py',
+  'rb',
+  'rs',
+  'go',
+  'java',
+  'kt',
+  'scala',
+  'c',
+  'cpp',
+  'cc',
+  'h',
+  'hpp',
+  'cs',
+  'swift',
+  'php',
+  'lua',
+  'ex',
+  'exs',
+  'clj',
+  'cljs',
+  'hs',
+  'ml',
+  'mli',
+  'r',
   // config / data
-  'json', 'jsonc', 'yaml', 'yml', 'toml', 'ini', 'cfg', 'conf', 'env',
-  'xml', 'csv', 'sql', 'graphql', 'proto',
+  'json',
+  'jsonc',
+  'yaml',
+  'yml',
+  'toml',
+  'ini',
+  'cfg',
+  'conf',
+  'env',
+  'xml',
+  'csv',
+  'sql',
+  'graphql',
+  'proto',
   // web
-  'html', 'htm', 'css', 'scss', 'sass', 'less',
+  'html',
+  'htm',
+  'css',
+  'scss',
+  'sass',
+  'less',
   // shell
-  'sh', 'bash', 'zsh', 'fish',
+  'sh',
+  'bash',
+  'zsh',
+  'fish',
   // docs
-  'txt', 'rst', 'tex', 'adoc',
+  'txt',
+  'rst',
+  'tex',
+  'adoc',
   // misc
-  'diff', 'patch',
+  'diff',
+  'patch',
 ]);
 
 // Map a repo file path to its FileKind, or null if the file should be ignored.
