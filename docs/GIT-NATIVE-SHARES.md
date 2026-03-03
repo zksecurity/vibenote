@@ -69,6 +69,24 @@ Both tiers coexist. Server distinguishes by URL structure:
 
 Same as current: relative asset paths in markdown are resolved and served via a `/assets` sub-endpoint. The share token/id identifies the note, assets are fetched relative to the note path.
 
+### Security Model
+
+**What Tier 2 protects:** The encrypted URL hides `owner`, `repo`, and `token` from anyone who sees the link. This is the only guarantee Tier 2 makes — it is about *URL privacy*, not access control.
+
+**What Tier 2 does NOT protect:** The Tier 1 endpoint is always available. Anyone who knows `owner/repo/token` can use it to read the note, because the server fetches content via the GitHub App installation (not the caller's credentials). The token is a plaintext filename inside `.shares/` in the repo, visible to anyone with repo read access.
+
+**Why token entropy matters even with Tier 2:** If the token is guessable (e.g. `weekly-update`) and the repo name is known or guessable, an attacker can brute-force the Tier 1 endpoint and:
+1. Confirm the private repo exists (GitHub deliberately doesn't reveal this — we must not either)
+2. Read the note content without any credentials
+
+Tier 2 encryption does **not** close this gap — the token is still a plaintext filename in `.shares/`.
+
+**Rules:**
+- Tokens on private repos MUST be cryptographically random, regardless of tier. Use `crypto.randomBytes(18).toString('base64url')` (24 chars, 144 bits).
+- Short human-readable tokens (e.g. `weekly-update`) are only safe on public repos, where the content is already public.
+- The sharing UI MUST always generate random tokens and use the Tier 2 (repo-keys) flow, producing opaque URLs that don't reveal the repo identity.
+- Agents and CLI tools creating shares must follow the same rule — see the VibeNote skill doc for guidance.
+
 ### Backward Compatibility
 
 Existing share links (`/s/<old-share-id>`) continue to work via legacy lookup in the current share store. New shares use the git-native system. Migration: optionally provide a tool to convert existing shares to `.shares/` files.
@@ -86,29 +104,29 @@ The share viewer SPA at `vibenote.dev/s/...` needs to be updated to:
 
 ### Task 1: Server — Tier 1 share resolution
 
-- [ ] New Express routes for git-native open shares
-- [ ] `GET /v1/git-shares/:owner/:repo/:token/content` — fetch `.shares/<token>.json` from repo, resolve path, serve markdown
-- [ ] `GET /v1/git-shares/:owner/:repo/:token` — share metadata
-- [ ] `GET /v1/git-shares/:owner/:repo/:token/assets?path=...` — relative assets
-- [ ] Reuse existing `installationRequest` / `getRepoInstallationId` for GitHub API calls
-- [ ] Tests
+- [x] New Express routes for git-native open shares
+- [x] `GET /v1/git-shares/:owner/:repo/:token/content` — fetch `.shares/<token>.json` from repo, resolve path, serve markdown
+- [x] `GET /v1/git-shares/:owner/:repo/:token` — share metadata
+- [x] `GET /v1/git-shares/:owner/:repo/:token/assets?path=...` — relative assets
+- [x] Reuse existing `installationRequest` / `getRepoInstallationId` for GitHub API calls
+- [x] Tests
 
 ### Task 2: Server — Tier 2 repo-keys endpoint
 
-- [ ] `POST /v1/repo-keys` — register a repo key
+- [x] `POST /v1/repo-keys` — register a repo key
   - Requires session auth (write access to repo)
   - Verifies `.shares/.key` exists in repo with matching `id`
   - Stores `keyId → {key, owner, repo}` in a key store (JSON file, like session store)
-- [ ] Key store implementation (similar to share-store.ts)
-- [ ] Tests
+- [x] Key store implementation (similar to share-store.ts)
+- [x] Tests
 
 ### Task 3: Server — Tier 2 encrypted share resolution
 
-- [ ] `GET /v1/git-shares/enc/:keyId/:blob/content` — decrypt blob, resolve share
-- [ ] `GET /v1/git-shares/enc/:keyId/:blob` — metadata
-- [ ] `GET /v1/git-shares/enc/:keyId/:blob/assets?path=...` — assets
-- [ ] AES-256-GCM encrypt/decrypt helpers
-- [ ] Tests
+- [x] `GET /v1/git-shares/enc/:keyId/:blob/content` — decrypt blob, resolve share
+- [x] `GET /v1/git-shares/enc/:keyId/:blob` — metadata
+- [x] `GET /v1/git-shares/enc/:keyId/:blob/assets?path=...` — assets
+- [x] AES-256-GCM encrypt/decrypt helpers
+- [x] Tests
 
 ### Task 4: Frontend — Share viewer updates
 

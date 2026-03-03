@@ -11,17 +11,19 @@ export { gitShareEndpoints };
 // --- Validation helpers ---
 
 // Token minimum length is 4 to allow readable names, but SHORT TOKENS ARE INSECURE
-// for tier 1 open shares on private repos (where the token is the only secret).
-// 4 chars ≈ 16M combinations = brute-forceable. 16+ chars ≈ 96+ bits = secure.
+// for any share on a private repo.
 //
-// The VibeNote UI / CLI MUST default to generating cryptographically random tokens
-// (e.g. crypto.randomBytes(18).toString('base64url') = 24 chars, 144 bits).
-// Short human-readable tokens should only be used on public repos or with tier 2
-// encryption where the token is inside the encrypted blob.
+// IMPORTANT: Tier 2 encryption does NOT make short tokens safe. The token is still
+// a plaintext filename inside .shares/ in the repo. If owner/repo are known or guessable,
+// Tier 1 is always available and a brute-forced token leaks both repo existence AND content.
+// GitHub deliberately doesn't reveal whether a private repo exists — we must uphold that.
 //
-// DO NOT raise the minimum here to enforce this — it would break tier 2 where
-// short tokens are fine (security comes from encryption, not token entropy).
-// Instead, enforce secure defaults in the UI/CLI layer.
+// Rule: tokens MUST be cryptographically random on private repos, regardless of tier.
+// Use crypto.randomBytes(18).toString('base64url') = 24 chars, 144 bits of entropy.
+// Short human-readable tokens are only safe on public repos (where content is already public).
+//
+// DO NOT raise the minimum here to enforce this — short tokens are structurally valid
+// (e.g. legacy or public repos). Enforce random defaults in the UI/CLI layer.
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{4,128}$/;
 
 function isValidToken(token: string): boolean {

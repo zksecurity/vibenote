@@ -26,15 +26,24 @@ VibeNote will pick up changes automatically on the next sync.
 
 ## Reading Shared Notes
 
-Shared note links look like: `https://vibenote.dev/s/<share-id>`
+There are three share URL formats. All are client-side rendered — rewrite to the API to fetch content.
 
-These pages are client-side rendered (React) and return empty HTML to `web_fetch`. To read the content, rewrite the URL to the API endpoint:
-
+### Legacy shares (old format)
 ```
 vibenote.dev/s/<share-id>  →  api.vibenote.dev/v1/share-links/<share-id>/content
 ```
 
-The API returns raw `text/markdown`.
+### Git-native Tier 1 (open shares — owner/repo/token visible in URL)
+```
+vibenote.dev/s/<owner>/<repo>/<token>  →  api.vibenote.dev/v1/git-shares/<owner>/<repo>/<token>/content
+```
+
+### Git-native Tier 2 (encrypted shares — opaque URL, repo identity hidden)
+```
+vibenote.dev/s/<keyId>/<blob>  →  api.vibenote.dev/v1/git-shares/enc/<keyId>/<blob>/content
+```
+
+All content endpoints return raw `text/markdown`.
 
 ### Example
 
@@ -43,6 +52,36 @@ The API returns raw `text/markdown`.
 # Fetch this instead:
 web_fetch https://api.vibenote.dev/v1/share-links/-0Fgm7cnqd8yZCfnULdY9oO5/content
 ```
+
+## Creating Git-Native Shares
+
+Shares are created by committing a JSON descriptor to `.shares/` in the repo:
+
+```json
+// .shares/<token>.json
+{ "path": "notes/my-note.md" }
+```
+
+The token becomes part of the share URL. **See the security rules below before choosing a token.**
+
+For encrypted (Tier 2) shares, the repo must have a key registered. The share URL is then constructed by encrypting `{owner, repo, token}` with AES-256-GCM using the repo key.
+
+### ⚠️ Security: Token Entropy is MANDATORY on Private Repos
+
+**Tokens on private repos MUST be cryptographically random, regardless of whether Tier 2 encryption is set up.** This is not optional.
+
+Why: The Tier 1 endpoint (`/v1/git-shares/<owner>/<repo>/<token>/content`) is always available. It uses the server's GitHub App credentials — not yours. If an attacker can guess `owner/repo` and `token`, they can:
+1. Confirm the private repo exists (GitHub deliberately hides this)
+2. Read the note content without any credentials
+
+Tier 2 encryption hides the token inside the encrypted URL, but the token is still a plaintext filename in `.shares/` in the repo. Tier 1 is always open. Encryption does not close this gap.
+
+**Always generate tokens like this:**
+```js
+crypto.randomBytes(18).toString('base64url') // 24 chars, 144 bits
+```
+
+Short human-readable tokens (e.g. `weekly-update`) are only safe on **public repos**, where the content is already public.
 
 ## Share Link API
 
