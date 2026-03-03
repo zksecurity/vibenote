@@ -971,14 +971,12 @@ const TEXT_EXTENSIONS = new Set([
 ]);
 
 // Map a repo file path to its FileKind, or null if the file should be ignored.
-// - .shares/ files → 'text' (path-prefix rule; no extension needed)
-// - .md             → 'markdown'
-// - known binary    → 'binary'
-// - known text ext  → 'text'
-// - no extension    → 'text'  (Makefile, Dockerfile, LICENSE, .gitignore …)
-// - unknown ext     → null (skip)
+// - .md          → 'markdown'
+// - known binary → 'binary'
+// - known text   → 'text'
+// - no extension → 'text'  (Makefile, Dockerfile, LICENSE, .gitignore, .shares/… )
+// - unknown ext  → null (skip)
 function kindFromPath(path: string): FileKind | null {
-  if (path.startsWith('.shares/')) return 'text';
   const lastSlash = path.lastIndexOf('/');
   const filename = path.slice(lastSlash + 1);
   const dotIdx = filename.lastIndexOf('.');
