@@ -36,6 +36,7 @@ function TextEditor({ doc, onChange, readOnly = false }: Props) {
   }
   return (
     <textarea
+      className="text-editor"
       value={text}
       onChange={(e) => onInput(e.target.value)}
       spellCheck={false}
