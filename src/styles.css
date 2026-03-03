@@ -878,53 +878,14 @@ textarea:focus-visible {
 
 .workspace-panels .preview {
   overflow: auto;
-  line-height: 1.68;
-  color: var(--text);
 }
 
-.workspace-panels .preview h1,
-.workspace-panels .preview h2,
-.workspace-panels .preview h3,
-.workspace-panels .preview h4 {
-  margin-top: 1.5em;
-  margin-bottom: 0.75em;
-  line-height: 1.25;
-}
-
-.workspace-panels .preview h1 {
-  font-size: 2rem;
-}
-
-.workspace-panels .preview h2 {
-  font-size: 1.6rem;
-}
-
-.workspace-panels .preview h3 {
-  font-size: 1.3rem;
-}
-
-.workspace-panels .preview p {
-  margin: 0 0 1em;
-}
-
-.workspace-panels .preview pre {
-  background: var(--surface-subtle);
-  border-radius: 10px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  overflow: auto;
-}
-
-.workspace-panels .preview code {
-  font: var(--code-font);
-}
-
-.workspace-panels .preview blockquote {
-  border-left: 4px solid var(--accent-border);
-  margin: 0 0 1em;
-  padding: 0.2em 1em;
-  background: rgba(9, 105, 218, 0.08);
-  border-radius: 0 8px 8px 0;
+/* github-markdown-css provides all content styles; override only the
+   properties that would conflict with the card layout. */
+.workspace-panels .preview.markdown-body {
+  font-family: inherit;
+  font-size: 1rem;
+  color: inherit;
 }
 
 .empty-state {

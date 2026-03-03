@@ -4,6 +4,7 @@ import type { TokenizerAndRendererExtension } from 'marked';
 import DOMPurify from 'dompurify';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
+import hljs from 'highlight.js';
 
 export type { MarkdownRenderMode };
 export { renderMarkdown };
@@ -123,6 +124,8 @@ function configureMarkedOnce() {
     },
     tokenizer(src) {
       if (src[0] !== '$' || src[1] === '$') return undefined;
+      // Don't match currency: $ followed by a digit or comma (e.g. $1,200)
+      if (src[1] !== undefined && /[\d,]/.test(src[1])) return undefined;
       let index = 1;
       let closing = -1;
       while (index < src.length) {
@@ -159,7 +162,19 @@ function configureMarkedOnce() {
       }
     },
   };
-  marked.use({ extensions: [blockMathExtension, inlineMathExtension] });
+  // Syntax-highlight fenced code blocks using highlight.js.
+  // Falls back to plain text for unknown languages.
+  const codeRenderer = {
+    code(code: string, infostring: string | undefined): string {
+      let lang = (infostring ?? '').split(/\s/)[0] ?? '';
+      let valid = lang !== '' && hljs.getLanguage(lang) !== undefined;
+      let highlighted = (valid && lang !== '')
+        ? hljs.highlight(code, { language: lang as string }).value
+        : hljs.highlightAuto(code).value;
+      return `<pre><code class="hljs${valid ? ` language-${lang}` : ''}">${highlighted}</code></pre>\n`;
+    },
+  };
+  marked.use({ extensions: [blockMathExtension, inlineMathExtension], renderer: codeRenderer });
   markedConfigured = true;
 }
 

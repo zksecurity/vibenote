@@ -1,6 +1,8 @@
 // Public share viewer entry that resolves the share ref and renders the note.
 import React, { useEffect, useMemo, useState } from 'react';
 import { renderMarkdown } from '../lib/render-markdown';
+import 'github-markdown-css/github-markdown-light.css';
+import 'highlight.js/styles/github.css';
 import { fetchShareContent, fetchShareMeta, buildAssetUrl, parseShareUrl, type ShareRef, type ShareMetaResponse } from './api';
 
 type ViewerState =
@@ -121,7 +123,7 @@ export function ShareApp() {
               </a>
             </p>
           </header>
-          <div className="share-content" dangerouslySetInnerHTML={{ __html: renderedHtml }} />
+          <div className="share-content markdown-body" dangerouslySetInnerHTML={{ __html: renderedHtml }} />
         </article>
       </main>
     </div>
