@@ -26,15 +26,25 @@ VibeNote will pick up changes automatically on the next sync.
 
 ## Reading Shared Notes
 
-Shared note links look like: `https://vibenote.dev/s/<share-id>`
+There are three share URL formats. All are client-side rendered — rewrite to the API to fetch content.
 
-These pages are client-side rendered (React) and return empty HTML to `web_fetch`. To read the content, rewrite the URL to the API endpoint:
-
+### Legacy shares (old format)
 ```
 vibenote.dev/s/<share-id>  →  api.vibenote.dev/v1/share-links/<share-id>/content
 ```
 
-The API returns raw `text/markdown`.
+### Git-native Tier 1 (open shares — owner/repo/shareId visible in URL)
+```
+vibenote.dev/s/<owner>/<repo>/<shareId>  →  api.vibenote.dev/v1/git-shares/<owner>/<repo>/<shareId>/content
+```
+
+### Git-native Tier 2 (opaque shares — repo identity hidden)
+```
+vibenote.dev/s/<segment>  →  api.vibenote.dev/v1/git-shares/<segment>/content
+```
+Where `<segment>` is a single 32-char base64url string encoding both repoId (8 bytes) and shareId (16 bytes).
+
+All content endpoints return raw `text/markdown`.
 
 ### Example
 
@@ -44,11 +54,41 @@ The API returns raw `text/markdown`.
 web_fetch https://api.vibenote.dev/v1/share-links/-0Fgm7cnqd8yZCfnULdY9oO5/content
 ```
 
+## Creating Git-Native Shares
+
+Shares are created by committing a JSON descriptor to `.shares/` in the repo:
+
+```json
+// .shares/<shareId>.json
+{ "path": "notes/my-note.md" }
+```
+
+The shareId becomes part of the share URL. **See the security rules below before choosing a shareId.**
+
+For opaque (Tier 2) shares, the repo must have a repoId registered with the server. The share URL segment is then `base64url(repoId_bytes[8] || shareId_bytes[16])`, constructable locally without a server round-trip.
+
+### ⚠️ Security: ShareId Entropy is MANDATORY on Private Repos
+
+**ShareIds on private repos MUST be cryptographically random.** This is not optional.
+
+Why: The Tier 1 endpoint (`/v1/git-shares/<owner>/<repo>/<shareId>/content`) is always available. It uses the server's GitHub App credentials — not yours. If an attacker can guess `owner/repo` and `shareId`, they can:
+1. Confirm the private repo exists (GitHub deliberately hides this)
+2. Read the note content without any credentials
+
+Tier 2 opaque URLs hide the shareId inside the URL segment, but the shareId is still a plaintext filename in `.shares/` in the repo. Tier 1 is always open and accessible to anyone who knows all three values.
+
+**Always generate shareIds like this:**
+```js
+crypto.randomBytes(16).toString('base64url') // 22 chars, 128 bits
+```
+
+Short human-readable shareIds (e.g. `weekly-update`) are only safe on **public repos**, where the content is already public.
+
 ## Share Link API
 
 Base URL: `https://api.vibenote.dev`
 
-All mutating endpoints require a VibeNote session JWT in the `Authorization: Bearer <token>` header. Currently there is no programmatic auth — share creation must be done through the VibeNote web UI.
+All mutating endpoints require a VibeNote session JWT in the `Authorization: Bearer <token>` header, where `<token>` is the session JWT obtained after authenticating via the VibeNote web UI. Currently there is no programmatic auth — share creation must be done through the VibeNote web UI.
 
 ### Endpoints
 
