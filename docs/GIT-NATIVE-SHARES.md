@@ -21,17 +21,21 @@ The filename (minus `.json`) becomes the token / URL slug.
 Example: `vibenote.dev/s/acme-org/team-notes/weekly-update`
 
 **Server resolution**:
+
 1. Parse owner/repo/token from URL
 2. Get GitHub App installation for that repo
 3. Fetch `.shares/<token>.json` from the repo (GitHub Contents API)
 4. Read `path` from JSON
 5. Fetch and serve the content at that path
 
-**No server-side state.** Security: for private repos, the token is the ONLY access credential in the URL. The UI/CLI **must** default to generating cryptographically random tokens (e.g. `crypto.randomBytes(18).toString('base64url')` → 24 chars, 144 bits of entropy). Short human-readable token names (like `weekly-update`) are fine for public repos or when using tier 2 encryption, but are insecure for tier 1 on private repos — a 4-char token has only ~16M combinations and is brute-forceable.
+**No server-side state.** Security: for private repos, the token is the ONLY access credential in the URL. The UI/CLI must default to generating cryptographically random tokens (e.g. `crypto.randomBytes(18).toString('base64url')` → 24 chars, 144 bits of entropy). Short human-readable token names (like `weekly-update`) are fine if the user wants to make the note effectively public.
+
+**Caveat.** Even with a random token, tier 1 shares leak the repo owner and name, which can be awkward and unwanted when sharing a note from a private repo. This is the main trade-off and why we created tier 2 shares.
 
 ### Tier 2 — Encrypted Shares (one-time setup per repo)
 
 **One-time setup**:
+
 1. Generate a 256-bit key locally
 2. Store in repo: `.shares/.key` → `{"id": "<keyId>", "key": "<hex-encoded-256bit>"}`
 3. Register with server: `POST /v1/repo-keys` with `{id, key, owner, repo}`
@@ -46,6 +50,7 @@ Example: `vibenote.dev/s/acme-org/team-notes/weekly-update`
 Where `encrypted-blob = base64url(AES-256-GCM(key, JSON.stringify({owner, repo, token})))`
 
 **Server resolution**:
+
 1. Look up key by `keyId`
 2. Decrypt blob → get `{owner, repo, token}`
 3. Fetch `.shares/<token>.json` from repo
@@ -56,6 +61,7 @@ Where `encrypted-blob = base64url(AES-256-GCM(key, JSON.stringify({owner, repo, 
 ### URL Routing
 
 Both tiers coexist. Server distinguishes by URL structure:
+
 - 3+ path segments after `/s/`: `owner/repo/token` → tier 1
 - 2 path segments after `/s/`: `keyId/blob` → tier 2
 
@@ -70,6 +76,7 @@ Existing share links (`/s/<old-share-id>`) continue to work via legacy lookup in
 ### Frontend (share viewer)
 
 The share viewer SPA at `vibenote.dev/s/...` needs to be updated to:
+
 - Parse the new URL formats
 - Call the corresponding new API endpoints
 
@@ -78,6 +85,7 @@ The share viewer SPA at `vibenote.dev/s/...` needs to be updated to:
 ## Tasks
 
 ### Task 1: Server — Tier 1 share resolution
+
 - [ ] New Express routes for git-native open shares
 - [ ] `GET /v1/git-shares/:owner/:repo/:token/content` — fetch `.shares/<token>.json` from repo, resolve path, serve markdown
 - [ ] `GET /v1/git-shares/:owner/:repo/:token` — share metadata
@@ -86,6 +94,7 @@ The share viewer SPA at `vibenote.dev/s/...` needs to be updated to:
 - [ ] Tests
 
 ### Task 2: Server — Tier 2 repo-keys endpoint
+
 - [ ] `POST /v1/repo-keys` — register a repo key
   - Requires session auth (write access to repo)
   - Verifies `.shares/.key` exists in repo with matching `id`
@@ -94,6 +103,7 @@ The share viewer SPA at `vibenote.dev/s/...` needs to be updated to:
 - [ ] Tests
 
 ### Task 3: Server — Tier 2 encrypted share resolution
+
 - [ ] `GET /v1/git-shares/enc/:keyId/:blob/content` — decrypt blob, resolve share
 - [ ] `GET /v1/git-shares/enc/:keyId/:blob` — metadata
 - [ ] `GET /v1/git-shares/enc/:keyId/:blob/assets?path=...` — assets
@@ -101,16 +111,19 @@ The share viewer SPA at `vibenote.dev/s/...` needs to be updated to:
 - [ ] Tests
 
 ### Task 4: Frontend — Share viewer updates
+
 - [ ] Update share viewer to handle new URL formats
 - [ ] Route `/s/<owner>/<repo>/<token>` → tier 1 API
 - [ ] Route `/s/<keyId>/<blob>` → tier 2 API
 - [ ] Keep backward compat with `/s/<old-id>` → legacy API
 
 ### Task 5: Skill doc & tooling
+
 - [ ] Update `skills/vibenote/SKILL.md` with new sharing workflow
 - [ ] Helper script or instructions for generating `.shares/.key` and encrypted URLs
 - [ ] Document how agents can create shares purely via git
 
 ### Task 6: Legacy compatibility
+
 - [ ] Keep old `/v1/share-links/:id/content` working
 - [ ] Optional migration script: export current shares → `.shares/` files
