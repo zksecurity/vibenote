@@ -41,7 +41,7 @@ function isValidRepoId(repoId: string): boolean {
 const assetCache = new Map<string, { paths: Set<string>; cachedAt: number }>();
 const ASSET_CACHE_TTL_MS = 5 * 60 * 1000;
 
-// --- Repo key store ---
+// --- Repo ID store ---
 
 const repoIdStore = createRepoIdStore({ filePath: env.REPO_ID_STORE_FILE });
 await repoIdStore.init();
