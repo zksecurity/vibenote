@@ -136,9 +136,9 @@ function configureMarkedOnce() {
         }
         if (char === '$') {
           // Closing $ must not be preceded by whitespace
-          if (index > 1 && /\s/.test(src[index - 1])) { index += 1; continue; }
+          if (index > 1 && /\s/.test(src[index - 1] ?? '')) { index += 1; continue; }
           // Closing $ must not be followed by a digit (avoids currency like $1,200)
-          if (index + 1 < src.length && /\d/.test(src[index + 1])) { index += 1; continue; }
+          if (index + 1 < src.length && /\d/.test(src[index + 1] ?? '')) { index += 1; continue; }
           closing = index;
           break;
         }
