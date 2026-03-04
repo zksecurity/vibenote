@@ -124,8 +124,8 @@ function configureMarkedOnce() {
     },
     tokenizer(src) {
       if (src[0] !== '$' || src[1] === '$') return undefined;
-      // Don't match currency: $ followed by a digit or comma (e.g. $1,200)
-      if (src[1] !== undefined && /[\d,]/.test(src[1])) return undefined;
+      // Opening $ must not be followed by whitespace
+      if (src[1] !== undefined && /\s/.test(src[1])) return undefined;
       let index = 1;
       let closing = -1;
       while (index < src.length) {
@@ -135,6 +135,10 @@ function configureMarkedOnce() {
           continue;
         }
         if (char === '$') {
+          // Closing $ must not be preceded by whitespace
+          if (index > 1 && /\s/.test(src[index - 1])) { index += 1; continue; }
+          // Closing $ must not be followed by a digit (avoids currency like $1,200)
+          if (index + 1 < src.length && /\d/.test(src[index + 1])) { index += 1; continue; }
           closing = index;
           break;
         }
