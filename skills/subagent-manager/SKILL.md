@@ -14,7 +14,8 @@ This repo uses a task-board workflow:
 
 - one task file per task under `tasks/`
 - one tmux session per subagent
-- one subagent per task
+- one active workstream per subagent session
+- one bounded task file at a time inside that session
 - manager reviews before accepting the task
 
 ## Launch workflow
@@ -56,6 +57,31 @@ Keep the prompt bounded and explicit:
 
 Avoid broad prompts like "work on #99" or "refactor the data layer".
 
+## Reuse policy
+
+Prefer reusing an existing subagent session when:
+
+- the next task is part of the same workstream
+- the session has already gathered relevant codebase context
+- the session output is still sharp and trustworthy
+
+This saves time and context reload cost.
+
+Do not restart a subagent just because one bounded task finished.
+
+Instead:
+
+1. review and accept or reject the finished task
+2. update the next task file
+3. send the next bounded prompt into the same tmux session
+
+Start a fresh subagent session when:
+
+- the workstream changes materially
+- the session starts drifting or freelancing
+- the accumulated context is becoming noisy or stale
+- the prior task revealed that a narrower or differently skilled agent is needed
+
 ## Supervision
 
 Inspect the live run with:
@@ -90,6 +116,7 @@ If the result is not acceptable, keep the task open and launch a follow-up subag
 ## Guardrails
 
 - Prefer one subagent per task file.
+- Prefer reusing one good subagent session across adjacent tasks in the same workstream.
 - Prefer one narrow task over one large autonomous run.
 - Do not let subagents commit unless explicitly requested by the user.
 - In this repo, avoid reading or writing `.env`.
