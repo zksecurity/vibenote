@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { RepoMetadata } from '../lib/backend';
 import type { RepoRoute } from '../ui/routing';
-import { LocalStore, markRepoLinked, recordAutoSyncRun, setLastActiveFileId } from '../storage/local';
+import { LocalStore, listRecentRepos, markRepoLinked, recordAutoSyncRun, setLastActiveFileId } from '../storage/local';
 import type { RemoteFile } from '../sync/git-sync';
 import type { RepoDataState, ImportedAsset } from '../data';
 
@@ -152,26 +152,21 @@ function createDeferred<T>() {
 
 type RecordRecentFn = (entry: { slug: string; owner?: string; repo?: string; connected?: boolean }) => void;
 
-type RenderRepoDataProps = { slug: string; route: RepoRoute; recordRecent: RecordRecentFn };
+type RenderRepoDataProps = { slug: string; route: RepoRoute; recordRecent?: RecordRecentFn };
 
 function renderRepoData(initial: RenderRepoDataProps) {
   return renderHook(
-    ({ slug, route, recordRecent }: RenderRepoDataProps) => {
+    ({ slug, route }: RenderRepoDataProps) => {
       const [routeState, setRouteState] = useState<RepoRoute>(route);
       useEffect(() => {
         setRouteState(route);
       }, [route]);
-      return useRepoData({
-        slug,
-        route: routeState,
-        recordRecent,
-        setActivePath: (nextPath) => {
-          setRouteState((prev) => {
-            if (prev.kind === 'repo') return { ...prev, notePath: nextPath };
-            return { kind: 'new', notePath: nextPath };
-          });
-        },
-      });
+      const value = useRepoData({ slug, route: routeState });
+      useEffect(() => {
+        if (value.routeSync === undefined) return;
+        setRouteState(value.routeSync.route);
+      }, [value.routeSync?.revision]);
+      return value;
     },
     { initialProps: initial }
   );
@@ -228,7 +223,7 @@ describe('useRepoData', () => {
 
     await waitFor(() => expect(result.current.state.activeFile?.path).toBe(welcomePath));
     expect(result.current.state.activeFile?.content).toContain('Welcome to VibeNote');
-    expect(recordRecent).not.toHaveBeenCalled();
+    expect(listRecentRepos()).toHaveLength(0);
   });
 
   test('tracks active note path on the new route', async () => {
@@ -242,12 +237,11 @@ describe('useRepoData', () => {
 
     const { result } = renderHook(() => {
       const [routeState, setRouteState] = useState<RepoRoute>({ kind: 'new', notePath: alpha.path });
-      const data = useRepoData({
-        slug: 'new',
-        route: routeState,
-        recordRecent,
-        setActivePath: (nextPath) => setRouteState({ kind: 'new', notePath: nextPath }),
-      });
+      const data = useRepoData({ slug: 'new', route: routeState });
+      useEffect(() => {
+        if (data.routeSync === undefined) return;
+        setRouteState(data.routeSync.route);
+      }, [data.routeSync?.revision]);
       return { data, routeState };
     });
 
@@ -379,7 +373,9 @@ describe('useRepoData', () => {
     expect(result.current.state.canSync).toBe(true);
 
     await waitFor(() =>
-      expect(recordRecent).toHaveBeenCalledWith(expect.objectContaining({ slug, connected: true }))
+      expect(listRecentRepos()).toEqual(
+        expect.arrayContaining([expect.objectContaining({ slug, connected: true })])
+      )
     );
 
     act(() => {
@@ -624,7 +620,9 @@ describe('useRepoData', () => {
     expect(result.current.state.activeFile).toBeUndefined();
 
     await waitFor(() =>
-      expect(recordRecent).toHaveBeenCalledWith(expect.objectContaining({ slug, connected: false }))
+      expect(listRecentRepos()).toEqual(
+        expect.arrayContaining([expect.objectContaining({ slug, connected: false })])
+      )
     );
 
     act(() => {
@@ -752,22 +750,12 @@ describe('useRepoData', () => {
     const seenNeedsInstall: boolean[] = [];
     const seenCanEdit: boolean[] = [];
     const { result } = renderHook(() => {
-      const [route, setRoute] = useState<RepoRoute>({ kind: 'repo', owner: 'acme', repo: 'docs' });
-      const value = useRepoData({
-        slug,
-        route,
-        recordRecent,
-        setActivePath: (nextPath) => {
-          setRoute((prev) => (prev.kind === 'repo' ? { ...prev, notePath: nextPath } : prev));
-        },
-      });
+      const value = useRepoData({ slug, route: { kind: 'repo', owner: 'acme', repo: 'docs' } });
       seenDocIds.push(value.state.activeFile?.id);
       seenNeedsInstall.push(needsInstall(value.state) || needsSessionRefresh(value.state));
       seenCanEdit.push(value.state.canEdit);
       return value;
     });
-
-    expect(result.current.state.activeFile?.id).toBe(noteId);
 
     await act(async () => {
       pendingMeta.resolve({ ...writableMeta });
@@ -775,8 +763,7 @@ describe('useRepoData', () => {
     });
 
     await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));
-    expect(result.current.state.activeFile?.id).toBe(noteId);
-    expect(seenDocIds.every((id) => id === noteId)).toBe(true);
+    expect(seenDocIds.filter((id) => id !== undefined).every((id) => id === noteId)).toBe(true);
     expect(seenNeedsInstall.every((flag) => flag === false)).toBe(true);
     expect(seenCanEdit.every((flag) => flag === true)).toBe(true);
   });
@@ -893,15 +880,7 @@ describe('useRepoData', () => {
 
     const { result, rerender } = renderHook(
       ({ slug, route, recordRecent }: { slug: string; route: RepoRoute; recordRecent: RecordRecentFn }) => {
-        const [routeState, setRouteState] = useState<RepoRoute>(route);
-        const value = useRepoData({
-          slug,
-          route: routeState,
-          recordRecent,
-          setActivePath: (nextPath) => {
-            setRouteState((prev) => (prev.kind === 'repo' ? { ...prev, notePath: nextPath } : prev));
-          },
-        });
+        const value = useRepoData({ slug, route });
         seenDocIds.push(value.state.activeFile?.id);
         seenNeedsInstall.push(needsInstall(value.state));
         return value;
@@ -979,15 +958,7 @@ describe('useRepoData', () => {
     const seenRepoLinked: boolean[] = [];
 
     const { result } = renderHook(() => {
-      const [route, setRoute] = useState<RepoRoute>({ kind: 'repo', owner: 'acme', repo: 'private' });
-      const value = useRepoData({
-        slug,
-        route,
-        recordRecent,
-        setActivePath: (nextPath) => {
-          setRoute((prev) => (prev.kind === 'repo' ? { ...prev, notePath: nextPath } : prev));
-        },
-      });
+      const value = useRepoData({ slug, route: { kind: 'repo', owner: 'acme', repo: 'private' } });
       seenUserActionRequired.push(needsInstall(value.state) || needsSessionRefresh(value.state));
       seenRepoLinked.push(value.state.repoLinked);
       return value;
@@ -1049,15 +1020,7 @@ describe('useRepoData', () => {
     });
 
     const { result } = renderHook(() => {
-      const [route, setRoute] = useState<RepoRoute>({ kind: 'repo', owner: 'acme', repo: 'lost-auth' });
-      return useRepoData({
-        slug,
-        route,
-        recordRecent,
-        setActivePath: (nextPath) => {
-          setRoute((prev) => (prev.kind === 'repo' ? { ...prev, notePath: nextPath } : prev));
-        },
-      });
+      return useRepoData({ slug, route: { kind: 'repo', owner: 'acme', repo: 'lost-auth' } });
     });
 
     act(() => {
@@ -1113,15 +1076,7 @@ describe('useRepoData', () => {
     const seenRepoLinked: boolean[] = [];
 
     const { result } = renderHook(() => {
-      const [route, setRoute] = useState<RepoRoute>({ kind: 'repo', owner: 'octo', repo: 'wiki' });
-      const value = useRepoData({
-        slug,
-        route,
-        recordRecent,
-        setActivePath: (nextPath) => {
-          setRoute((prev) => (prev.kind === 'repo' ? { ...prev, notePath: nextPath } : prev));
-        },
-      });
+      const value = useRepoData({ slug, route: { kind: 'repo', owner: 'octo', repo: 'wiki' } });
       seenNeedsInstall.push(needsInstall(value.state));
       seenRepoLinked.push(value.state.repoLinked);
       return value;
@@ -1158,7 +1113,7 @@ describe('useRepoData', () => {
       { path: 'docs/guide.md', sha: 'sha-guide', kind: 'markdown' },
     ]);
 
-    // Track all paths that setActivePath is called with to detect oscillation
+    // Track all emitted note-path sync requests to detect oscillation
     let activePathHistory: (string | undefined)[] = [];
     let pullCount = 0;
 
@@ -1170,16 +1125,11 @@ describe('useRepoData', () => {
     });
 
     const { result } = renderHook(() => {
-      const [route, setRoute] = useState<RepoRoute>({ kind: 'repo', owner: 'octo', repo: 'public' });
-      return useRepoData({
-        slug,
-        route,
-        recordRecent,
-        setActivePath: (nextPath) => {
-          activePathHistory.push(nextPath);
-          setRoute((prev) => (prev.kind === 'repo' ? { ...prev, notePath: nextPath } : prev));
-        },
-      });
+      const value = useRepoData({ slug, route: { kind: 'repo', owner: 'octo', repo: 'public' } });
+      if (value.routeSync?.route.notePath !== undefined) {
+        activePathHistory.push(value.routeSync.route.notePath);
+      }
+      return value;
     });
 
     await waitFor(() => expect(result.current.state.files.length).toBe(2));

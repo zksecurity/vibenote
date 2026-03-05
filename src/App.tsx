@@ -1,84 +1,59 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { useRoute } from './ui/routing';
+import React, { useEffect } from 'react';
+import { useAppData, type AppNavigationState } from './data';
+import { useRoute, type Route } from './ui/routing';
 import { RepoView } from './ui/RepoView';
 import { HomeView } from './ui/HomeView';
-import { listRecentRepos, recordRecentRepo, type RecentRepo } from './storage/local';
 
 export function App() {
   const { route, navigate } = useRoute();
+  let { state, dispatch, helpers } = useAppData({ route });
 
   // Adjust page title based on route
   useEffect(() => {
-    document.title = route.kind === 'repo' ? `${route.owner}/${route.repo}` : 'VibeNote';
-  }, [route]);
+    let target = state.workspace?.target;
+    document.title =
+      target !== undefined && target.kind === 'github' ? `${target.owner}/${target.repo}` : 'VibeNote';
+  }, [state.workspace?.target]);
 
-  // redirects
   useEffect(() => {
-    // if the route is /start, redirect to the most recent repo or /home
-    if (route.kind === 'start') {
-      let candidate = recents.find((entry) => entry.owner !== undefined && entry.repo !== undefined);
+    let nextRoute = routeFromNavigation(state.navigation);
+    if (nextRoute === undefined) return;
+    if (routesEqual(route, nextRoute)) return;
+    navigate(nextRoute, { replace: state.navigation.replace === true });
+  }, [route, navigate, state.navigation]);
 
-      if (candidate !== undefined) {
-        navigate({ kind: 'repo', owner: candidate.owner!, repo: candidate.repo! }, { replace: true });
-        return;
-      }
-      navigate({ kind: 'home' }, { replace: true });
-    }
-
-    // if the route is /home and there are no recent repos, redirect to /new for the onboarding flow
-    if (route.kind === 'home') {
-      if (listRecentRepos().length === 0) {
-        navigate({ kind: 'new', notePath: 'README.md' }, { replace: true });
-      }
-    }
-  }, [route]);
-
-  // list of recent repos, kept in local storage and updated when navigating to a new repo
-  // or updating information about an existing one
-  const [recents, recordRecent] = useRecents();
-
-  if (route.kind === 'home') {
-    return <HomeView recents={recents} navigate={navigate} />;
+  if (state.navigation.screen === 'home') {
+    return <HomeView recents={state.repos.recents} dispatch={dispatch} />;
   }
 
-  if (route.kind === 'start') {
-    // will redirect immediately
-    return null;
-  }
-
-  if (route.kind === 'new') {
-    return <RepoView slug="new" route={route} navigate={navigate} recordRecent={recordRecent} />;
-  }
-
-  if (route.kind === 'repo') {
-    return (
-      <RepoView
-        slug={`${route.owner}/${route.repo}`}
-        route={route}
-        navigate={navigate}
-        recordRecent={recordRecent}
-      />
-    );
+  if (state.navigation.screen === 'workspace' && state.workspace !== undefined) {
+    return <RepoView state={state} dispatch={dispatch} helpers={helpers} />;
   }
 
   return null;
 }
 
-function useRecents() {
-  const [recents, setRecents] = useState<RecentRepo[]>(() => listRecentRepos());
+function routeFromNavigation(navigation: AppNavigationState): Route | undefined {
+  if (navigation.screen === 'home') return { kind: 'home' } as const;
+  if (navigation.screen !== 'workspace' || navigation.target === undefined) return undefined;
+  if (navigation.target.repo.kind === 'new') {
+    return { kind: 'new', notePath: navigation.target.notePath } as const;
+  }
+  return {
+    kind: 'repo',
+    owner: navigation.target.repo.owner,
+    repo: navigation.target.repo.repo,
+    notePath: navigation.target.notePath,
+  } as const;
+}
 
-  useEffect(() => {
-    const onStorage = () => setRecents(listRecentRepos());
-    window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
-  }, []);
-
-  const recordRecent = useCallback(
-    (entry: { slug: string; owner?: string; repo?: string; title?: string; connected?: boolean }) => {
-      recordRecentRepo(entry);
-      setRecents(listRecentRepos());
-    },
-    []
-  );
-  return [recents, recordRecent] as const;
+function routesEqual(a: Route | undefined, b: Route | undefined) {
+  if (a === undefined || b === undefined) return a === b;
+  if (a.kind !== b.kind) return false;
+  if (a.kind === 'home' && b.kind === 'home') return true;
+  if (a.kind === 'new' && b.kind === 'new') return a.notePath === b.notePath;
+  if (a.kind === 'repo' && b.kind === 'repo') {
+    return a.owner === b.owner && a.repo === b.repo && a.notePath === b.notePath;
+  }
+  return false;
 }

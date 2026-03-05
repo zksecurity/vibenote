@@ -71,24 +71,19 @@ const writableMeta: RepoMetadata = {
 
 type RecordRecentFn = (entry: { slug: string; owner?: string; repo?: string; connected?: boolean }) => void;
 
-function renderRepoData(initial: { slug: string; route: RepoRoute; recordRecent: RecordRecentFn }) {
+function renderRepoData(initial: { slug: string; route: RepoRoute; recordRecent?: RecordRecentFn }) {
   return renderHook(
-    ({ slug, route, recordRecent }: { slug: string; route: RepoRoute; recordRecent: RecordRecentFn }) => {
+    ({ slug, route }: { slug: string; route: RepoRoute }) => {
       let [routeState, setRouteState] = useState<RepoRoute>(route);
       useEffect(() => {
         setRouteState(route);
       }, [route]);
-      return useRepoData({
-        slug,
-        route: routeState,
-        recordRecent,
-        setActivePath: (nextPath, options) => {
-          setRouteState((prev) => {
-            if (prev.kind !== 'repo') return prev;
-            return { ...prev, notePath: nextPath };
-          });
-        },
-      });
+      let value = useRepoData({ slug, route: routeState });
+      useEffect(() => {
+        if (value.routeSync === undefined) return;
+        setRouteState(value.routeSync.route);
+      }, [value.routeSync?.revision]);
+      return value;
     },
     { initialProps: initial }
   );
@@ -133,7 +128,6 @@ describe('useRepoData integration', () => {
 
   test('imports remote files, pushes local edits, and pulls remote updates through the real sync path', async () => {
     let slug = 'acme/docs';
-    let recordRecent = vi.fn<RecordRecentFn>();
 
     remote.setFile('README.md', '# Remote readme');
     remote.setFile('Guide.md', 'initial guide');
@@ -141,7 +135,6 @@ describe('useRepoData integration', () => {
     let { result } = renderRepoData({
       slug,
       route: { kind: 'repo', owner: 'acme', repo: 'docs' },
-      recordRecent,
     });
 
     await waitFor(() => expect(result.current.state.repoQueryStatus).toBe('ready'));

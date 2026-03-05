@@ -7,7 +7,7 @@ import { AssetViewer } from './AssetViewer';
 import { RepoSwitcher } from './RepoSwitcher';
 import { Toggle } from './Toggle';
 import { GitHubIcon, ExternalLinkIcon, NotesIcon, CloseIcon, SyncIcon, ShareIcon } from './RepoIcons';
-import { useRepoData } from '../data';
+import type { AppDataAction, AppDataResult, AppDataState } from '../data';
 import type { FileMeta } from '../storage/local';
 import {
   getExpandedFolders,
@@ -20,85 +20,59 @@ import {
   extractDir,
   stripExtension,
 } from '../storage/local';
-import type { RepoRoute, Route } from './routing';
-import { normalizePath, pathsEqual } from '../lib/util';
+import { normalizePath } from '../lib/util';
 import { useRepoAssetLoader } from './useRepoAssetLoader';
 import { ShareDialog } from './ShareDialog';
 import { useOnClickOutside } from './useOnClickOutside';
 
 type RepoViewProps = {
-  slug: string;
-  route: RepoRoute;
-  navigate: (route: Route, options?: { replace?: boolean }) => void;
-  recordRecent: (entry: {
-    slug: string;
-    owner?: string;
-    repo?: string;
-    title?: string;
-    connected?: boolean;
-  }) => void;
+  state: AppDataState;
+  dispatch: (action: AppDataAction) => void;
+  helpers: AppDataResult['helpers'];
 };
 
 const primaryModifier = detectPrimaryShortcut();
 
-export function RepoView(props: RepoViewProps) {
-  return <RepoViewInner key={props.slug} {...props} />;
+export function RepoView({ state, dispatch, helpers }: RepoViewProps) {
+  let workspace = state.workspace;
+  if (workspace === undefined) return null;
+  return <RepoViewInner key={workspace.target.slug} state={state} dispatch={dispatch} helpers={helpers} />;
 }
 
-function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
-  const setActivePath = (nextPath: string | undefined, options?: { replace?: boolean }) => {
-    let replace = options?.replace === true;
-    if (route.kind === 'repo') {
-      if (pathsEqual(route.notePath, nextPath)) return;
-      navigate({ kind: 'repo', owner: route.owner, repo: route.repo, notePath: nextPath }, { replace });
-      return;
-    }
-    if (route.kind === 'new') {
-      if (pathsEqual(route.notePath, nextPath)) return;
-      navigate({ kind: 'new', notePath: nextPath }, { replace });
-    }
-  };
+function RepoViewInner({ state, dispatch, helpers }: RepoViewProps) {
+  let workspace = state.workspace;
+  if (workspace === undefined) return null;
 
-  // Data layer exposes repo-backed state and the high-level actions the UI needs.
-  const { state, actions } = useRepoData({ slug, route, recordRecent, setActivePath });
-  const {
-    hasSession,
-    user,
-
-    canEdit,
-    canRead,
-    canSync,
-    repoLinked,
-    repoErrorType,
-    manageUrl,
-
-    activeFile,
-    activePath,
-    files,
-    folders,
-
-    autosync,
-    syncing,
-    statusMessage,
-    share,
-    defaultBranch,
-  } = state;
+  let slug = workspace.target.slug;
+  let hasSession = state.session.status === 'signed-in';
+  let user = state.session.user;
+  let { canEdit, canRead, canSync, linked: repoLinked, manageUrl, defaultBranch, errorType: repoErrorType } =
+    workspace.access;
+  let activeFile = workspace.document.activeFile;
+  let activePath = state.navigation.target?.notePath ?? workspace.document.activePath;
+  let files = workspace.tree.files;
+  let folders = workspace.tree.folders;
+  let autosync = workspace.sync.autosync;
+  let syncing = workspace.sync.syncing;
+  let statusMessage = workspace.sync.statusMessage;
+  let share = workspace.share;
 
   const userAvatarSrc = user?.avatarDataUrl ?? user?.avatarUrl ?? undefined;
-  let repoOwner = route.kind === 'repo' ? route.owner : undefined;
+  let repoOwner = workspace.target.kind === 'github' ? workspace.target.owner : undefined;
+  let repoName = workspace.target.kind === 'github' ? workspace.target.repo : undefined;
   const showSidebar = canRead;
   const isReadOnly = !canEdit && canRead;
   const layoutClass = showSidebar ? '' : 'single';
 
   const activeIsMarkdown = activeFile !== undefined && isMarkdownFile(activeFile);
   const canShare =
-    hasSession && route.kind === 'repo' && activePath !== undefined && canEdit && activeIsMarkdown;
+    hasSession && workspace.target.kind === 'github' && activePath !== undefined && canEdit && activeIsMarkdown;
   const shareDisabled = share.status === 'idle' || share.status === 'loading';
 
   // error states that require user action (these trigger a custom full sized banner)
   const needsSessionRefresh = repoLinked && repoErrorType === 'auth';
   const needsInstall = hasSession && repoErrorType === 'not-found';
-  const needsUserAction = route.kind === 'repo' && (needsSessionRefresh || needsInstall);
+  const needsUserAction = workspace.target.kind === 'github' && (needsSessionRefresh || needsInstall);
 
   // Pure UI state: sidebar visibility and account menu.
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -112,14 +86,15 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
   useEffect(() => {
     if (!shareOpen) return;
     if (share.status !== 'idle') return;
-    void actions.refreshShareLink();
-  }, [shareOpen, share.status, actions.refreshShareLink]);
+    if (activePath === undefined) return;
+    dispatch({ type: 'share.refresh', notePath: activePath });
+  }, [activePath, dispatch, shareOpen, share.status]);
 
   const [showSwitcher, setShowSwitcher] = useState(false);
 
   // Keyboard shortcuts: Cmd/Ctrl+K and "g","r" open the repo switcher even when the tree is focused.
   const repoShortcutLabel = primaryModifier === 'meta' ? '⌘K' : 'Ctrl+K';
-  const repoButtonBaseTitle = route.kind === 'repo' ? 'Change repository' : 'Choose repository';
+  const repoButtonBaseTitle = workspace.target.kind === 'github' ? 'Change repository' : 'Choose repository';
   const repoButtonTitle = `${repoButtonBaseTitle} (${repoShortcutLabel})`;
 
   useEffect(() => {
@@ -158,9 +133,44 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const onSelect = async (path: string | undefined) => {
-    await actions.selectFile(path);
+  const onSelect = (path: string | undefined) => {
+    dispatch({ type: 'note.open', path });
     setSidebarOpen(false);
+  };
+
+  const onCreateNote = (dir: string, name: string) => {
+    dispatch({ type: 'note.create', parentDir: dir, name });
+    return undefined;
+  };
+
+  const onCreateFolder = (parentDir: string, name: string) => {
+    dispatch({ type: 'folder.create', parentDir, name });
+  };
+
+  const onRenameFile = (path: string, name: string) => {
+    dispatch({ type: 'file.rename', path, name });
+  };
+
+  const onMoveFile = (path: string, targetDir: string) => {
+    dispatch({ type: 'file.move', path, targetDir });
+    return buildMovedFilePath(path, targetDir);
+  };
+
+  const onDeleteFile = (path: string) => {
+    dispatch({ type: 'file.delete', path });
+  };
+
+  const onRenameFolder = (path: string, name: string) => {
+    dispatch({ type: 'folder.rename', path, name });
+  };
+
+  const onMoveFolder = (path: string, targetDir: string) => {
+    dispatch({ type: 'folder.move', path, targetDir });
+    return buildMovedFolderPath(path, targetDir);
+  };
+
+  const onDeleteFolder = (path: string) => {
+    dispatch({ type: 'folder.delete', path });
   };
 
   const loadAsset = useRepoAssetLoader({ slug, isReadOnly, defaultBranch });
@@ -180,12 +190,12 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
           <button
             className="brand-button"
             type="button"
-            onClick={() => navigate({ kind: 'home' })}
+            onClick={() => dispatch({ type: 'navigation.go-home' })}
             aria-label="Go home"
           >
             <span className="brand">VibeNote</span>
           </button>
-          {route.kind === 'repo' ? (
+          {workspace.target.kind === 'github' ? (
             <span className="repo-anchor align-workspace">
               <button
                 type="button"
@@ -196,13 +206,13 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
               >
                 <GitHubIcon />
                 <span className="repo-label">
-                  <span className="repo-owner">{route.owner}/</span>
-                  <span>{route.repo}</span>
+                  <span className="repo-owner">{repoOwner}/</span>
+                  <span>{repoName}</span>
                 </span>
               </button>
               <a
                 className="repo-open-link"
-                href={`https://github.com/${route.owner}/${route.repo}`}
+                href={`https://github.com/${repoOwner}/${repoName}`}
                 target="_blank"
                 rel="noreferrer"
                 title="Open on GitHub"
@@ -233,7 +243,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
         </div>
         <div className="topbar-actions">
           {!hasSession ? (
-            <button className="btn primary" onClick={actions.signIn}>
+            <button className="btn primary" onClick={() => dispatch({ type: 'session.sign-in' })}>
               Connect GitHub
             </button>
           ) : (
@@ -260,7 +270,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
               {canSync && (
                 <button
                   className={`btn icon sync-btn ${syncing ? 'syncing' : ''}`}
-                  onClick={actions.syncNow}
+                  onClick={() => dispatch({ type: 'sync.run', source: 'user' })}
                   disabled={syncing}
                   aria-label={syncing ? 'Syncing' : 'Sync now'}
                   title={syncing ? 'Syncing…' : 'Sync now'}
@@ -313,20 +323,20 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
               slug={slug}
               activePath={activePath}
               onSelect={onSelect}
-              onCreateNote={actions.createNote}
-              onCreateFolder={actions.createFolder}
-              onRenameFile={actions.renameFile}
-              onMoveFile={actions.moveFile}
-              onDeleteFile={actions.deleteFile}
-              onRenameFolder={actions.renameFolder}
-              onMoveFolder={actions.moveFolder}
-              onDeleteFolder={actions.deleteFolder}
+              onCreateNote={onCreateNote}
+              onCreateFolder={onCreateFolder}
+              onRenameFile={onRenameFile}
+              onMoveFile={onMoveFile}
+              onDeleteFile={onDeleteFile}
+              onRenameFolder={onRenameFolder}
+              onMoveFolder={onMoveFolder}
+              onDeleteFolder={onDeleteFolder}
             />
             {canSync ? (
               <div className="repo-autosync-toggle">
                 <Toggle
                   checked={autosync}
-                  onChange={actions.setAutosync}
+                  onChange={(enabled) => dispatch({ type: 'sync.set-autosync', enabled })}
                   label="Autosync"
                   description="Runs background sync after edits and periodically."
                 />
@@ -357,7 +367,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
                 <span className="badge">Read-only</span>
                 <span className="alert-text">You can view, but not edit files in this repository.</span>
                 {hasSession && (
-                  <button className="btn primary" onClick={actions.openRepoAccess}>
+                  <button className="btn primary" onClick={() => dispatch({ type: 'repo.request-access', owner: repoOwner!, repo: repoName! })}>
                     Get Write Access
                   </button>
                 )}
@@ -372,9 +382,9 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
                     readOnly={!canEdit}
                     slug={slug}
                     loadAsset={loadAsset}
-                    onImportAssets={actions.importPastedAssets}
+                    onImportAssets={helpers.importPastedAssets}
                     onChange={(path, text) => {
-                      actions.saveFile(path, text);
+                      dispatch({ type: 'file.save', path, contents: text });
                     }}
                   />
                 ) : isBinaryFile(activeFile) || isAssetUrlFile(activeFile) ? (
@@ -385,7 +395,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
                     doc={activeFile}
                     readOnly={!canEdit}
                     onChange={(path, text) => {
-                      actions.saveFile(path, text);
+                      dispatch({ type: 'file.save', path, contents: text });
                     }}
                   />
                 ) : null}
@@ -397,7 +407,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
                   <>
                     <p>VibeNote lost permission to talk to GitHub for this repository.</p>
                     <p>Sign in again to refresh your session without clearing any local notes.</p>
-                    <button className="btn primary" onClick={actions.signIn}>
+                    <button className="btn primary" onClick={() => dispatch({ type: 'session.sign-in' })}>
                       Sign in again
                     </button>
                   </>
@@ -408,12 +418,15 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
                       Continue to GitHub and either select <strong>Only select repositories</strong> and pick
                       <code>
                         {' '}
-                        {route.owner}/{route.repo}
+                        {repoOwner}/{repoName}
                       </code>
                       , or grant access to all repositories (not recommended).
                     </p>
                     {hasSession ? (
-                      <button className="btn primary" onClick={actions.openRepoAccess}>
+                      <button
+                        className="btn primary"
+                        onClick={() => dispatch({ type: 'repo.request-access', owner: repoOwner!, repo: repoName! })}
+                      >
                         Get Read/Write Access
                       </button>
                     ) : (
@@ -461,7 +474,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
           <button
             className="btn subtle full-width"
             onClick={async () => {
-              await actions.signOut();
+              dispatch({ type: 'session.sign-out' });
               setMenuOpen(false);
             }}
           >
@@ -476,10 +489,10 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
       )}
       {showSwitcher && (
         <RepoSwitcher
-          route={route}
-          slug={slug}
-          navigate={navigate}
-          onRecordRecent={recordRecent}
+          currentSlug={slug}
+          recents={state.repos.recents}
+          probe={state.repos.probe}
+          dispatch={dispatch}
           onClose={() => setShowSwitcher(false)}
           triggerRef={repoButtonRef}
         />
@@ -490,9 +503,15 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
           notePath={activePath}
           triggerRef={shareButtonRef}
           onClose={() => setShareOpen(false)}
-          onCreate={actions.createShareLink}
-          onRevoke={actions.revokeShareLink}
-          onRefresh={actions.refreshShareLink}
+          onCreate={async () => {
+            if (activePath !== undefined) dispatch({ type: 'share.create', notePath: activePath });
+          }}
+          onRevoke={async () => {
+            if (activePath !== undefined) dispatch({ type: 'share.revoke', notePath: activePath });
+          }}
+          onRefresh={async () => {
+            if (activePath !== undefined) dispatch({ type: 'share.refresh', notePath: activePath });
+          }}
         />
       )}
     </div>
@@ -734,6 +753,21 @@ function foldersEqual(a: string[], b: string[]): boolean {
     if (a[i] !== b[i]) return false;
   }
   return true;
+}
+
+function buildMovedFilePath(path: string, targetDir: string): string {
+  let name = basename(path);
+  let normalizedDir = normalizePath(targetDir);
+  if (normalizedDir === '') return name;
+  return `${normalizedDir}/${name}`;
+}
+
+function buildMovedFolderPath(path: string, targetDir: string): string {
+  let parts = normalizePath(path).split('/');
+  let folderName = parts[parts.length - 1] ?? path;
+  let normalizedDir = normalizePath(targetDir);
+  if (normalizedDir === '') return folderName;
+  return `${normalizedDir}/${folderName}`;
 }
 
 function detectPrimaryShortcut(): 'meta' | 'ctrl' {
