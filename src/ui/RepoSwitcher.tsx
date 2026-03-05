@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import type { Route } from './routing';
-import { listRecentRepos, type RecentRepo } from '../storage/local';
-import { repoExists } from '../sync/git-sync';
+import type { AppDataAction } from '../data';
+import type { RecentRepo } from '../storage/local';
 import { useOnClickOutside } from './useOnClickOutside';
 
 type Props = {
-  route: Route;
-  slug: string;
-  navigate: (route: Route, options?: { replace?: boolean }) => void;
+  currentSlug?: string;
+  dispatch: (action: AppDataAction) => void;
+  probe: {
+    status: 'idle' | 'checking' | 'ready';
+    owner?: string;
+    repo?: string;
+    exists?: boolean;
+  };
+  recents: RecentRepo[];
   onClose: () => void;
-  onRecordRecent: (entry: { slug: string; owner?: string; repo?: string; connected?: boolean }) => void;
   triggerRef?: RefObject<HTMLElement | null>;
 };
 
@@ -22,18 +26,11 @@ function parseOwnerRepo(input: string): Parsed {
   return { owner, repo };
 }
 
-export function RepoSwitcher({ route, slug, navigate, onClose, onRecordRecent, triggerRef }: Props) {
+export function RepoSwitcher({ currentSlug, dispatch, probe, recents, onClose, triggerRef }: Props) {
   const [input, setInput] = useState('');
-  const [recents, setRecents] = useState<RecentRepo[]>(() => listRecentRepos());
-  const [checking, setChecking] = useState(false);
-  const [exists, setExists] = useState<boolean | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const panelRef = useOnClickOutside(onClose, { trigger: triggerRef });
   const inputRef = useRef<HTMLInputElement | null>(null);
-
-  useEffect(() => {
-    setRecents(listRecentRepos());
-  }, [route]);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -58,31 +55,20 @@ export function RepoSwitcher({ route, slug, navigate, onClose, onRecordRecent, t
 
   // Debounced existence check for precise owner/repo inputs
   useEffect(() => {
-    let cancel = false;
     const parsed = parseOwnerRepo(input);
     if (!parsed) {
-      setExists(null);
-      setChecking(false);
       return;
     }
-    setChecking(true);
     const t = setTimeout(async () => {
-      try {
-        const ok = await repoExists(parsed.owner, parsed.repo);
-        if (!cancel) setExists(ok);
-      } finally {
-        if (!cancel) setChecking(false);
-      }
+      dispatch({ type: 'repo.probe', owner: parsed.owner, repo: parsed.repo });
     }, 300);
     return () => {
-      cancel = true;
       clearTimeout(t);
     };
-  }, [input]);
+  }, [dispatch, input]);
 
   const goTo = (owner: string, repo: string) => {
-    onRecordRecent({ slug: `${owner}/${repo}`, owner, repo });
-    navigate({ kind: 'repo', owner, repo });
+    dispatch({ type: 'repo.activate', repo: { kind: 'github', owner, repo } });
     onClose();
   };
 
@@ -100,6 +86,12 @@ export function RepoSwitcher({ route, slug, navigate, onClose, onRecordRecent, t
   };
 
   const parsed = parseOwnerRepo(input);
+  const probeMatchesInput =
+    parsed !== null &&
+    probe.owner?.toLowerCase() === parsed.owner.toLowerCase() &&
+    probe.repo?.toLowerCase() === parsed.repo.toLowerCase();
+  const checking = probeMatchesInput && probe.status === 'checking';
+  const exists = probeMatchesInput && probe.status === 'ready' ? probe.exists ?? null : null;
 
   const statusText = checking
     ? 'Checking repository…'
@@ -149,6 +141,7 @@ export function RepoSwitcher({ route, slug, navigate, onClose, onRecordRecent, t
               <span className="repo-switcher-slug">
                 {s.owner && s.repo ? `${s.owner}/${s.repo}` : s.slug}
               </span>
+              {s.slug === currentSlug ? <span className="repo-switcher-connected">current</span> : null}
               {s.connected ? <span className="repo-switcher-connected">linked</span> : null}
             </button>
           </li>

@@ -2,12 +2,19 @@
 import { useState, useEffect, type FocusEvent, type MouseEvent, type RefObject } from 'react';
 import { CloseIcon, CopyIcon, CopySuccessIcon, CopyErrorIcon, ShareIcon } from './RepoIcons';
 import { useOnClickOutside } from './useOnClickOutside';
-import { type ShareState } from '../data';
 
 export { ShareDialog, type ShareDialogProps };
 
+type ShareDialogState = {
+  status: 'idle' | 'loading' | 'ready' | 'error';
+  link?: {
+    url: string;
+  };
+  error?: string;
+};
+
 type ShareDialogProps = {
-  share: ShareState;
+  share: ShareDialogState;
   notePath: string | undefined;
   triggerRef: RefObject<HTMLElement | null>;
   onClose: () => void;
