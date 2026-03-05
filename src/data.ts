@@ -893,7 +893,7 @@ function useAppData({ route }: { route: Route }): AppDataResult {
   let workspaceData = useRepoData({ slug, route: repoRoute });
 
   useEffect(() => {
-    if (workspaceTarget === undefined) return;
+    if (navigation.screen !== 'workspace') return;
     let nextRouteSync = workspaceData.routeSync;
     if (nextRouteSync === undefined) return;
     setNavigation((prev) =>
@@ -909,7 +909,7 @@ function useAppData({ route }: { route: Route }): AppDataResult {
             target: toAppNavigationTarget(nextRouteSync.route, slug),
           }
     );
-  }, [workspaceData.routeSync?.revision, slug, workspaceTarget]);
+  }, [navigation.screen, workspaceData.routeSync?.revision, slug]);
 
   useEffect(() => {
     if (workspaceTarget === undefined) return;
