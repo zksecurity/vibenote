@@ -11,9 +11,9 @@ type ShareDialogProps = {
   notePath: string | undefined;
   triggerRef: RefObject<HTMLElement | null>;
   onClose: () => void;
-  onCreate: () => Promise<void>;
-  onRevoke: () => Promise<void>;
-  onRefresh: () => Promise<void>;
+  onCreate: () => void | Promise<void>;
+  onRevoke: () => void | Promise<void>;
+  onRefresh: () => void | Promise<void>;
 };
 
 function ShareDialog({

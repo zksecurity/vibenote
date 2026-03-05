@@ -7,7 +7,7 @@ import { AssetViewer } from './AssetViewer';
 import { RepoSwitcher } from './RepoSwitcher';
 import { Toggle } from './Toggle';
 import { GitHubIcon, ExternalLinkIcon, NotesIcon, CloseIcon, SyncIcon, ShareIcon } from './RepoIcons';
-import { useRepoData } from '../data';
+import type { AppDataState, Dispatch } from '../data';
 import type { FileMeta } from '../storage/local';
 import {
   getExpandedFolders,
@@ -20,47 +20,30 @@ import {
   extractDir,
   stripExtension,
 } from '../storage/local';
-import type { RepoRoute, Route } from './routing';
+import type { Route } from './routing';
 import { normalizePath, pathsEqual } from '../lib/util';
 import { useRepoAssetLoader } from './useRepoAssetLoader';
 import { ShareDialog } from './ShareDialog';
 import { useOnClickOutside } from './useOnClickOutside';
 
 type RepoViewProps = {
-  slug: string;
-  route: RepoRoute;
+  state: AppDataState;
+  dispatch: Dispatch;
   navigate: (route: Route, options?: { replace?: boolean }) => void;
-  recordRecent: (entry: {
-    slug: string;
-    owner?: string;
-    repo?: string;
-    title?: string;
-    connected?: boolean;
-  }) => void;
 };
 
 const primaryModifier = detectPrimaryShortcut();
 
+// RepoView is a thin wrapper that resets all ephemeral UI state when the slug changes.
 export function RepoView(props: RepoViewProps) {
-  return <RepoViewInner key={props.slug} {...props} />;
+  return <RepoViewInner key={props.state.activeSlug} {...props} />;
 }
 
-function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
-  const setActivePath = (nextPath: string | undefined, options?: { replace?: boolean }) => {
-    let replace = options?.replace === true;
-    if (route.kind === 'repo') {
-      if (pathsEqual(route.notePath, nextPath)) return;
-      navigate({ kind: 'repo', owner: route.owner, repo: route.repo, notePath: nextPath }, { replace });
-      return;
-    }
-    if (route.kind === 'new') {
-      if (pathsEqual(route.notePath, nextPath)) return;
-      navigate({ kind: 'new', notePath: nextPath }, { replace });
-    }
-  };
+function RepoViewInner({ state, dispatch, navigate }: RepoViewProps) {
+  // Narrow the active route to the repo/new context for local use.
+  const route = state.activeRoute;
+  const slug = state.activeSlug;
 
-  // Data layer exposes repo-backed state and the high-level actions the UI needs.
-  const { state, actions } = useRepoData({ slug, route, recordRecent, setActivePath });
   const {
     hasSession,
     user,
@@ -112,8 +95,8 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
   useEffect(() => {
     if (!shareOpen) return;
     if (share.status !== 'idle') return;
-    void actions.refreshShareLink();
-  }, [shareOpen, share.status, actions.refreshShareLink]);
+    void dispatch({ type: 'refresh-share-link' });
+  }, [shareOpen, share.status]);
 
   const [showSwitcher, setShowSwitcher] = useState(false);
 
@@ -159,7 +142,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
   }, []);
 
   const onSelect = async (path: string | undefined) => {
-    await actions.selectFile(path);
+    await dispatch({ type: 'select-file', path });
     setSidebarOpen(false);
   };
 
@@ -233,7 +216,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
         </div>
         <div className="topbar-actions">
           {!hasSession ? (
-            <button className="btn primary" onClick={actions.signIn}>
+            <button className="btn primary" onClick={() => dispatch({ type: 'sign-in' })}>
               Connect GitHub
             </button>
           ) : (
@@ -260,7 +243,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
               {canSync && (
                 <button
                   className={`btn icon sync-btn ${syncing ? 'syncing' : ''}`}
-                  onClick={actions.syncNow}
+                  onClick={() => dispatch({ type: 'sync-now' })}
                   disabled={syncing}
                   aria-label={syncing ? 'Syncing' : 'Sync now'}
                   title={syncing ? 'Syncing…' : 'Sync now'}
@@ -313,20 +296,20 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
               slug={slug}
               activePath={activePath}
               onSelect={onSelect}
-              onCreateNote={actions.createNote}
-              onCreateFolder={actions.createFolder}
-              onRenameFile={actions.renameFile}
-              onMoveFile={actions.moveFile}
-              onDeleteFile={actions.deleteFile}
-              onRenameFolder={actions.renameFolder}
-              onMoveFolder={actions.moveFolder}
-              onDeleteFolder={actions.deleteFolder}
+              onCreateNote={(dir, name) => dispatch({ type: 'create-note', dir, name })}
+              onCreateFolder={(parentDir, name) => dispatch({ type: 'create-folder', parentDir, name })}
+              onRenameFile={(path, name) => dispatch({ type: 'rename-file', path, name })}
+              onMoveFile={(path, targetDir) => dispatch({ type: 'move-file', path, targetDir })}
+              onDeleteFile={(path) => dispatch({ type: 'delete-file', path })}
+              onRenameFolder={(dir, newName) => dispatch({ type: 'rename-folder', dir, newName })}
+              onMoveFolder={(dir, targetDir) => dispatch({ type: 'move-folder', dir, targetDir })}
+              onDeleteFolder={(dir) => dispatch({ type: 'delete-folder', dir })}
             />
             {canSync ? (
               <div className="repo-autosync-toggle">
                 <Toggle
                   checked={autosync}
-                  onChange={actions.setAutosync}
+                  onChange={(enabled) => dispatch({ type: 'set-autosync', enabled })}
                   label="Autosync"
                   description="Runs background sync after edits and periodically."
                 />
@@ -357,7 +340,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
                 <span className="badge">Read-only</span>
                 <span className="alert-text">You can view, but not edit files in this repository.</span>
                 {hasSession && (
-                  <button className="btn primary" onClick={actions.openRepoAccess}>
+                  <button className="btn primary" onClick={() => dispatch({ type: 'open-repo-access' })}>
                     Get Write Access
                   </button>
                 )}
@@ -372,9 +355,11 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
                     readOnly={!canEdit}
                     slug={slug}
                     loadAsset={loadAsset}
-                    onImportAssets={actions.importPastedAssets}
+                    onImportAssets={(params) =>
+                      dispatch({ type: 'import-pasted-assets', notePath: params.notePath, files: params.files })
+                    }
                     onChange={(path, text) => {
-                      actions.saveFile(path, text);
+                      dispatch({ type: 'save-file', path, text });
                     }}
                   />
                 ) : isBinaryFile(activeFile) || isAssetUrlFile(activeFile) ? (
@@ -385,7 +370,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
                     doc={activeFile}
                     readOnly={!canEdit}
                     onChange={(path, text) => {
-                      actions.saveFile(path, text);
+                      dispatch({ type: 'save-file', path, text });
                     }}
                   />
                 ) : null}
@@ -397,7 +382,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
                   <>
                     <p>VibeNote lost permission to talk to GitHub for this repository.</p>
                     <p>Sign in again to refresh your session without clearing any local notes.</p>
-                    <button className="btn primary" onClick={actions.signIn}>
+                    <button className="btn primary" onClick={() => dispatch({ type: 'sign-in' })}>
                       Sign in again
                     </button>
                   </>
@@ -413,7 +398,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
                       , or grant access to all repositories (not recommended).
                     </p>
                     {hasSession ? (
-                      <button className="btn primary" onClick={actions.openRepoAccess}>
+                      <button className="btn primary" onClick={() => dispatch({ type: 'open-repo-access' })}>
                         Get Read/Write Access
                       </button>
                     ) : (
@@ -461,7 +446,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
           <button
             className="btn subtle full-width"
             onClick={async () => {
-              await actions.signOut();
+              await dispatch({ type: 'sign-out' });
               setMenuOpen(false);
             }}
           >
@@ -479,7 +464,6 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
           route={route}
           slug={slug}
           navigate={navigate}
-          onRecordRecent={recordRecent}
           onClose={() => setShowSwitcher(false)}
           triggerRef={repoButtonRef}
         />
@@ -490,9 +474,9 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
           notePath={activePath}
           triggerRef={shareButtonRef}
           onClose={() => setShareOpen(false)}
-          onCreate={actions.createShareLink}
-          onRevoke={actions.revokeShareLink}
-          onRefresh={actions.refreshShareLink}
+          onCreate={() => dispatch({ type: 'create-share-link' })}
+          onRevoke={() => dispatch({ type: 'revoke-share-link' })}
+          onRefresh={() => dispatch({ type: 'refresh-share-link' })}
         />
       )}
     </div>
