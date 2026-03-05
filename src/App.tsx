@@ -1,21 +1,55 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { useRoute } from './ui/routing';
+// Top-level application component. Instantiates the data layer once and
+// provides a thin routing adapter that syncs URL ↔ data state.
+import React, { useEffect, useRef } from 'react';
+import { useRoute, parseRoute } from './ui/routing';
 import { RepoView } from './ui/RepoView';
 import { HomeView } from './ui/HomeView';
-import { listRecentRepos, recordRecentRepo, type RecentRepo } from './storage/local';
+import { useAppData } from './data';
+import { listRecentRepos } from './storage/local';
 
 export function App() {
+  // Data layer: instantiated once at the app level.
+  // The initial route is read from the URL synchronously so the first render
+  // already reflects the correct slug/path without waiting for a dispatch.
+  const { state, dispatch } = useAppData(parseRoute(window.location.pathname));
+
+  // URL routing: parse/navigate the browser history.
   const { route, navigate } = useRoute();
 
-  // Adjust page title based on route
+  // URL → data: inform the data layer whenever the browser route changes.
   useEffect(() => {
-    document.title = route.kind === 'repo' ? `${route.owner}/${route.repo}` : 'VibeNote';
+    dispatch({ type: 'route-changed', route });
   }, [route]);
 
-  // redirects
+  // Data → URL: when the data layer sets a pendingNavigation (e.g. after a
+  // rename or sync), reflect it in the URL via navigate().
+  let lastNavRef = useRef(state.pendingNavigation);
+  useEffect(() => {
+    let nav = state.pendingNavigation;
+    // Skip if no pending nav, or if we already processed this exact object.
+    if (!nav || nav === lastNavRef.current) return;
+    lastNavRef.current = nav;
+
+    // Build the target route from the current active route + new path.
+    let activeRoute = state.activeRoute;
+    if (activeRoute.kind === 'repo') {
+      navigate({ ...activeRoute, notePath: nav.path }, { replace: nav.replace });
+    } else if (activeRoute.kind === 'new') {
+      navigate({ kind: 'new', notePath: nav.path }, { replace: nav.replace });
+    }
+  }, [state.pendingNavigation]);
+
+  // Adjust page title based on active route.
+  useEffect(() => {
+    let r = state.activeRoute;
+    document.title = r.kind === 'repo' ? `${r.owner}/${r.repo}` : 'VibeNote';
+  }, [state.activeRoute]);
+
+  // Redirects based on the URL route (not the data layer route).
   useEffect(() => {
     // if the route is /start, redirect to the most recent repo or /home
     if (route.kind === 'start') {
+      let recents = state.recents;
       let candidate = recents.find((entry) => entry.owner !== undefined && entry.repo !== undefined);
 
       if (candidate !== undefined) {
@@ -33,12 +67,8 @@ export function App() {
     }
   }, [route]);
 
-  // list of recent repos, kept in local storage and updated when navigating to a new repo
-  // or updating information about an existing one
-  const [recents, recordRecent] = useRecents();
-
   if (route.kind === 'home') {
-    return <HomeView recents={recents} navigate={navigate} />;
+    return <HomeView recents={state.recents} navigate={navigate} />;
   }
 
   if (route.kind === 'start') {
@@ -46,39 +76,9 @@ export function App() {
     return null;
   }
 
-  if (route.kind === 'new') {
-    return <RepoView slug="new" route={route} navigate={navigate} recordRecent={recordRecent} />;
-  }
-
-  if (route.kind === 'repo') {
-    return (
-      <RepoView
-        slug={`${route.owner}/${route.repo}`}
-        route={route}
-        navigate={navigate}
-        recordRecent={recordRecent}
-      />
-    );
+  if (route.kind === 'new' || route.kind === 'repo') {
+    return <RepoView state={state} dispatch={dispatch} navigate={navigate} />;
   }
 
   return null;
-}
-
-function useRecents() {
-  const [recents, setRecents] = useState<RecentRepo[]>(() => listRecentRepos());
-
-  useEffect(() => {
-    const onStorage = () => setRecents(listRecentRepos());
-    window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
-  }, []);
-
-  const recordRecent = useCallback(
-    (entry: { slug: string; owner?: string; repo?: string; title?: string; connected?: boolean }) => {
-      recordRecentRepo(entry);
-      setRecents(listRecentRepos());
-    },
-    []
-  );
-  return [recents, recordRecent] as const;
 }

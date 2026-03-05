@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { Route } from './routing';
-import { listRecentRepos, type RecentRepo } from '../storage/local';
+import { listRecentRepos, recordRecentRepo, type RecentRepo } from '../storage/local';
 import { repoExists } from '../sync/git-sync';
 import { useOnClickOutside } from './useOnClickOutside';
 
@@ -9,7 +9,6 @@ type Props = {
   slug: string;
   navigate: (route: Route, options?: { replace?: boolean }) => void;
   onClose: () => void;
-  onRecordRecent: (entry: { slug: string; owner?: string; repo?: string; connected?: boolean }) => void;
   triggerRef?: RefObject<HTMLElement | null>;
 };
 
@@ -22,7 +21,7 @@ function parseOwnerRepo(input: string): Parsed {
   return { owner, repo };
 }
 
-export function RepoSwitcher({ route, slug, navigate, onClose, onRecordRecent, triggerRef }: Props) {
+export function RepoSwitcher({ route, slug, navigate, onClose, triggerRef }: Props) {
   const [input, setInput] = useState('');
   const [recents, setRecents] = useState<RecentRepo[]>(() => listRecentRepos());
   const [checking, setChecking] = useState(false);
@@ -81,7 +80,8 @@ export function RepoSwitcher({ route, slug, navigate, onClose, onRecordRecent, t
   }, [input]);
 
   const goTo = (owner: string, repo: string) => {
-    onRecordRecent({ slug: `${owner}/${repo}`, owner, repo });
+    // Record the repo immediately on navigation so it appears in recents right away.
+    recordRecentRepo({ slug: `${owner}/${repo}`, owner, repo });
     navigate({ kind: 'repo', owner, repo });
     onClose();
   };

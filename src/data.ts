@@ -1,4 +1,5 @@
-// Data-layer hook that orchestrates repo auth, storage, and sync state for RepoView.
+// Data-layer hook that orchestrates repo auth, storage, and sync state for the app.
+// Exported as a single app-level hook (useAppData) with a typed dispatch interface.
 import { useMemo, useState, useEffect, useRef, useSyncExternalStore, useCallback } from 'react';
 import {
   isRepoLinked,
@@ -15,6 +16,9 @@ import {
   getRepoStore,
   computeSyncedHash,
   extractDir,
+  listRecentRepos,
+  recordRecentRepo,
+  type RecentRepo,
 } from './storage/local';
 import {
   signInWithGitHubApp,
@@ -50,14 +54,16 @@ import { useReadOnlyFiles } from './data/useReadOnlyFiles';
 import { normalizePath } from './lib/util';
 import { prepareClipboardImage } from './lib/image-processing';
 import { relativePathBetween, COMMON_ASSET_DIR } from './lib/pathing';
-import type { RepoRoute } from './ui/routing';
+import type { Route, RepoRoute } from './ui/routing';
 
-export { useRepoData };
+export { useAppData };
 export type {
+  Action,
+  Dispatch,
   RepoAccessState,
-  RepoDataInputs,
-  RepoDataState,
-  RepoDataActions,
+  AppDataState,
+  // Keep RepoDataState as an alias for backward compat with existing type references
+  AppDataState as RepoDataState,
   ShareState,
   RepoAccessErrorType,
   ImportedAsset,
@@ -76,7 +82,44 @@ type ShareState = {
 // Compact set of error outcomes we surface to the UI for repo access.
 type RepoAccessErrorType = 'auth' | 'not-found' | 'forbidden' | 'network' | 'rate-limited' | 'unknown';
 
-type RepoDataState = {
+// Discriminated union of all actions the UI can dispatch to the data layer.
+type Action =
+  | { type: 'route-changed'; route: Route }
+  | { type: 'sign-in' }
+  | { type: 'sign-out' }
+  | { type: 'open-repo-access' }
+  | { type: 'sync-now' }
+  | { type: 'set-autosync'; enabled: boolean }
+  | { type: 'select-file'; path: string | undefined }
+  | { type: 'create-note'; dir: string; name: string }
+  | { type: 'create-folder'; parentDir: string; name: string }
+  | { type: 'rename-file'; path: string; name: string }
+  | { type: 'move-file'; path: string; targetDir: string }
+  | { type: 'delete-file'; path: string }
+  | { type: 'rename-folder'; dir: string; newName: string }
+  | { type: 'move-folder'; dir: string; targetDir: string }
+  | { type: 'delete-folder'; dir: string }
+  | { type: 'save-file'; path: string; text: string }
+  | { type: 'import-pasted-assets'; notePath: string; files: File[] }
+  | { type: 'create-share-link' }
+  | { type: 'refresh-share-link' }
+  | { type: 'revoke-share-link' };
+
+// Typed dispatch: returns specific values for actions that produce results.
+// Most actions return void or Promise<void>; the overloads cover exceptions.
+type Dispatch = {
+  (action: { type: 'create-note'; dir: string; name: string }): string | undefined;
+  (action: { type: 'move-file'; path: string; targetDir: string }): string | undefined;
+  (action: { type: 'move-folder'; dir: string; targetDir: string }): string | undefined;
+  (action: { type: 'import-pasted-assets'; notePath: string; files: File[] }): Promise<ImportedAsset[]>;
+  (action: Action): void | Promise<void>;
+};
+
+// Pending navigation driven by the data layer (e.g. after rename or sync).
+// The routing adapter in App.tsx picks this up and calls navigate().
+type PendingNavigation = { path: string | undefined; replace: boolean };
+
+type AppDataState = {
   // session state
   hasSession: boolean;
   user: AppUser | undefined;
@@ -106,59 +149,54 @@ type RepoDataState = {
 
   // general info
   statusMessage: string | undefined;
+
+  // routing info (new in app-level hook)
+  activeSlug: string;
+  activeRoute: Route;
+
+  // Pending URL navigation from the data layer. The routing adapter should
+  // call navigate() with this and then dispatch route-changed when done.
+  pendingNavigation: PendingNavigation | undefined;
+
+  // list of recently opened repos (for HomeView)
+  recents: RecentRepo[];
 };
 
-type RepoDataActions = {
-  // auth actions
-  signIn: () => Promise<void>;
-  signOut: () => Promise<void>;
-  openRepoAccess: () => Promise<void>;
-
-  // syncing actions
-  syncNow: () => Promise<void>;
-  setAutosync: (enabled: boolean) => void;
-
-  // edit notes/folders
-  selectFile: (path: string | undefined) => Promise<void>;
-  createNote: (dir: string, name: string) => string | undefined;
-  createFolder: (parentDir: string, name: string) => void;
-  renameFile: (path: string, name: string) => void;
-  moveFile: (path: string, targetDir: string) => string | undefined;
-  deleteFile: (path: string) => void;
-  renameFolder: (dir: string, newName: string) => void;
-  moveFolder: (dir: string, targetDir: string) => string | undefined;
-  deleteFolder: (dir: string) => void;
-  saveFile: (path: string, text: string) => void;
-  importPastedAssets: (params: { notePath: string; files: File[] }) => Promise<ImportedAsset[]>;
-  createShareLink: () => Promise<void>;
-  refreshShareLink: () => Promise<void>;
-  revokeShareLink: () => Promise<void>;
-};
 type ImportedAsset = {
   assetPath: string;
   markdownPath: string;
   altText: string;
 };
 
-type RepoDataInputs = {
-  slug: string;
-  route: RepoRoute;
-  recordRecent: (entry: { slug: string; owner?: string; repo?: string; connected?: boolean }) => void;
-  setActivePath: (notePath: string | undefined, options?: { replace?: boolean }) => void;
-};
-
 /**
- * Data layer entry point.
+ * App-level data hook. Instantiate once in App.tsx.
  *
- * Invariants when calling this hook:
- * - `slug` and `route` are always in sync, and never change througout the component lifetime
- * - `recordRecent` and `setActivePath` are stable as well
- * - none of these will be put in dependency arrays
+ * Route changes flow IN via dispatch({ type: 'route-changed', route }).
+ * The data layer expresses navigation intent via state.pendingNavigation.
+ * A thin adapter in App.tsx handles URL↔state sync.
  */
-function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInputs): {
-  state: RepoDataState;
-  actions: RepoDataActions;
+function useAppData(initialRoute: Route): {
+  state: AppDataState;
+  dispatch: Dispatch;
 } {
+  // Internal route state — the data layer's canonical view of "where we are".
+  // Updated via route-changed dispatch (URL→data) and navigateInternal (data→URL).
+  let [internalRoute, setInternalRoute] = useState<Route>(initialRoute);
+
+  // Pending navigation for the routing adapter to pick up and call navigate().
+  let [pendingNavigation, setPendingNavigation] = useState<PendingNavigation | undefined>(undefined);
+
+  // Recents list (synced to localStorage).
+  let [recents, setRecents] = useState<RecentRepo[]>(() => listRecentRepos());
+
+  // Derive slug and the repo-level route from the internal route.
+  let slug =
+    internalRoute.kind === 'repo' ? `${internalRoute.owner}/${internalRoute.repo}` : 'new';
+  let repoRoute: RepoRoute =
+    internalRoute.kind === 'repo' || internalRoute.kind === 'new'
+      ? internalRoute
+      : { kind: 'new' };
+
   // ORIGINAL STATE AND MAIN HOOKS
   // Local storage wrapper
   let { files: localFiles, folders: localFolders } = useLocalRepoSnapshot(slug);
@@ -180,18 +218,28 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   // Keep the signed-in GitHub App user details for header UI.
   let [user, setUser] = useState<AppUser | undefined>(() => getAppSessionUser() ?? undefined);
 
+  // --- Per-slug state reset (synchronous, runs before render completes) ---
+  // When the slug changes, reset per-slug state to avoid leaking state between repos.
+  let [prevSlugForReset, setPrevSlugForReset] = useState(slug);
+  if (prevSlugForReset !== slug) {
+    setPrevSlugForReset(slug);
+    setLinked(isRepoLinked(slug));
+    setShareState({ status: 'idle' });
+    setStatusMessage(undefined);
+  }
+
   // Query GitHub for repo access state and other metadata.
-  let repoAccess = useRepoAccess({ route, sessionToken });
+  let repoAccess = useRepoAccess({ route: repoRoute, sessionToken });
 
   // DERIVED STATE (and hooks that depend on it)
 
   let { defaultBranch, manageUrl } = repoAccess;
-  let repoOwner = route.kind === 'repo' ? route.owner : undefined;
-  let repoName = route.kind === 'repo' ? route.repo : undefined;
+  let repoOwner = repoRoute.kind === 'repo' ? repoRoute.owner : undefined;
+  let repoName = repoRoute.kind === 'repo' ? repoRoute.repo : undefined;
   let accessStatusReady = repoAccess.status === 'ready' || repoAccess.status === 'error';
   let accessStatusUnknown = !accessStatusReady || repoAccess.errorType === 'network';
 
-  let desiredPath = normalizePath(route.notePath);
+  let desiredPath = normalizePath(repoRoute.notePath);
 
   // in readonly mode, we store nothing locally and just fetch content from github no demand
   let isReadOnly = repoAccess.level === 'read';
@@ -207,9 +255,9 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   // note that we are optimistic about write access until the access check completes,
   // to avoid flickering the UI when revisiting a known writable repo
   let canEdit =
-    route.kind === 'new' || (hasSession && (repoAccess.level === 'write' || (accessStatusUnknown && linked)));
+    repoRoute.kind === 'new' || (hasSession && (repoAccess.level === 'write' || (accessStatusUnknown && linked)));
 
-  let canSync = canEdit && route.kind === 'repo' && linked;
+  let canSync = canEdit && repoRoute.kind === 'repo' && linked;
 
   let { autosync, syncing, setAutosync, scheduleAutoSync, performSync } = useSync({
     slug,
@@ -268,24 +316,30 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     if (currentPath === undefined) return;
     if (currentPath === prevPath) return;
     if (pathsEqual(desiredPath, currentPath)) return;
-    setActivePath(currentPath, { replace: true });
+    navigateInternal(currentPath, { replace: true });
   }, [activeFile?.path, desiredPath]);
 
   // Remember recently opened repos once we know the current repo is reachable.
   // TODO this shouldn't a useEffect, the only place a repo ever becomes reachable is after
   // fetching metadata, so just record it there
   useEffect(() => {
-    if (route.kind !== 'repo') return;
+    if (repoRoute.kind !== 'repo') return;
     if (repoAccess.level === 'none') return;
-    recordRecent({
+    recordRecentRepo({
       slug,
-      owner: route.owner,
-      repo: route.repo,
+      owner: repoRoute.owner,
+      repo: repoRoute.repo,
       connected: repoAccess.level === 'write' && linked,
     });
-  }, [slug, route, linked, recordRecent, repoAccess.level]);
+    // Refresh the in-memory recents list so HomeView stays in sync.
+    setRecents(listRecentRepos());
+  }, [slug, repoRoute, linked, repoAccess.level]);
 
-  let initialPullRef = useRef({ done: false });
+  let initialPullRef = useRef({ done: false, slug: '' });
+  // Reset the "done" flag synchronously when the slug changes.
+  if (initialPullRef.current.slug !== slug) {
+    initialPullRef.current = { done: false, slug };
+  }
   let shareRequestRef = useRef<{ owner: string; repo: string; path: string } | null>(null);
 
   // Synchronous localStorage lookup — no network call needed.
@@ -298,7 +352,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   // Kick off the one-time remote import when visiting a writable repo we have not linked yet.
   useEffect(() => {
     (async () => {
-      if (route.kind !== 'repo') return;
+      if (repoRoute.kind !== 'repo') return;
       if (repoAccess.level !== 'write') return;
       if (!canEdit) return;
       if (linked) return;
@@ -323,7 +377,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
           let readmePath = synced.find((note) => note.path.toLowerCase() === 'readme.md')?.path;
           let initialPath = storedPath ?? readmePath;
           if (initialPath !== undefined && !pathsEqual(desiredPath, initialPath)) {
-            setActivePath(initialPath, { replace: true });
+            navigateInternal(initialPath, { replace: true });
           }
         }
         markRepoLinked(slug);
@@ -335,7 +389,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
         initialPullRef.current.done = true;
       }
     })();
-  }, [route, repoAccess.level, linked, slug, canEdit, defaultBranch, desiredPath]);
+  }, [repoRoute, repoAccess.level, linked, slug, canEdit, defaultBranch, desiredPath]);
 
   useEffect(() => {
     if (!repoOwner || !repoName || !hasSession || !canEdit) {
@@ -376,13 +430,26 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     loadShareForTarget,
   ]);
 
-  // CLICK HANDLERS
+  // INTERNAL NAVIGATION HELPER
+  // Replaces the old setActivePath callback. Updates internal route state so
+  // activePath reflects the new path immediately, and signals the routing adapter
+  // via pendingNavigation to sync the URL.
+  const navigateInternal = (path: string | undefined, options: { replace?: boolean } = {}) => {
+    setInternalRoute((prev) => {
+      if (prev.kind === 'repo') return { ...prev, notePath: path };
+      if (prev.kind === 'new') return { ...prev, notePath: path };
+      return prev;
+    });
+    setPendingNavigation({ path, replace: options.replace ?? false });
+  };
 
   const ensureActivePath = (nextPath: string | undefined, options?: { replace?: boolean }) => {
-    if (pathsEqual(route.notePath, nextPath)) return;
+    if (pathsEqual(repoRoute.notePath, nextPath)) return;
     // hack: we navigate on the next event loop task to give React state time to update active doc
-    setTimeout(() => setActivePath(nextPath, options), 0);
+    setTimeout(() => navigateInternal(nextPath, options), 0);
   };
+
+  // CLICK HANDLERS
 
   // "Connect GitHub" button in the header
   const signIn = async () => {
@@ -405,8 +472,8 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
         window.open(manageUrl, '_blank', 'noopener');
         return;
       }
-      if (route.kind !== 'repo') return;
-      let url = await apiGetInstallUrl(route.owner, route.repo, window.location.href);
+      if (repoRoute.kind !== 'repo') return;
+      let url = await apiGetInstallUrl(repoRoute.owner, repoRoute.repo, window.location.href);
       window.open(url, '_blank', 'noopener');
     } catch (error) {
       logError(error);
@@ -675,7 +742,71 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     await loadShareForTarget({ owner: repoOwner, repo: repoName, path: activePath });
   };
 
-  let state: RepoDataState = {
+  // DISPATCH: routes action objects to the appropriate internal handler.
+  // The implementation function returns `unknown` to cover all overloads;
+  // the typed Dispatch cast enforces the correct return type at call sites.
+  const dispatchImpl = (action: Action): unknown => {
+    switch (action.type) {
+      case 'route-changed': {
+        // URL changed externally: update internal route and clear pending navigation.
+        let newRoute = action.route;
+        setInternalRoute(newRoute);
+        setPendingNavigation(undefined);
+        return;
+      }
+      case 'sign-in':
+        return signIn();
+      case 'sign-out':
+        return signOut();
+      case 'open-repo-access':
+        return openRepoAccess();
+      case 'sync-now':
+        return syncNow();
+      case 'set-autosync':
+        setAutosync(action.enabled);
+        return;
+      case 'select-file':
+        return selectFile(action.path);
+      case 'create-note':
+        return createNote(action.dir, action.name);
+      case 'create-folder':
+        createFolder(action.parentDir, action.name);
+        return;
+      case 'rename-file':
+        renameFile(action.path, action.name);
+        return;
+      case 'move-file':
+        return moveFile(action.path, action.targetDir);
+      case 'delete-file':
+        deleteFile(action.path);
+        return;
+      case 'rename-folder':
+        renameFolder(action.dir, action.newName);
+        return;
+      case 'move-folder':
+        return moveFolder(action.dir, action.targetDir);
+      case 'delete-folder':
+        deleteFolder(action.dir);
+        return;
+      case 'save-file':
+        saveFile(action.path, action.text);
+        return;
+      case 'import-pasted-assets':
+        return importPastedAssets({ notePath: action.notePath, files: action.files });
+      case 'create-share-link':
+        return createShare();
+      case 'refresh-share-link':
+        return refreshShare();
+      case 'revoke-share-link':
+        return revokeShare();
+    }
+  };
+
+  // Cast to the typed Dispatch interface — justified because dispatchImpl correctly
+  // returns the right type for each action case.
+  const dispatch = dispatchImpl as Dispatch;
+
+  let state: AppDataState = {
     hasSession,
     user,
 
@@ -697,32 +828,15 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     share: shareState,
     statusMessage,
     defaultBranch,
+
+    // Routing info exposed for the UI adapter and consumers.
+    activeSlug: slug,
+    activeRoute: internalRoute,
+    pendingNavigation,
+    recents,
   };
 
-  let actions: RepoDataActions = {
-    signIn,
-    signOut,
-    openRepoAccess,
-
-    syncNow,
-    setAutosync,
-    selectFile,
-    createNote,
-    createFolder,
-    renameFile,
-    moveFile,
-    deleteFile,
-    renameFolder,
-    moveFolder,
-    deleteFolder,
-    saveFile,
-    importPastedAssets,
-    createShareLink: createShare,
-    refreshShareLink: refreshShare,
-    revokeShareLink: revokeShare,
-  };
-
-  return { state, actions };
+  return { state, dispatch };
 }
 
 // Subscribe to the LocalStore's internal cache so React re-renders whenever
