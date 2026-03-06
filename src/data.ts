@@ -438,10 +438,7 @@ function useRepoWorkspaceData({ slug, route }: RepoDataInputs): {
     });
   }, [activeFile?.path, desiredPath]);
 
-  let initialPullRef = useRef({ done: false, slug });
-  if (initialPullRef.current.slug !== slug) {
-    initialPullRef.current = { done: false, slug };
-  }
+  let initialPullRef = useRef({ done: false });
   let shareRequestRef = useRef<{ owner: string; repo: string; path: string } | null>(null);
 
   // Synchronous localStorage lookup — no network call needed.
