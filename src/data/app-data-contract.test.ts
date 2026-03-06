@@ -340,7 +340,7 @@ describe('useAppData contract', () => {
     act(() => {
       result.current.dispatch({
         type: 'repo.activate',
-        repo: { kind: 'github', owner: 'acme', repo: 'docs' },
+        target: { kind: 'repo', owner: 'acme', repo: 'docs' },
       });
     });
 
@@ -380,7 +380,7 @@ describe('useAppData contract', () => {
     act(() => {
       result.current.dispatch({
         type: 'repo.activate',
-        repo: { kind: 'github', owner: 'acme', repo: 'docs' },
+        target: { kind: 'repo', owner: 'acme', repo: 'docs' },
       });
     });
 
@@ -447,7 +447,7 @@ describe('useAppData contract', () => {
     act(() => {
       result.current.dispatch({
         type: 'repo.activate',
-        repo: { kind: 'github', owner: 'acme', repo: 'docs' },
+        target: { kind: 'repo', owner: 'acme', repo: 'docs' },
       });
     });
 
@@ -483,7 +483,7 @@ describe('useAppData contract', () => {
     act(() => {
       result.current.dispatch({
         type: 'repo.activate',
-        repo: { kind: 'github', owner: 'acme', repo: 'docs' },
+        target: { kind: 'repo', owner: 'acme', repo: 'docs' },
       });
     });
 
@@ -528,7 +528,7 @@ describe('useAppData contract', () => {
     act(() => {
       result.current.dispatch({
         type: 'repo.activate',
-        repo: { kind: 'github', owner: 'octocat', repo: 'Hello-World' },
+        target: { kind: 'repo', owner: 'octocat', repo: 'Hello-World' },
       });
     });
 

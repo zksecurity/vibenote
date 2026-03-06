@@ -246,11 +246,7 @@ type AppAction =
 
   // Repo selection and access checks.
   // Open a workspace target and optionally seed the desired file path.
-  | {
-      type: 'repo.activate';
-      repo: { kind: 'new' } | { kind: 'github'; owner: string; repo: string };
-      filePath?: string;
-    }
+  | { type: 'repo.activate'; target: RepoRoute }
   // Check whether an owner/repo appears reachable from the current session.
   | { type: 'repo.probe'; owner: string; repo: string }
   | { type: 'repo.request-access'; owner: string; repo: string }
@@ -1008,21 +1004,14 @@ function useAppShellData({ route }: { route: Route }): AppShellDataResult {
       }
       if (action.type === 'repo.activate') {
         let currentTarget = navigation.screen === 'workspace' ? navigation.target : undefined;
-        if (action.repo.kind === 'github' && currentTarget?.kind === 'repo') {
-          let sameRepo = currentTarget.owner === action.repo.owner && currentTarget.repo === action.repo.repo;
-          if (sameRepo && action.filePath === undefined) {
+        if (action.target.kind === 'repo' && currentTarget?.kind === 'repo') {
+          let sameRepo =
+            currentTarget.owner === action.target.owner && currentTarget.repo === action.target.repo;
+          if (sameRepo && action.target.filePath === undefined) {
             return;
           }
         }
-        let nextTarget: RepoRoute =
-          action.repo.kind === 'new'
-            ? { kind: 'new', filePath: action.filePath }
-            : {
-                kind: 'repo',
-                owner: action.repo.owner,
-                repo: action.repo.repo,
-                filePath: action.filePath,
-              };
+        let nextTarget = action.target;
         if (currentTarget !== undefined && areRepoRoutesEqual(currentTarget, nextTarget)) {
           return;
         }

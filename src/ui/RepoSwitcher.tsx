@@ -67,7 +67,7 @@ export function RepoSwitcher({ dispatch, probe, recents, onClose, triggerRef }: 
   }, [dispatch, input]);
 
   const goTo = (owner: string, repo: string) => {
-    dispatch({ type: 'repo.activate', repo: { kind: 'github', owner, repo } });
+    dispatch({ type: 'repo.activate', target: { kind: 'repo', owner, repo } });
     onClose();
   };
 

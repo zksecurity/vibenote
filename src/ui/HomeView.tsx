@@ -15,12 +15,12 @@ export function HomeView({ recents, dispatch }: HomeViewProps) {
 
   const openEntry = (entry: RecentRepo) => {
     if (entry.owner && entry.repo) {
-      dispatch({ type: 'repo.activate', repo: { kind: 'github', owner: entry.owner, repo: entry.repo } });
+      dispatch({ type: 'repo.activate', target: { kind: 'repo', owner: entry.owner, repo: entry.repo } });
       return;
     }
     const [owner, repo] = entry.slug.split('/', 2);
     if (owner && repo) {
-      dispatch({ type: 'repo.activate', repo: { kind: 'github', owner, repo } });
+      dispatch({ type: 'repo.activate', target: { kind: 'repo', owner, repo } });
     }
   };
 
@@ -30,7 +30,7 @@ export function HomeView({ recents, dispatch }: HomeViewProps) {
   };
 
   const goCreateRepo = () => {
-    dispatch({ type: 'repo.activate', repo: { kind: 'new' } });
+    dispatch({ type: 'repo.activate', target: { kind: 'new' } });
   };
 
   return (
