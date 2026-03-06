@@ -4,7 +4,6 @@ import type { RecentRepo } from '../storage/local';
 import { useOnClickOutside } from './useOnClickOutside';
 
 type Props = {
-  currentSlug?: string;
   dispatch: (action: AppAction) => void;
   probe: {
     status: 'idle' | 'checking' | 'ready';
@@ -26,7 +25,7 @@ function parseOwnerRepo(input: string): Parsed {
   return { owner, repo };
 }
 
-export function RepoSwitcher({ currentSlug, dispatch, probe, recents, onClose, triggerRef }: Props) {
+export function RepoSwitcher({ dispatch, probe, recents, onClose, triggerRef }: Props) {
   const [input, setInput] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const panelRef = useOnClickOutside(onClose, { trigger: triggerRef });
@@ -141,7 +140,6 @@ export function RepoSwitcher({ currentSlug, dispatch, probe, recents, onClose, t
               <span className="repo-switcher-slug">
                 {s.owner && s.repo ? `${s.owner}/${s.repo}` : s.slug}
               </span>
-              {s.slug === currentSlug ? <span className="repo-switcher-connected">current</span> : null}
               {s.connected ? <span className="repo-switcher-connected">linked</span> : null}
             </button>
           </li>

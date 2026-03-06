@@ -510,7 +510,6 @@ function RepoViewInner({ state, dispatch, helpers }: RepoViewProps) {
       )}
       {showSwitcher && (
         <RepoSwitcher
-          currentSlug={slug}
           recents={state.repos.recents}
           probe={state.repos.probe}
           dispatch={dispatch}
