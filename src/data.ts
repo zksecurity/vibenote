@@ -51,7 +51,7 @@ import { prepareClipboardImage } from './lib/image-processing';
 import { relativePathBetween, COMMON_ASSET_DIR } from './lib/pathing';
 import type { Route, RepoRoute } from './ui/routing';
 
-export { useAppData, useRepoData, repoRouteToSlug };
+export { useAppShellData, useWorkspaceAppData, useRepoData, repoRouteToSlug };
 export type {
   AppAction,
   AppDataResult,
@@ -295,6 +295,20 @@ type AppDataResult = {
   };
 };
 
+type AppShellState = {
+  session: AppState['session'];
+  navigation: AppNavigationState;
+  repos: AppState['repos'];
+};
+
+type AppShellDataResult = {
+  state: AppShellState;
+  dispatch: (action: AppAction) => void;
+  setWorkspaceNavigation: (route: RepoRoute, options?: { replace?: boolean }) => void;
+  syncSession: (session: AppShellState['session']) => void;
+  refreshRecents: () => void;
+};
+
 /**
  * Repo-scoped data layer that still powers the current implementation.
  *
@@ -424,7 +438,10 @@ function useRepoWorkspaceData({ slug, route }: RepoDataInputs): {
     });
   }, [activeFile?.path, desiredPath]);
 
-  let initialPullRef = useRef({ done: false });
+  let initialPullRef = useRef({ done: false, slug });
+  if (initialPullRef.current.slug !== slug) {
+    initialPullRef.current = { done: false, slug };
+  }
   let shareRequestRef = useRef<{ owner: string; repo: string; path: string } | null>(null);
 
   // Synchronous localStorage lookup — no network call needed.
@@ -921,7 +938,9 @@ function useRepoData({ slug, route }: RepoDataInputs): {
   return { state, actions, routeSync };
 }
 
-function useAppData({ route }: { route: Route }): AppDataResult {
+function useAppShellData({ route }: { route: Route }): AppShellDataResult {
+  // App-lifetime state: routing, recents, probe state, and coarse session info.
+  let [session, setSession] = useState<AppShellState['session']>(() => readAppSessionState());
   let [recents, setRecents] = useState<RecentRepo[]>(() => listRecentRepos());
   let [probe, setProbe] = useState<RepoProbeState>({ status: 'idle' });
   let [navigation, setNavigation] = useState<AppNavigationState>(() =>
@@ -929,8 +948,30 @@ function useAppData({ route }: { route: Route }): AppDataResult {
   );
   let probeRevisionRef = useRef(0);
 
+  let refreshSession = useCallback(() => {
+    let next = readAppSessionState();
+    setSession((prev) => (areSessionStatesEqual(prev, next) ? prev : next));
+  }, []);
+
+  let refreshRecents = useCallback(() => {
+    let next = listRecentRepos();
+    setRecents((prev) => (recentReposEqual(prev, next) ? prev : next));
+  }, []);
+
+  let setWorkspaceNavigation = useCallback((target: RepoRoute, options?: { replace?: boolean }) => {
+    let next: AppNavigationState = {
+      screen: 'workspace',
+      replace: options?.replace === true ? true : undefined,
+      target,
+    };
+    setNavigation((prev) => (areAppNavigationsEqual(prev, next) ? prev : next));
+  }, []);
+
   useEffect(() => {
-    let onStorage = () => setRecents(listRecentRepos());
+    let onStorage = () => {
+      refreshRecents();
+      refreshSession();
+    };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
   }, []);
@@ -940,35 +981,122 @@ function useAppData({ route }: { route: Route }): AppDataResult {
     setNavigation((prev) => (areAppNavigationsEqual(prev, next) ? prev : next));
   }, [route, recents]);
 
-  let workspaceTarget = navigation.screen === 'workspace' ? navigation.target : undefined;
-  let repoRoute = workspaceTarget ?? { kind: 'new' };
-  let slug = repoRouteToSlug(repoRoute);
-  let workspaceData = useRepoData({ slug, route: repoRoute });
+  let dispatch = useCallback((action: AppAction) => {
+    if (action.type === 'navigation.go-home') {
+      setNavigation({ screen: 'home' });
+      return;
+    }
+    if (action.type === 'session.sign-in') {
+      void (async () => {
+        try {
+          let result = await signInWithGitHubApp();
+          if (result === null) return;
+          setSession({
+            status: 'signed-in',
+            user: result.user,
+          });
+        } catch (error) {
+          logError(error);
+        }
+      })();
+      return;
+    }
+    if (action.type === 'session.sign-out') {
+      void (async () => {
+        try {
+          await signOutFromGitHubApp();
+        } catch (error) {
+          console.warn('vibenote: failed to sign out cleanly', error);
+        }
+        clearAllLocalData();
+        refreshRecents();
+        setSession({ status: 'signed-out', user: undefined });
+      })();
+      return;
+    }
+    if (action.type === 'repo.activate') {
+      let currentTarget = navigation.screen === 'workspace' ? navigation.target : undefined;
+      if (action.repo.kind === 'github' && currentTarget?.kind === 'repo') {
+        let sameRepo =
+          currentTarget.owner === action.repo.owner && currentTarget.repo === action.repo.repo;
+        if (sameRepo && action.filePath === undefined) {
+          return;
+        }
+      }
+      let nextTarget: RepoRoute =
+        action.repo.kind === 'new'
+          ? { kind: 'new', filePath: action.filePath }
+          : {
+              kind: 'repo',
+              owner: action.repo.owner,
+              repo: action.repo.repo,
+              filePath: action.filePath,
+            };
+      if (currentTarget !== undefined && areRepoRoutesEqual(currentTarget, nextTarget)) {
+        return;
+      }
+      setNavigation({ screen: 'workspace', target: nextTarget });
+      return;
+    }
+    if (action.type === 'repo.probe') {
+      let revision = ++probeRevisionRef.current;
+      setProbe({ status: 'checking', owner: action.owner, repo: action.repo });
+      void repoExists(action.owner, action.repo).then((exists) => {
+        if (probeRevisionRef.current !== revision) return;
+        setProbe({ status: 'ready', owner: action.owner, repo: action.repo, exists });
+      });
+    }
+  }, [navigation.screen, navigation.target]);
+
+  return {
+    state: {
+      session,
+      navigation,
+      repos: {
+        recents,
+        probe,
+      },
+    },
+    dispatch,
+    setWorkspaceNavigation,
+    syncSession: useCallback((next) => {
+      setSession((prev) => (areSessionStatesEqual(prev, next) ? prev : next));
+    }, []),
+    refreshRecents,
+  };
+}
+
+function useWorkspaceAppData({
+  app,
+  route,
+}: {
+  app: AppShellDataResult;
+  route: RepoRoute;
+}): AppDataResult {
+  // Repo-lifetime adapter: mount this per slug so repo-local hooks can assume a stable target.
+  let slug = repoRouteToSlug(route);
+  let workspaceData = useRepoData({ slug, route });
 
   useEffect(() => {
-    if (navigation.screen !== 'workspace') return;
-    let nextRouteSync = workspaceData.routeSync;
-    if (nextRouteSync === undefined) return;
-    setNavigation((prev) =>
-      areAppNavigationsEqual(prev, {
-        screen: 'workspace',
-        replace: nextRouteSync.replace,
-        target: nextRouteSync.route,
-      })
-        ? prev
-        : {
-            screen: 'workspace',
-            replace: nextRouteSync.replace,
-            target: nextRouteSync.route,
-          }
-    );
-  }, [navigation.screen, workspaceData.routeSync?.revision, slug]);
+    if (workspaceData.routeSync === undefined) return;
+    app.setWorkspaceNavigation(workspaceData.routeSync.route, {
+      replace: workspaceData.routeSync.replace,
+    });
+  }, [app.setWorkspaceNavigation, workspaceData.routeSync?.revision]);
 
   useEffect(() => {
-    if (workspaceTarget === undefined) return;
-    setRecents(listRecentRepos());
+    app.syncSession({
+      status: workspaceData.state.hasSession ? 'signed-in' : 'signed-out',
+      user: workspaceData.state.user,
+    });
+  }, [app.syncSession, workspaceData.state.hasSession, workspaceData.state.user]);
+
+  useEffect(() => {
+    if (!workspaceData.state.canRead) return;
+    app.refreshRecents();
   }, [
-    workspaceTarget,
+    app.refreshRecents,
+    slug,
     workspaceData.state.canRead,
     workspaceData.state.canSync,
     workspaceData.state.repoLinked,
@@ -980,83 +1108,62 @@ function useAppData({ route }: { route: Route }): AppDataResult {
       status: workspaceData.state.hasSession ? 'signed-in' : 'signed-out',
       user: workspaceData.state.user,
     },
-    navigation,
-    repos: {
-      recents,
-      probe,
+    navigation: app.state.navigation,
+    repos: app.state.repos,
+    workspace: {
+      target: route,
+      access: {
+        status: workspaceData.state.repoQueryStatus,
+        level: workspaceData.state.canEdit ? 'write' : workspaceData.state.canRead ? 'read' : 'none',
+        canRead: workspaceData.state.canRead,
+        canEdit: workspaceData.state.canEdit,
+        canSync: workspaceData.state.canSync,
+        linked: workspaceData.state.repoLinked,
+        manageUrl: workspaceData.state.manageUrl,
+        defaultBranch: workspaceData.state.defaultBranch,
+        errorType: workspaceData.state.repoErrorType,
+      },
+      tree: {
+        files: workspaceData.state.files,
+        folders: workspaceData.state.folders,
+      },
+      document: {
+        activeFile: workspaceData.state.activeFile,
+        activePath: workspaceData.state.activePath,
+      },
+      sync: {
+        autosync: workspaceData.state.autosync,
+        syncing: workspaceData.state.syncing,
+        statusMessage: workspaceData.state.statusMessage,
+      },
+      share: {
+        status: workspaceData.state.share.status,
+        link:
+          workspaceData.state.share.link === undefined
+            ? undefined
+            : { url: workspaceData.state.share.link.url },
+        error: workspaceData.state.share.error,
+      },
     },
-    workspace:
-      workspaceTarget === undefined
-        ? undefined
-        : {
-            target: workspaceTarget,
-            access: {
-              status: workspaceData.state.repoQueryStatus,
-              level: workspaceData.state.canEdit ? 'write' : workspaceData.state.canRead ? 'read' : 'none',
-              canRead: workspaceData.state.canRead,
-              canEdit: workspaceData.state.canEdit,
-              canSync: workspaceData.state.canSync,
-              linked: workspaceData.state.repoLinked,
-              manageUrl: workspaceData.state.manageUrl,
-              defaultBranch: workspaceData.state.defaultBranch,
-              errorType: workspaceData.state.repoErrorType,
-            },
-            tree: {
-              files: workspaceData.state.files,
-              folders: workspaceData.state.folders,
-            },
-            document: {
-              activeFile: workspaceData.state.activeFile,
-              activePath: workspaceData.state.activePath,
-            },
-            sync: {
-              autosync: workspaceData.state.autosync,
-              syncing: workspaceData.state.syncing,
-              statusMessage: workspaceData.state.statusMessage,
-            },
-            share: {
-              status: workspaceData.state.share.status,
-              link:
-                workspaceData.state.share.link === undefined
-                  ? undefined
-                  : { url: workspaceData.state.share.link.url },
-              error: workspaceData.state.share.error,
-            },
-          },
   };
 
-  let dispatch = (action: AppAction) => {
-    if (action.type === 'navigation.go-home') {
-      setNavigation({ screen: 'home' });
+  let dispatch = useCallback((action: AppAction) => {
+    if (
+      action.type === 'navigation.go-home' ||
+      action.type === 'repo.activate' ||
+      action.type === 'repo.probe'
+    ) {
+      app.dispatch(action);
       return;
     }
     if (action.type === 'session.sign-in') {
-      void workspaceData.actions.signIn();
+      void workspaceData.actions.signIn().finally(() => app.syncSession(readAppSessionState()));
       return;
     }
     if (action.type === 'session.sign-out') {
-      void workspaceData.actions.signOut();
-      return;
-    }
-    if (action.type === 'repo.activate') {
-      let nextTarget: RepoRoute =
-        action.repo.kind === 'new'
-          ? { kind: 'new', filePath: action.filePath }
-          : {
-              kind: 'repo',
-              owner: action.repo.owner,
-              repo: action.repo.repo,
-              filePath: action.filePath,
-            };
-      setNavigation({ screen: 'workspace', target: nextTarget });
-      return;
-    }
-    if (action.type === 'repo.probe') {
-      let revision = ++probeRevisionRef.current;
-      setProbe({ status: 'checking', owner: action.owner, repo: action.repo });
-      void repoExists(action.owner, action.repo).then((exists) => {
-        if (probeRevisionRef.current !== revision) return;
-        setProbe({ status: 'ready', owner: action.owner, repo: action.repo, exists });
+      void workspaceData.actions.signOut().finally(() => {
+        app.syncSession(readAppSessionState());
+        app.refreshRecents();
       });
       return;
     }
@@ -1065,6 +1172,7 @@ function useAppData({ route }: { route: Route }): AppDataResult {
       return;
     }
     if (action.type === 'note.open') {
+      app.setWorkspaceNavigation(updateRepoRouteNotePath(route, action.path));
       void workspaceData.actions.selectFile(action.path);
       return;
     }
@@ -1127,7 +1235,14 @@ function useAppData({ route }: { route: Route }): AppDataResult {
     if (action.type === 'share.revoke') {
       void workspaceData.actions.revokeShareLink();
     }
-  };
+  }, [
+    app.dispatch,
+    app.refreshRecents,
+    app.setWorkspaceNavigation,
+    app.syncSession,
+    route,
+    workspaceData.actions,
+  ]);
 
   return {
     state,
@@ -1181,12 +1296,11 @@ function useRepoAccess(params: { route: RepoRoute; sessionToken: string | undefi
   let { route, sessionToken } = params;
   let owner = route.kind === 'repo' ? route.owner : undefined;
   let repo = route.kind === 'repo' ? route.repo : undefined;
-
-  // Track the evolving access status/metadata for the active repository target.
   let [state, setState] = useState<RepoAccessState>(initialAccessState);
 
   // Query GitHub (and the public fallback) whenever the targeted repo changes.
   useEffect(() => {
+    setState((prev) => (areAccessStatesEqual(prev, initialAccessState) ? prev : initialAccessState));
     if (owner === undefined || repo === undefined) return;
     let cancelled = false;
     (async () => {
@@ -1486,9 +1600,49 @@ function areAppNavigationsEqual(a: AppNavigationState, b: AppNavigationState): b
   return areRepoRoutesEqual(a.target, b.target);
 }
 
+function readAppSessionState(): AppShellState['session'] {
+  let token = getAppSessionToken();
+  return {
+    status: token === null ? 'signed-out' : 'signed-in',
+    user: getAppSessionUser() ?? undefined,
+  };
+}
+
+function areSessionStatesEqual(a: AppShellState['session'], b: AppShellState['session']) {
+  if (a.status !== b.status) return false;
+  let left = a.user;
+  let right = b.user;
+  if (left === undefined || right === undefined) return left === right;
+  return (
+    left.login === right.login &&
+    left.name === right.name &&
+    left.avatarUrl === right.avatarUrl &&
+    left.avatarDataUrl === right.avatarDataUrl
+  );
+}
+
 function repoRouteToSlug(route: RepoRoute): string {
   if (route.kind === 'new') return 'new';
   return `${route.owner}/${route.repo}`;
+}
+
+function recentReposEqual(a: RecentRepo[], b: RecentRepo[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    let left = a[i];
+    let right = b[i];
+    if (
+      left?.slug !== right?.slug ||
+      left?.owner !== right?.owner ||
+      left?.repo !== right?.repo ||
+      left?.connected !== right?.connected ||
+      left?.lastOpenedAt !== right?.lastOpenedAt
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function isPathInsideDir(path: string, dir: string): boolean {

@@ -81,7 +81,7 @@ function RepoViewInner({ state, dispatch, helpers }: RepoViewProps) {
   const activeIsMarkdown = activeFile !== undefined && isMarkdownFile(activeFile);
   const canShare =
     hasSession && workspace.target.kind === 'repo' && activePath !== undefined && canEdit && activeIsMarkdown;
-  const shareDisabled = share.status === 'idle' || share.status === 'loading';
+  const shareDisabled = share.status === 'loading';
 
   // error states that require user action (these trigger a custom full sized banner)
   const needsSessionRefresh = repoLinked && repoErrorType === 'auth';

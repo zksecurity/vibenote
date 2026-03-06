@@ -37,6 +37,10 @@ Catch regressions that unit tests often miss:
 5. In that repo:
    - click between 2-3 files in the tree
    - confirm file selection and URL stay in sync
+   - click the sync button once without making edits first
+   - confirm it behaves like a no-op and does not destabilize routing/state
+   - open a markdown note and press the share icon
+   - confirm the dialog opens cleanly, then press cancel without creating/revoking anything
    - open the repo switcher
    - navigate home and back into the repo
    - confirm the workspace still behaves normally

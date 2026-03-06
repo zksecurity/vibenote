@@ -1,36 +1,48 @@
 import React, { useEffect } from 'react';
-import { useAppData, type AppNavigationState } from './data';
+import { repoRouteToSlug, useAppShellData, useWorkspaceAppData, type AppNavigationState } from './data';
 import { useRoute, type Route } from './ui/routing';
 import { RepoView } from './ui/RepoView';
 import { HomeView } from './ui/HomeView';
 
 export function App() {
   const { route, navigate } = useRoute();
-  let { state, dispatch, helpers } = useAppData({ route });
+  let app = useAppShellData({ route });
 
   // Adjust page title based on route
   useEffect(() => {
-    let target = state.workspace?.target;
+    let target = app.state.navigation.target;
     document.title =
       target !== undefined && target.kind === 'repo' ? `${target.owner}/${target.repo}` : 'VibeNote';
-  }, [state.workspace?.target]);
+  }, [app.state.navigation.target]);
 
   useEffect(() => {
-    let nextRoute = routeFromNavigation(state.navigation);
+    let nextRoute = routeFromNavigation(app.state.navigation);
     if (nextRoute === undefined) return;
     if (routesEqual(route, nextRoute)) return;
-    navigate(nextRoute, { replace: state.navigation.replace === true });
-  }, [route, navigate, state.navigation]);
+    navigate(nextRoute, { replace: app.state.navigation.replace === true });
+  }, [route, navigate, app.state.navigation]);
 
-  if (state.navigation.screen === 'home') {
-    return <HomeView recents={state.repos.recents} dispatch={dispatch} />;
+  if (app.state.navigation.screen === 'home') {
+    return <HomeView recents={app.state.repos.recents} dispatch={app.dispatch} />;
   }
 
-  if (state.navigation.screen === 'workspace' && state.workspace !== undefined) {
-    return <RepoView state={state} dispatch={dispatch} helpers={helpers} />;
+  if (app.state.navigation.screen === 'workspace' && app.state.navigation.target !== undefined) {
+    let target = app.state.navigation.target;
+    return <RepoWorkspaceScreen key={repoRouteToSlug(target)} route={target} app={app} />;
   }
 
   return null;
+}
+
+function RepoWorkspaceScreen({
+  route,
+  app,
+}: {
+  route: NonNullable<AppNavigationState['target']>;
+  app: ReturnType<typeof useAppShellData>;
+}) {
+  let data = useWorkspaceAppData({ app, route });
+  return <RepoView state={data.state} dispatch={data.dispatch} helpers={data.helpers} />;
 }
 
 function routeFromNavigation(navigation: AppNavigationState): Route | undefined {

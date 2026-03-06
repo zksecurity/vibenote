@@ -1,10 +1,17 @@
 // Contract tests for the app-scoped data hook consumed by the UI shell.
-import { act, renderHook, waitFor } from '@testing-library/react';
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState, type ReactNode } from 'react';
+import { act, render, waitFor } from '@testing-library/react';
 import { beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { RepoMetadata } from '../lib/backend';
 import type { AppNavigationState } from '../data';
-import { clearAllLocalData, listRecentRepos, recordRecentRepo } from '../storage/local';
+import {
+  LocalStore,
+  clearAllLocalData,
+  listRecentRepos,
+  markRepoLinked,
+  recordRecentRepo,
+  setLastActiveFileId,
+} from '../storage/local';
 import type { Route } from '../ui/routing';
 
 type AuthMocks = {
@@ -89,10 +96,13 @@ vi.mock('../sync/git-sync', async () => {
   };
 });
 
-let useAppData: typeof import('../data').useAppData;
+let useAppShellData: typeof import('../data').useAppShellData;
+let useWorkspaceAppData: typeof import('../data').useWorkspaceAppData;
+let repoRouteToSlug: typeof import('../data').repoRouteToSlug;
+type AppDataResult = import('../data').AppDataResult;
 
 beforeAll(async () => {
-  ({ useAppData } = await import('../data'));
+  ({ useAppShellData, useWorkspaceAppData, repoRouteToSlug } = await import('../data'));
 });
 
 let mockSignInWithGitHubApp = authModule.signInWithGitHubApp;
@@ -116,6 +126,14 @@ let publicMeta: RepoMetadata = {
   manageUrl: null,
 };
 
+let writableMeta: RepoMetadata = {
+  isPrivate: true,
+  installed: true,
+  repoSelected: true,
+  defaultBranch: 'main',
+  manageUrl: null,
+};
+
 function createDeferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
   let reject!: (reason?: unknown) => void;
@@ -127,26 +145,100 @@ function createDeferred<T>() {
 }
 
 function renderAppData(initialRoute: Route) {
-  return renderHook(
-    ({ route }: { route: Route }) => {
-      let [routeState, setRouteState] = useState<Route>(route);
+  let latest: AppDataResult | undefined;
 
-      useEffect(() => {
-        setRouteState((prev) => (routesEqual(prev, route) ? prev : route));
-      }, [route]);
+  function report(value: AppDataResult) {
+    latest = value;
+  }
 
-      let value = useAppData({ route: routeState });
+  let rendered = render(React.createElement(AppDataHarness, { route: initialRoute, onValue: report }));
 
-      useEffect(() => {
-        let nextRoute = routeFromNavigation(value.state.navigation);
-        if (nextRoute === undefined) return;
-        setRouteState((prev) => (routesEqual(prev, nextRoute) ? prev : nextRoute));
-      }, [value.state.navigation]);
-
-      return value;
+  return {
+    result: {
+      get current() {
+        if (latest === undefined) throw new Error('AppDataHarness has not produced a value yet');
+        return latest;
+      },
     },
-    { initialProps: { route: initialRoute } }
-  );
+    rerender: (route: Route) =>
+      rendered.rerender(React.createElement(AppDataHarness, { route, onValue: report })),
+    unmount: rendered.unmount,
+  };
+}
+
+function AppDataHarness({
+  route,
+  onValue,
+}: {
+  route: Route;
+  onValue: (value: AppDataResult) => void;
+}): ReactNode {
+  let [routeState, setRouteState] = useState<Route>(route);
+
+  useEffect(() => {
+    setRouteState((prev) => (routesEqual(prev, route) ? prev : route));
+  }, [route]);
+
+  let app = useAppShellData({ route: routeState });
+
+  useEffect(() => {
+    let nextRoute = routeFromNavigation(app.state.navigation);
+    if (nextRoute === undefined) return;
+    setRouteState((prev) => (routesEqual(prev, nextRoute) ? prev : nextRoute));
+  }, [app.state.navigation]);
+
+  if (app.state.navigation.screen === 'workspace' && app.state.navigation.target !== undefined) {
+    return React.createElement(WorkspaceDataHarness, {
+      key: repoRouteToSlug(app.state.navigation.target),
+      app,
+      route: app.state.navigation.target,
+      onValue,
+    });
+  }
+
+  return React.createElement(HomeDataHarness, { app, onValue });
+}
+
+function HomeDataHarness({
+  app,
+  onValue,
+}: {
+  app: ReturnType<typeof useAppShellData>;
+  onValue: (value: AppDataResult) => void;
+}) {
+  useEffect(() => {
+    onValue({
+      state: {
+        session: app.state.session,
+        navigation: app.state.navigation,
+        repos: app.state.repos,
+        workspace: undefined,
+      },
+      dispatch: app.dispatch,
+      helpers: {
+        importPastedAssets: async () => [],
+      },
+    });
+  });
+  return null;
+}
+
+function WorkspaceDataHarness({
+  app,
+  route,
+  onValue,
+}: {
+  app: ReturnType<typeof useAppShellData>;
+  route: NonNullable<AppNavigationState['target']>;
+  onValue: (value: AppDataResult) => void;
+}) {
+  let value = useWorkspaceAppData({ app, route });
+
+  useEffect(() => {
+    onValue(value);
+  });
+
+  return null;
 }
 
 function setRepoMetadata(meta: RepoMetadata) {
@@ -270,6 +362,195 @@ describe('useAppData contract', () => {
 
     expect(result.current.state.navigation.screen).toBe('home');
     expect(result.current.state.workspace).toBeUndefined();
+  });
+
+  test('opens the selected recent repo from home without falling back to the hidden new workspace route', async () => {
+    let store = new LocalStore('new');
+    let readme = store.listFiles().find((file) => file.path === 'README.md');
+    if (readme === undefined) {
+      throw new Error('Expected seeded README.md in the new workspace');
+    }
+    setLastActiveFileId('new', readme.id);
+    recordRecentRepo({ slug: 'space/wiki', owner: 'space', repo: 'wiki' });
+
+    let { result } = renderAppData({ kind: 'home' });
+
+    await waitFor(() => expect(result.current.state.navigation.screen).toBe('home'));
+
+    act(() => {
+      result.current.dispatch({
+        type: 'repo.activate',
+        repo: { kind: 'github', owner: 'acme', repo: 'docs' },
+      });
+    });
+
+    await waitFor(() => expect(result.current.state.workspace?.access.status).toBe('ready'));
+
+    let target = result.current.state.navigation.target;
+    if (target === undefined || target.kind !== 'repo') {
+      throw new Error('Expected a GitHub workspace target');
+    }
+
+    expect(target.owner).toBe('acme');
+    expect(target.repo).toBe('docs');
+    expect(target.filePath).toBeUndefined();
+  });
+
+  test('keeps file selection and file route in sync inside a writable repo', async () => {
+    let slug = 'acme/docs';
+    let store = new LocalStore(slug);
+    store.createFile('Alpha.md', '# alpha');
+    store.createFile('Beta.md', '# beta');
+    markRepoLinked(slug);
+
+    mockGetSessionToken.mockReturnValue('session-token');
+    mockGetSessionUser.mockReturnValue({
+      login: 'mona',
+      name: 'Mona',
+      avatarUrl: 'https://example.com/mona.png',
+    });
+    setRepoMetadata(writableMeta);
+
+    let { result } = renderAppData({ kind: 'repo', owner: 'acme', repo: 'docs' });
+
+    await waitFor(() => expect(result.current.state.workspace?.access.canEdit).toBe(true));
+    await waitFor(() => expect(result.current.state.workspace?.access.canSync).toBe(true));
+
+    act(() => {
+      result.current.dispatch({ type: 'note.open', path: 'Beta.md' });
+    });
+
+    await waitFor(() => expect(result.current.state.workspace?.document.activePath).toBe('Beta.md'));
+    await waitFor(() => expect(result.current.state.navigation.target?.filePath).toBe('Beta.md'));
+  });
+
+  test('keeps file route sync working after opening a repo from home', async () => {
+    let slug = 'acme/docs';
+    let store = new LocalStore(slug);
+    store.createFile('Alpha.md', '# alpha');
+    store.createFile('Beta.md', '# beta');
+    markRepoLinked(slug);
+    recordRecentRepo({ slug, owner: 'acme', repo: 'docs', connected: true });
+
+    mockGetSessionToken.mockReturnValue('session-token');
+    mockGetSessionUser.mockReturnValue({
+      login: 'mona',
+      name: 'Mona',
+      avatarUrl: 'https://example.com/mona.png',
+    });
+    setRepoMetadata(writableMeta);
+
+    let { result } = renderAppData({ kind: 'home' });
+
+    await waitFor(() => expect(result.current.state.navigation.screen).toBe('home'));
+
+    act(() => {
+      result.current.dispatch({
+        type: 'repo.activate',
+        repo: { kind: 'github', owner: 'acme', repo: 'docs' },
+      });
+    });
+
+    await waitFor(() => expect(result.current.state.workspace?.access.canEdit).toBe(true));
+
+    act(() => {
+      result.current.dispatch({ type: 'note.open', path: 'Beta.md' });
+    });
+
+    await waitFor(() => expect(result.current.state.workspace?.document.activePath).toBe('Beta.md'));
+    await waitFor(() => expect(result.current.state.navigation.target?.filePath).toBe('Beta.md'));
+  });
+
+  test('reselecting the current repo keeps the active note route intact', async () => {
+    let slug = 'acme/docs';
+    let store = new LocalStore(slug);
+    store.createFile('Alpha.md', '# alpha');
+    store.createFile('Beta.md', '# beta');
+    markRepoLinked(slug);
+
+    mockGetSessionToken.mockReturnValue('session-token');
+    mockGetSessionUser.mockReturnValue({
+      login: 'mona',
+      name: 'Mona',
+      avatarUrl: 'https://example.com/mona.png',
+    });
+    setRepoMetadata(writableMeta);
+
+    let { result } = renderAppData({ kind: 'repo', owner: 'acme', repo: 'docs', filePath: 'Beta.md' });
+
+    await waitFor(() => expect(result.current.state.workspace?.access.canSync).toBe(true));
+
+    act(() => {
+      result.current.dispatch({
+        type: 'repo.activate',
+        repo: { kind: 'github', owner: 'acme', repo: 'docs' },
+      });
+    });
+
+    expect(result.current.state.navigation.target).toEqual({
+      kind: 'repo',
+      owner: 'acme',
+      repo: 'docs',
+      filePath: 'Beta.md',
+    });
+    expect(result.current.state.workspace?.target).toEqual({
+      kind: 'repo',
+      owner: 'acme',
+      repo: 'docs',
+      filePath: 'Beta.md',
+    });
+  });
+
+  test('resets workspace access when switching from a writable repo to a public read-only repo', async () => {
+    let writableSlug = 'acme/docs';
+    let publicSlug = 'octocat/Hello-World';
+    let writableStore = new LocalStore(writableSlug);
+    writableStore.createFile('Alpha.md', '# alpha');
+    markRepoLinked(writableSlug);
+    recordRecentRepo({ slug: writableSlug, owner: 'acme', repo: 'docs', connected: true });
+
+    mockGetSessionToken.mockReturnValue('session-token');
+    mockGetSessionUser.mockReturnValue({
+      login: 'mona',
+      name: 'Mona',
+      avatarUrl: 'https://example.com/mona.png',
+    });
+    mockGetRepoMetadata.mockImplementation(async (owner: string, repo: string) => {
+      if (owner === 'acme' && repo === 'docs') return { ...writableMeta };
+      if (owner === 'octocat' && repo === 'Hello-World') return { ...publicMeta };
+      return { ...publicMeta };
+    });
+
+    let { result } = renderAppData({ kind: 'repo', owner: 'acme', repo: 'docs' });
+
+    await waitFor(() => expect(result.current.state.workspace?.access.canSync).toBe(true));
+
+    act(() => {
+      result.current.dispatch({
+        type: 'repo.activate',
+        repo: { kind: 'github', owner: 'octocat', repo: 'Hello-World' },
+      });
+    });
+
+    await waitFor(() => expect(result.current.state.workspace?.target).toEqual({
+      kind: 'repo',
+      owner: 'octocat',
+      repo: 'Hello-World',
+      filePath: undefined,
+    }));
+    await waitFor(() => expect(result.current.state.workspace?.access.status).toBe('ready'));
+    await waitFor(() => expect(result.current.state.workspace?.access.canRead).toBe(true));
+
+    expect(result.current.state.workspace?.access.level).toBe('read');
+    expect(result.current.state.workspace?.access.canEdit).toBe(false);
+    expect(result.current.state.workspace?.access.canSync).toBe(false);
+    expect(result.current.state.navigation.target).toEqual({
+      kind: 'repo',
+      owner: 'octocat',
+      repo: 'Hello-World',
+      filePath: undefined,
+    });
+    expect(listRecentRepos().some((entry) => entry.slug === publicSlug)).toBe(true);
   });
 
   test('surfaces note creation and rename through navigation and document state', async () => {
