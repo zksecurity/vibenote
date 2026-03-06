@@ -53,9 +53,9 @@ import type { Route, RepoRoute } from './ui/routing';
 
 export { useAppData, useRepoData, repoRouteToSlug };
 export type {
-  AppDataAction,
+  AppAction,
   AppDataResult,
-  AppDataState,
+  AppState,
   AppNavigationState,
   RepoAccessState,
   RepoDataInputs,
@@ -177,7 +177,7 @@ type RepoProbeState = {
 };
 
 /** App-level contract consumed by the UI shell. */
-type AppDataState = {
+type AppState = {
   /** Current auth/session state for GitHub-backed features. */
   session: {
     status: 'signed-out' | 'signed-in';
@@ -244,7 +244,7 @@ type AppDataState = {
 // Action protocol emitted by the UI.
 // Actions are intents, not imperative callbacks: the UI asks for something to
 // happen and then observes the resulting state update.
-type AppDataAction =
+type AppAction =
   // App-level navigation and session lifecycle.
   | { type: 'navigation.go-home' }
   | { type: 'session.sign-in' }
@@ -288,8 +288,8 @@ type AppDataAction =
   | { type: 'share.revoke'; notePath: string };
 
 type AppDataResult = {
-  state: AppDataState;
-  dispatch: (action: AppDataAction) => void;
+  state: AppState;
+  dispatch: (action: AppAction) => void;
   helpers: {
     importPastedAssets: (params: { notePath: string; files: File[] }) => Promise<ImportedAsset[]>;
   };
@@ -975,7 +975,7 @@ function useAppData({ route }: { route: Route }): AppDataResult {
     workspaceData.state.repoQueryStatus,
   ]);
 
-  let state: AppDataState = {
+  let state: AppState = {
     session: {
       status: workspaceData.state.hasSession ? 'signed-in' : 'signed-out',
       user: workspaceData.state.user,
@@ -1025,7 +1025,7 @@ function useAppData({ route }: { route: Route }): AppDataResult {
           },
   };
 
-  let dispatch = (action: AppDataAction) => {
+  let dispatch = (action: AppAction) => {
     if (action.type === 'navigation.go-home') {
       setNavigation({ screen: 'home' });
       return;

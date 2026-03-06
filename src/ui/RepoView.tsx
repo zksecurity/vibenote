@@ -7,7 +7,7 @@ import { AssetViewer } from './AssetViewer';
 import { RepoSwitcher } from './RepoSwitcher';
 import { Toggle } from './Toggle';
 import { GitHubIcon, ExternalLinkIcon, NotesIcon, CloseIcon, SyncIcon, ShareIcon } from './RepoIcons';
-import { repoRouteToSlug, type AppDataAction, type AppDataResult, type AppDataState } from '../data';
+import { repoRouteToSlug, type AppAction, type AppDataResult, type AppState } from '../data';
 import type { FileMeta } from '../storage/local';
 import {
   getExpandedFolders,
@@ -26,8 +26,8 @@ import { ShareDialog } from './ShareDialog';
 import { useOnClickOutside } from './useOnClickOutside';
 
 type RepoViewProps = {
-  state: AppDataState;
-  dispatch: (action: AppDataAction) => void;
+  state: AppState;
+  dispatch: (action: AppAction) => void;
   helpers: AppDataResult['helpers'];
 };
 
@@ -271,8 +271,8 @@ function RepoViewInner({ state, dispatch, helpers }: RepoViewProps) {
                     share.link
                       ? 'Manage share link'
                       : shareDisabled
-                      ? 'Checking share status'
-                      : 'Create share link'
+                        ? 'Checking share status'
+                        : 'Create share link'
                   }
                   aria-label={share.link ? 'Manage share link' : 'Create share link'}
                   disabled={shareDisabled}

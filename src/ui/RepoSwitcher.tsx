@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import type { AppDataAction } from '../data';
+import type { AppAction } from '../data';
 import type { RecentRepo } from '../storage/local';
 import { useOnClickOutside } from './useOnClickOutside';
 
 type Props = {
   currentSlug?: string;
-  dispatch: (action: AppDataAction) => void;
+  dispatch: (action: AppAction) => void;
   probe: {
     status: 'idle' | 'checking' | 'ready';
     owner?: string;
@@ -91,17 +91,17 @@ export function RepoSwitcher({ currentSlug, dispatch, probe, recents, onClose, t
     probe.owner?.toLowerCase() === parsed.owner.toLowerCase() &&
     probe.repo?.toLowerCase() === parsed.repo.toLowerCase();
   const checking = probeMatchesInput && probe.status === 'checking';
-  const exists = probeMatchesInput && probe.status === 'ready' ? probe.exists ?? null : null;
+  const exists = probeMatchesInput && probe.status === 'ready' ? (probe.exists ?? null) : null;
 
   const statusText = checking
     ? 'Checking repository…'
     : parsed
-    ? exists === true
-      ? 'Press Enter to open'
-      : exists === false
-      ? 'Repo not found or no access'
-      : 'Type owner/repo to open'
-    : 'Type owner/repo or choose a recent';
+      ? exists === true
+        ? 'Press Enter to open'
+        : exists === false
+          ? 'Repo not found or no access'
+          : 'Type owner/repo to open'
+      : 'Type owner/repo or choose a recent';
 
   return (
     <div ref={panelRef} className="repo-switcher-panel" onClick={(e) => e.stopPropagation()}>

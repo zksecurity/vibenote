@@ -1,12 +1,12 @@
 // Home screen listing recent repositories and entry points for setup.
 import 'react';
 import { ChevronRight } from 'lucide-react';
-import type { AppDataAction } from '../data';
+import type { AppAction } from '../data';
 import type { RecentRepo } from '../storage/local';
 
 type HomeViewProps = {
   recents: RecentRepo[];
-  dispatch: (action: AppDataAction) => void;
+  dispatch: (action: AppAction) => void;
 };
 
 export function HomeView({ recents, dispatch }: HomeViewProps) {
