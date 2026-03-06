@@ -15,6 +15,7 @@ export function App() {
       target !== undefined && target.kind === 'repo' ? `${target.owner}/${target.repo}` : 'VibeNote';
   }, [app.state.navigation.target]);
 
+  // Keep the browser URL in sync with the app-level navigation contract.
   useEffect(() => {
     let nextRoute = routeFromNavigation(app.state.navigation);
     if (nextRoute === undefined) return;
@@ -22,10 +23,12 @@ export function App() {
     navigate(nextRoute, { replace: app.state.navigation.replace === true });
   }, [route, navigate, app.state.navigation]);
 
+  // Home is rendered directly from app-level state, without mounting any repo workspace.
   if (app.state.navigation.screen === 'home') {
     return <HomeView recents={app.state.repos.recents} dispatch={app.dispatch} />;
   }
 
+  // Mount repo state behind a slug key so repo-local hooks can assume owner/repo stay fixed.
   if (app.state.navigation.screen === 'workspace' && app.state.navigation.target !== undefined) {
     let target = app.state.navigation.target;
     return <RepoWorkspaceScreen key={repoRouteToSlug(target)} route={target} app={app} />;
@@ -41,6 +44,7 @@ function RepoWorkspaceScreen({
   route: NonNullable<AppNavigationState['target']>;
   app: ReturnType<typeof useAppShellData>;
 }) {
+  // Combine app-level shell state with the repo-scoped workspace data for RepoView.
   let data = useWorkspaceAppData({ app, route });
   return <RepoView state={data.state} dispatch={data.dispatch} helpers={data.helpers} />;
 }

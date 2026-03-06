@@ -978,72 +978,74 @@ function useAppShellData({ route }: { route: Route }): AppShellDataResult {
     setNavigation((prev) => (areAppNavigationsEqual(prev, next) ? prev : next));
   }, [route, recents]);
 
-  let dispatch = useCallback((action: AppAction) => {
-    if (action.type === 'navigation.go-home') {
-      setNavigation({ screen: 'home' });
-      return;
-    }
-    if (action.type === 'session.sign-in') {
-      void (async () => {
-        try {
-          let result = await signInWithGitHubApp();
-          if (result === null) return;
-          setSession({
-            status: 'signed-in',
-            user: result.user,
-          });
-        } catch (error) {
-          logError(error);
-        }
-      })();
-      return;
-    }
-    if (action.type === 'session.sign-out') {
-      void (async () => {
-        try {
-          await signOutFromGitHubApp();
-        } catch (error) {
-          console.warn('vibenote: failed to sign out cleanly', error);
-        }
-        clearAllLocalData();
-        refreshRecents();
-        setSession({ status: 'signed-out', user: undefined });
-      })();
-      return;
-    }
-    if (action.type === 'repo.activate') {
-      let currentTarget = navigation.screen === 'workspace' ? navigation.target : undefined;
-      if (action.repo.kind === 'github' && currentTarget?.kind === 'repo') {
-        let sameRepo =
-          currentTarget.owner === action.repo.owner && currentTarget.repo === action.repo.repo;
-        if (sameRepo && action.filePath === undefined) {
-          return;
-        }
-      }
-      let nextTarget: RepoRoute =
-        action.repo.kind === 'new'
-          ? { kind: 'new', filePath: action.filePath }
-          : {
-              kind: 'repo',
-              owner: action.repo.owner,
-              repo: action.repo.repo,
-              filePath: action.filePath,
-            };
-      if (currentTarget !== undefined && areRepoRoutesEqual(currentTarget, nextTarget)) {
+  let dispatch = useCallback(
+    (action: AppAction) => {
+      if (action.type === 'navigation.go-home') {
+        setNavigation({ screen: 'home' });
         return;
       }
-      setNavigation({ screen: 'workspace', target: nextTarget });
-      return;
-    }
-    if (action.type === 'repo.probe') {
-      let revision = ++probeRevisionRef.current;
-      setProbe({ status: 'checking', owner: action.owner, repo: action.repo });
-      void repoExists(action.owner, action.repo).then((exists) => {
-        if (probeRevisionRef.current !== revision) return;
-        setProbe({ status: 'ready', owner: action.owner, repo: action.repo, exists });
-      });
-    }
-  }, [navigation.screen, navigation.target]);
+      if (action.type === 'session.sign-in') {
+        void (async () => {
+          try {
+            let result = await signInWithGitHubApp();
+            if (result === null) return;
+            setSession({
+              status: 'signed-in',
+              user: result.user,
+            });
+          } catch (error) {
+            logError(error);
+          }
+        })();
+        return;
+      }
+      if (action.type === 'session.sign-out') {
+        void (async () => {
+          try {
+            await signOutFromGitHubApp();
+          } catch (error) {
+            console.warn('vibenote: failed to sign out cleanly', error);
+          }
+          clearAllLocalData();
+          refreshRecents();
+          setSession({ status: 'signed-out', user: undefined });
+        })();
+        return;
+      }
+      if (action.type === 'repo.activate') {
+        let currentTarget = navigation.screen === 'workspace' ? navigation.target : undefined;
+        if (action.repo.kind === 'github' && currentTarget?.kind === 'repo') {
+          let sameRepo = currentTarget.owner === action.repo.owner && currentTarget.repo === action.repo.repo;
+          if (sameRepo && action.filePath === undefined) {
+            return;
+          }
+        }
+        let nextTarget: RepoRoute =
+          action.repo.kind === 'new'
+            ? { kind: 'new', filePath: action.filePath }
+            : {
+                kind: 'repo',
+                owner: action.repo.owner,
+                repo: action.repo.repo,
+                filePath: action.filePath,
+              };
+        if (currentTarget !== undefined && areRepoRoutesEqual(currentTarget, nextTarget)) {
+          return;
+        }
+        setNavigation({ screen: 'workspace', target: nextTarget });
+        return;
+      }
+      if (action.type === 'repo.probe') {
+        let revision = ++probeRevisionRef.current;
+        setProbe({ status: 'checking', owner: action.owner, repo: action.repo });
+        void repoExists(action.owner, action.repo).then((exists) => {
+          if (probeRevisionRef.current !== revision) return;
+          setProbe({ status: 'ready', owner: action.owner, repo: action.repo, exists });
+        });
+      }
+    },
+    [navigation.screen, navigation.target]
+  );
 
   return {
     state: {
@@ -1063,13 +1065,7 @@ function useAppShellData({ route }: { route: Route }): AppShellDataResult {
   };
 }
 
-function useWorkspaceAppData({
-  app,
-  route,
-}: {
-  app: AppShellDataResult;
-  route: RepoRoute;
-}): AppDataResult {
+function useWorkspaceAppData({ app, route }: { app: AppShellDataResult; route: RepoRoute }): AppDataResult {
   // Repo-lifetime adapter: mount this per slug so repo-local hooks can assume a stable target.
   let slug = repoRouteToSlug(route);
   let workspaceData = useRepoData({ slug, route });
@@ -1144,102 +1140,105 @@ function useWorkspaceAppData({
     },
   };
 
-  let dispatch = useCallback((action: AppAction) => {
-    if (
-      action.type === 'navigation.go-home' ||
-      action.type === 'repo.activate' ||
-      action.type === 'repo.probe'
-    ) {
-      app.dispatch(action);
-      return;
-    }
-    if (action.type === 'session.sign-in') {
-      void workspaceData.actions.signIn().finally(() => app.syncSession(readAppSessionState()));
-      return;
-    }
-    if (action.type === 'session.sign-out') {
-      void workspaceData.actions.signOut().finally(() => {
-        app.syncSession(readAppSessionState());
-        app.refreshRecents();
-      });
-      return;
-    }
-    if (action.type === 'repo.request-access') {
-      void workspaceData.actions.openRepoAccess();
-      return;
-    }
-    if (action.type === 'note.open') {
-      app.setWorkspaceNavigation(updateRepoRouteNotePath(route, action.path));
-      void workspaceData.actions.selectFile(action.path);
-      return;
-    }
-    if (action.type === 'note.create') {
-      void workspaceData.actions.createNote(action.parentDir, action.name);
-      return;
-    }
-    if (action.type === 'file.save') {
-      workspaceData.actions.saveFile(action.path, action.contents);
-      return;
-    }
-    if (action.type === 'file.rename') {
-      workspaceData.actions.renameFile(action.path, action.name);
-      return;
-    }
-    if (action.type === 'file.move') {
-      void workspaceData.actions.moveFile(action.path, action.targetDir);
-      return;
-    }
-    if (action.type === 'file.delete') {
-      workspaceData.actions.deleteFile(action.path);
-      return;
-    }
-    if (action.type === 'folder.create') {
-      workspaceData.actions.createFolder(action.parentDir, action.name);
-      return;
-    }
-    if (action.type === 'folder.rename') {
-      workspaceData.actions.renameFolder(action.path, action.name);
-      return;
-    }
-    if (action.type === 'folder.move') {
-      void workspaceData.actions.moveFolder(action.path, action.targetDir);
-      return;
-    }
-    if (action.type === 'folder.delete') {
-      workspaceData.actions.deleteFolder(action.path);
-      return;
-    }
-    if (action.type === 'assets.import') {
-      void workspaceData.actions.importPastedAssets({ notePath: action.notePath, files: action.files });
-      return;
-    }
-    if (action.type === 'sync.run') {
-      void workspaceData.actions.syncNow();
-      return;
-    }
-    if (action.type === 'sync.set-autosync') {
-      workspaceData.actions.setAutosync(action.enabled);
-      return;
-    }
-    if (action.type === 'share.create') {
-      void workspaceData.actions.createShareLink();
-      return;
-    }
-    if (action.type === 'share.refresh') {
-      void workspaceData.actions.refreshShareLink();
-      return;
-    }
-    if (action.type === 'share.revoke') {
-      void workspaceData.actions.revokeShareLink();
-    }
-  }, [
-    app.dispatch,
-    app.refreshRecents,
-    app.setWorkspaceNavigation,
-    app.syncSession,
-    route,
-    workspaceData.actions,
-  ]);
+  let dispatch = useCallback(
+    (action: AppAction) => {
+      if (
+        action.type === 'navigation.go-home' ||
+        action.type === 'repo.activate' ||
+        action.type === 'repo.probe'
+      ) {
+        app.dispatch(action);
+        return;
+      }
+      if (action.type === 'session.sign-in') {
+        void workspaceData.actions.signIn().finally(() => app.syncSession(readAppSessionState()));
+        return;
+      }
+      if (action.type === 'session.sign-out') {
+        void workspaceData.actions.signOut().finally(() => {
+          app.syncSession(readAppSessionState());
+          app.refreshRecents();
+        });
+        return;
+      }
+      if (action.type === 'repo.request-access') {
+        void workspaceData.actions.openRepoAccess();
+        return;
+      }
+      if (action.type === 'note.open') {
+        app.setWorkspaceNavigation(updateRepoRouteNotePath(route, action.path));
+        void workspaceData.actions.selectFile(action.path);
+        return;
+      }
+      if (action.type === 'note.create') {
+        void workspaceData.actions.createNote(action.parentDir, action.name);
+        return;
+      }
+      if (action.type === 'file.save') {
+        workspaceData.actions.saveFile(action.path, action.contents);
+        return;
+      }
+      if (action.type === 'file.rename') {
+        workspaceData.actions.renameFile(action.path, action.name);
+        return;
+      }
+      if (action.type === 'file.move') {
+        void workspaceData.actions.moveFile(action.path, action.targetDir);
+        return;
+      }
+      if (action.type === 'file.delete') {
+        workspaceData.actions.deleteFile(action.path);
+        return;
+      }
+      if (action.type === 'folder.create') {
+        workspaceData.actions.createFolder(action.parentDir, action.name);
+        return;
+      }
+      if (action.type === 'folder.rename') {
+        workspaceData.actions.renameFolder(action.path, action.name);
+        return;
+      }
+      if (action.type === 'folder.move') {
+        void workspaceData.actions.moveFolder(action.path, action.targetDir);
+        return;
+      }
+      if (action.type === 'folder.delete') {
+        workspaceData.actions.deleteFolder(action.path);
+        return;
+      }
+      if (action.type === 'assets.import') {
+        void workspaceData.actions.importPastedAssets({ notePath: action.notePath, files: action.files });
+        return;
+      }
+      if (action.type === 'sync.run') {
+        void workspaceData.actions.syncNow();
+        return;
+      }
+      if (action.type === 'sync.set-autosync') {
+        workspaceData.actions.setAutosync(action.enabled);
+        return;
+      }
+      if (action.type === 'share.create') {
+        void workspaceData.actions.createShareLink();
+        return;
+      }
+      if (action.type === 'share.refresh') {
+        void workspaceData.actions.refreshShareLink();
+        return;
+      }
+      if (action.type === 'share.revoke') {
+        void workspaceData.actions.revokeShareLink();
+      }
+    },
+    [
+      app.dispatch,
+      app.refreshRecents,
+      app.setWorkspaceNavigation,
+      app.syncSession,
+      route,
+      workspaceData.actions,
+    ]
+  );
 
   return {
     state,
@@ -1293,11 +1292,12 @@ function useRepoAccess(params: { route: RepoRoute; sessionToken: string | undefi
   let { route, sessionToken } = params;
   let owner = route.kind === 'repo' ? route.owner : undefined;
   let repo = route.kind === 'repo' ? route.repo : undefined;
+
+  // Track the evolving access status/metadata for the active repository target.
   let [state, setState] = useState<RepoAccessState>(initialAccessState);
 
   // Query GitHub (and the public fallback) whenever the targeted repo changes.
   useEffect(() => {
-    setState((prev) => (areAccessStatesEqual(prev, initialAccessState) ? prev : initialAccessState));
     if (owner === undefined || repo === undefined) return;
     let cancelled = false;
     (async () => {
