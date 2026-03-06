@@ -1,25 +1,27 @@
 // Home screen listing recent repositories and entry points for setup.
 import 'react';
 import { ChevronRight } from 'lucide-react';
-import type { Route } from './routing';
+import type { AppAction } from '../data';
 import type { RecentRepo } from '../storage/local';
 
 type HomeViewProps = {
   recents: RecentRepo[];
-  navigate: (route: Route, options?: { replace?: boolean }) => void;
+  dispatch: (action: AppAction) => void;
 };
 
-export function HomeView({ recents, navigate }: HomeViewProps) {
+export function HomeView({ recents, dispatch }: HomeViewProps) {
   const repos = recents.filter((entry) => entry.slug !== 'new');
   const hasRepos = repos.length > 0;
 
   const openEntry = (entry: RecentRepo) => {
     if (entry.owner && entry.repo) {
-      navigate({ kind: 'repo', owner: entry.owner, repo: entry.repo });
+      dispatch({ type: 'repo.activate', target: { kind: 'repo', owner: entry.owner, repo: entry.repo } });
       return;
     }
     const [owner, repo] = entry.slug.split('/', 2);
-    if (owner && repo) navigate({ kind: 'repo', owner, repo });
+    if (owner && repo) {
+      dispatch({ type: 'repo.activate', target: { kind: 'repo', owner, repo } });
+    }
   };
 
   const renderLabel = (entry: RecentRepo) => {
@@ -28,7 +30,7 @@ export function HomeView({ recents, navigate }: HomeViewProps) {
   };
 
   const goCreateRepo = () => {
-    navigate({ kind: 'new' });
+    dispatch({ type: 'repo.activate', target: { kind: 'new' } });
   };
 
   return (

@@ -1,84 +1,97 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { useRoute } from './ui/routing';
+import React, { useEffect } from 'react';
+import { repoRouteToSlug, type AppNavigationState } from './data';
+import { AppShellProvider, RepoDataProvider, useAppDataContext, useAppShellContext } from './data-context';
+import { useRoute, type Route } from './ui/routing';
 import { RepoView } from './ui/RepoView';
 import { HomeView } from './ui/HomeView';
-import { listRecentRepos, recordRecentRepo, type RecentRepo } from './storage/local';
 
 export function App() {
   const { route, navigate } = useRoute();
+  return (
+    <AppShellProvider route={route}>
+      <AppScreens route={route} navigate={navigate} />
+    </AppShellProvider>
+  );
+}
+
+function AppScreens({
+  route,
+  navigate,
+}: {
+  route: Route;
+  navigate: (route: Route, options?: { replace?: boolean }) => void;
+}) {
+  let app = useAppShellContext();
 
   // Adjust page title based on route
   useEffect(() => {
-    document.title = route.kind === 'repo' ? `${route.owner}/${route.repo}` : 'VibeNote';
-  }, [route]);
+    let target = app.state.navigation.target;
+    document.title =
+      target !== undefined && target.kind === 'repo' ? `${target.owner}/${target.repo}` : 'VibeNote';
+  }, [app.state.navigation.target]);
 
-  // redirects
+  // Keep the browser URL in sync with the app-level navigation contract.
   useEffect(() => {
-    // if the route is /start, redirect to the most recent repo or /home
-    if (route.kind === 'start') {
-      let candidate = recents.find((entry) => entry.owner !== undefined && entry.repo !== undefined);
+    let nextRoute = routeFromNavigation(app.state.navigation);
+    if (nextRoute === undefined) return;
+    if (routesEqual(route, nextRoute)) return;
+    navigate(nextRoute, { replace: app.state.navigation.replace === true });
+  }, [route, navigate, app.state.navigation]);
 
-      if (candidate !== undefined) {
-        navigate({ kind: 'repo', owner: candidate.owner!, repo: candidate.repo! }, { replace: true });
-        return;
-      }
-      navigate({ kind: 'home' }, { replace: true });
-    }
-
-    // if the route is /home and there are no recent repos, redirect to /new for the onboarding flow
-    if (route.kind === 'home') {
-      if (listRecentRepos().length === 0) {
-        navigate({ kind: 'new', notePath: 'README.md' }, { replace: true });
-      }
-    }
-  }, [route]);
-
-  // list of recent repos, kept in local storage and updated when navigating to a new repo
-  // or updating information about an existing one
-  const [recents, recordRecent] = useRecents();
-
-  if (route.kind === 'home') {
-    return <HomeView recents={recents} navigate={navigate} />;
+  // Home is rendered directly from app-level state, without mounting any repo workspace.
+  if (app.state.navigation.screen === 'home') {
+    return <HomeView recents={app.state.repos.recents} dispatch={app.dispatch} />;
   }
 
-  if (route.kind === 'start') {
-    // will redirect immediately
-    return null;
-  }
-
-  if (route.kind === 'new') {
-    return <RepoView slug="new" route={route} navigate={navigate} recordRecent={recordRecent} />;
-  }
-
-  if (route.kind === 'repo') {
+  // Mount repo state behind a slug key so repo-local hooks can assume owner/repo stay fixed.
+  if (app.state.navigation.screen === 'workspace' && app.state.navigation.target !== undefined) {
+    let target = app.state.navigation.target;
     return (
-      <RepoView
-        slug={`${route.owner}/${route.repo}`}
-        route={route}
-        navigate={navigate}
-        recordRecent={recordRecent}
-      />
+      <RepoDataProvider key={repoRouteToSlug(target)} route={target}>
+        <RepoWorkspaceScreen />
+      </RepoDataProvider>
     );
   }
 
   return null;
 }
 
-function useRecents() {
-  const [recents, setRecents] = useState<RecentRepo[]>(() => listRecentRepos());
-
-  useEffect(() => {
-    const onStorage = () => setRecents(listRecentRepos());
-    window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
-  }, []);
-
-  const recordRecent = useCallback(
-    (entry: { slug: string; owner?: string; repo?: string; title?: string; connected?: boolean }) => {
-      recordRecentRepo(entry);
-      setRecents(listRecentRepos());
-    },
-    []
+function RepoWorkspaceScreen() {
+  // Combine app-level shell state with the repo-scoped workspace data for RepoView.
+  let data = useAppDataContext();
+  let workspace = data.state.workspace;
+  if (workspace === undefined) return null;
+  return (
+    <RepoView
+      state={{ ...data.state, workspace }}
+      dispatch={data.dispatch}
+      queries={data.queries}
+      helpers={data.helpers}
+    />
   );
-  return [recents, recordRecent] as const;
+}
+
+function routeFromNavigation(navigation: AppNavigationState): Route | undefined {
+  if (navigation.screen === 'home') return { kind: 'home' } as const;
+  if (navigation.screen !== 'workspace' || navigation.target === undefined) return undefined;
+  if (navigation.target.kind === 'new') {
+    return { kind: 'new', filePath: navigation.target.filePath } as const;
+  }
+  return {
+    kind: 'repo',
+    owner: navigation.target.owner,
+    repo: navigation.target.repo,
+    filePath: navigation.target.filePath,
+  } as const;
+}
+
+function routesEqual(a: Route | undefined, b: Route | undefined) {
+  if (a === undefined || b === undefined) return a === b;
+  if (a.kind !== b.kind) return false;
+  if (a.kind === 'home' && b.kind === 'home') return true;
+  if (a.kind === 'new' && b.kind === 'new') return a.filePath === b.filePath;
+  if (a.kind === 'repo' && b.kind === 'repo') {
+    return a.owner === b.owner && a.repo === b.repo && a.filePath === b.filePath;
+  }
+  return false;
 }

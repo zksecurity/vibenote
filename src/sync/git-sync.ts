@@ -52,7 +52,8 @@ export function buildRemoteConfig(slug: string, branch?: string): RemoteConfig {
 export async function repoExists(owner: string, repo: string): Promise<boolean> {
   try {
     let meta = await getRepoMetadata(owner, repo);
-    if (meta.installed) return true;
+    // Installation alone is owner-scoped and does not prove the repo itself exists.
+    if (meta.repoSelected) return true;
     if (meta.isPrivate === false) return true;
     if (meta.isPrivate === true) return false;
   } catch {

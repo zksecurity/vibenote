@@ -18,10 +18,7 @@ import { getRepoStore, markSynced, hashText } from '../storage/local';
 export type { GitShareLink };
 export { createGitShare, revokeGitShare, lookupCachedShare };
 
-type GitShareLink = {
-  shareId: string;
-  url: string;
-};
+type GitShareLink = { shareId: string; url: string };
 
 // --- Crypto helpers (browser-native, no Node.js) ---
 
@@ -130,7 +127,7 @@ async function readRepoFile(
   });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`GitHub read failed (${res.status}): ${path}`);
-  const json = await res.json() as Record<string, unknown>;
+  const json = (await res.json()) as Record<string, unknown>;
   const sha = typeof json.sha === 'string' ? json.sha : '';
   const content = typeof json.content === 'string' ? json.content : '';
   return { text: base64ToText(content), sha };
@@ -155,12 +152,14 @@ async function putRepoFile(
     body: JSON.stringify({ message, content: textToBase64(text) }),
   });
   if (!res.ok) throw new Error(`GitHub write failed (${res.status}): ${path}`);
-  const json = await res.json() as Record<string, unknown>;
+  const json = (await res.json()) as Record<string, unknown>;
   // GitHub returns { content: { sha } } — the blob SHA of the created file
   const contentObj = json.content;
   const sha =
-    contentObj && typeof contentObj === 'object' && typeof (contentObj as Record<string, unknown>).sha === 'string'
-      ? (contentObj as Record<string, unknown>).sha as string
+    contentObj &&
+    typeof contentObj === 'object' &&
+    typeof (contentObj as Record<string, unknown>).sha === 'string'
+      ? ((contentObj as Record<string, unknown>).sha as string)
       : '';
   return sha;
 }
@@ -252,26 +251,14 @@ async function createGitShare(owner: string, repo: string, notePath: string): Pr
   return { shareId, url };
 }
 
-async function revokeGitShare(
-  owner: string,
-  repo: string,
-  notePath: string,
-  shareId: string
-): Promise<void> {
+async function revokeGitShare(owner: string, repo: string, notePath: string, shareId: string): Promise<void> {
   const token = await ensureFreshAccessToken();
   if (!token) throw new Error('Not authenticated.');
 
   // Read the share file to get its SHA — required by the GitHub delete API
   const file = await readRepoFile(token, owner, repo, `.shares/${shareId}`);
   if (file) {
-    await deleteRepoFile(
-      token,
-      owner,
-      repo,
-      `.shares/${shareId}`,
-      file.sha,
-      `share: revoke ${notePath}`
-    );
+    await deleteRepoFile(token, owner, repo, `.shares/${shareId}`, file.sha, `share: revoke ${notePath}`);
   }
 
   // Remove from local store — sync tombstone will be a no-op since the file

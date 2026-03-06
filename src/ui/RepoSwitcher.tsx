@@ -1,15 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import type { Route } from './routing';
-import { listRecentRepos, type RecentRepo } from '../storage/local';
-import { repoExists } from '../sync/git-sync';
+import type { AppAction, AppQueries } from '../data';
+import type { RecentRepo } from '../storage/local';
 import { useOnClickOutside } from './useOnClickOutside';
 
 type Props = {
-  route: Route;
-  slug: string;
-  navigate: (route: Route, options?: { replace?: boolean }) => void;
+  dispatch: (action: AppAction) => void;
+  queries: AppQueries;
+  recents: RecentRepo[];
   onClose: () => void;
-  onRecordRecent: (entry: { slug: string; owner?: string; repo?: string; connected?: boolean }) => void;
   triggerRef?: RefObject<HTMLElement | null>;
 };
 
@@ -22,18 +20,18 @@ function parseOwnerRepo(input: string): Parsed {
   return { owner, repo };
 }
 
-export function RepoSwitcher({ route, slug, navigate, onClose, onRecordRecent, triggerRef }: Props) {
+export function RepoSwitcher({ dispatch, queries, recents, onClose, triggerRef }: Props) {
   const [input, setInput] = useState('');
-  const [recents, setRecents] = useState<RecentRepo[]>(() => listRecentRepos());
-  const [checking, setChecking] = useState(false);
-  const [exists, setExists] = useState<boolean | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const panelRef = useOnClickOutside(onClose, { trigger: triggerRef });
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const dispatchRef = useRef(dispatch);
+  const parsed = parseOwnerRepo(input);
+  const probe = parsed === null ? undefined : queries.getRepoProbe(parsed.owner, parsed.repo);
 
   useEffect(() => {
-    setRecents(listRecentRepos());
-  }, [route]);
+    dispatchRef.current = dispatch;
+  }, [dispatch]);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -56,33 +54,25 @@ export function RepoSwitcher({ route, slug, navigate, onClose, onRecordRecent, t
     setSelectedIndex(0);
   }, [suggestions.length]);
 
-  // Debounced existence check for precise owner/repo inputs
+  // Debounced existence check for precise owner/repo inputs.
+  // Once a matching probe is already in-flight or cached, do not re-dispatch it.
   useEffect(() => {
-    let cancel = false;
-    const parsed = parseOwnerRepo(input);
     if (!parsed) {
-      setExists(null);
-      setChecking(false);
       return;
     }
-    setChecking(true);
-    const t = setTimeout(async () => {
-      try {
-        const ok = await repoExists(parsed.owner, parsed.repo);
-        if (!cancel) setExists(ok);
-      } finally {
-        if (!cancel) setChecking(false);
-      }
+    if (probe?.status === 'checking' || probe?.status === 'ready') {
+      return;
+    }
+    const t = setTimeout(() => {
+      dispatchRef.current({ type: 'repo.probe', owner: parsed.owner, repo: parsed.repo });
     }, 300);
     return () => {
-      cancel = true;
       clearTimeout(t);
     };
-  }, [input]);
+  }, [input, parsed?.owner, parsed?.repo, probe?.status]);
 
   const goTo = (owner: string, repo: string) => {
-    onRecordRecent({ slug: `${owner}/${repo}`, owner, repo });
-    navigate({ kind: 'repo', owner, repo });
+    dispatch({ type: 'repo.activate', target: { kind: 'repo', owner, repo } });
     onClose();
   };
 
@@ -99,17 +89,18 @@ export function RepoSwitcher({ route, slug, navigate, onClose, onRecordRecent, t
     if (parsed) goTo(parsed.owner, parsed.repo);
   };
 
-  const parsed = parseOwnerRepo(input);
+  const checking = probe?.status === 'checking';
+  const exists = probe?.status === 'ready' ? (probe.exists ?? null) : null;
 
   const statusText = checking
     ? 'Checking repository…'
     : parsed
-    ? exists === true
-      ? 'Press Enter to open'
-      : exists === false
-      ? 'Repo not found or no access'
-      : 'Type owner/repo to open'
-    : 'Type owner/repo or choose a recent';
+      ? exists === true
+        ? 'Press Enter to open'
+        : exists === false
+          ? 'Repo not found or no access'
+          : 'Type owner/repo to open'
+      : 'Type owner/repo or choose a recent';
 
   return (
     <div ref={panelRef} className="repo-switcher-panel" onClick={(e) => e.stopPropagation()}>
