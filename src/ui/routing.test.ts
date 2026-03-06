@@ -10,14 +10,14 @@ describe('routing helpers', () => {
   it('parses /new with nested note path', () => {
     expect(parseRoute('/new/docs/setup.md')).toEqual<Route>({
       kind: 'new',
-      notePath: 'docs/setup.md',
+      filePath: 'docs/setup.md',
     });
   });
 
   it('round-trips /new with encoded segments', () => {
     const path = '/new/docs/My%20Note.md';
     const route = parseRoute(path);
-    expect(route).toEqual<Route>({ kind: 'new', notePath: 'docs/My Note.md' });
+    expect(route).toEqual<Route>({ kind: 'new', filePath: 'docs/My Note.md' });
     expect(routeToPath(route)).toBe(path);
   });
 
@@ -26,13 +26,13 @@ describe('routing helpers', () => {
       kind: 'repo',
       owner: 'acme',
       repo: 'docs',
-      notePath: 'guides/intro.md',
+      filePath: 'guides/intro.md',
     });
   });
 
   it('builds repo paths with nested note path', () => {
-    expect(
-      routeToPath({ kind: 'repo', owner: 'acme', repo: 'docs', notePath: 'guides/intro.md' })
-    ).toBe('/acme/docs/guides/intro.md');
+    expect(routeToPath({ kind: 'repo', owner: 'acme', repo: 'docs', filePath: 'guides/intro.md' })).toBe(
+      '/acme/docs/guides/intro.md'
+    );
   });
 });

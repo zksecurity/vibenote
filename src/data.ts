@@ -32,12 +32,7 @@ import {
   getInstallUrl as apiGetInstallUrl,
   type RepoMetadata,
 } from './lib/backend';
-import {
-  createGitShare,
-  revokeGitShare,
-  lookupCachedShare,
-  type GitShareLink,
-} from './lib/git-share-ops';
+import { createGitShare, revokeGitShare, lookupCachedShare, type GitShareLink } from './lib/git-share-ops';
 import {
   buildRemoteConfig,
   syncBidirectional,
@@ -163,8 +158,8 @@ type RepoDataInputs = {
 };
 
 type AppNavigationTarget =
-  | { repo: { kind: 'new'; slug: 'new' }; notePath?: string }
-  | { repo: { kind: 'github'; slug: string; owner: string; repo: string }; notePath?: string };
+  | { repo: { kind: 'new'; slug: 'new' }; filePath?: string }
+  | { repo: { kind: 'github'; slug: string; owner: string; repo: string }; filePath?: string };
 
 type AppNavigationState = {
   screen: 'resolving' | 'home' | 'workspace';
@@ -229,7 +224,11 @@ type AppDataAction =
   | { type: 'navigation.go-home' }
   | { type: 'session.sign-in' }
   | { type: 'session.sign-out' }
-  | { type: 'repo.activate'; repo: { kind: 'new' } | { kind: 'github'; owner: string; repo: string }; notePath?: string }
+  | {
+      type: 'repo.activate';
+      repo: { kind: 'new' } | { kind: 'github'; owner: string; repo: string };
+      notePath?: string;
+    }
   | { type: 'repo.probe'; owner: string; repo: string }
   | { type: 'repo.request-access'; owner: string; repo: string }
   | { type: 'note.open'; path?: string }
@@ -300,7 +299,7 @@ function useRepoWorkspaceData({ slug, route }: RepoDataInputs): {
   let accessStatusReady = repoAccess.status === 'ready' || repoAccess.status === 'error';
   let accessStatusUnknown = !accessStatusReady || repoAccess.errorType === 'network';
 
-  let desiredPath = normalizePath(route.notePath);
+  let desiredPath = normalizePath(route.filePath);
 
   // in readonly mode, we store nothing locally and just fetch content from github no demand
   let isReadOnly = repoAccess.level === 'read';
@@ -484,7 +483,7 @@ function useRepoWorkspaceData({ slug, route }: RepoDataInputs): {
   // CLICK HANDLERS
 
   const ensureActivePath = (nextPath: string | undefined, options?: { replace?: boolean }) => {
-    if (pathsEqual(route.notePath, nextPath)) return;
+    if (pathsEqual(route.filePath, nextPath)) return;
     // Keep path changes as data so the app-level adapter can sync the router.
     setTimeout(() => {
       setRouteSync({
@@ -939,11 +938,7 @@ function useAppData({ route }: { route: Route }): AppDataResult {
             target: workspaceTarget.repo,
             access: {
               status: workspaceData.state.repoQueryStatus,
-              level: workspaceData.state.canEdit
-                ? 'write'
-                : workspaceData.state.canRead
-                ? 'read'
-                : 'none',
+              level: workspaceData.state.canEdit ? 'write' : workspaceData.state.canRead ? 'read' : 'none',
               canRead: workspaceData.state.canRead,
               canEdit: workspaceData.state.canEdit,
               canSync: workspaceData.state.canSync,
@@ -992,7 +987,7 @@ function useAppData({ route }: { route: Route }): AppDataResult {
     if (action.type === 'repo.activate') {
       let nextTarget: AppNavigationTarget =
         action.repo.kind === 'new'
-          ? { repo: { kind: 'new', slug: 'new' }, notePath: action.notePath }
+          ? { repo: { kind: 'new', slug: 'new' }, filePath: action.notePath }
           : {
               repo: {
                 kind: 'github',
@@ -1000,7 +995,7 @@ function useAppData({ route }: { route: Route }): AppDataResult {
                 repo: action.repo.repo,
                 slug: `${action.repo.owner}/${action.repo.repo}`,
               },
-              notePath: action.notePath,
+              filePath: action.notePath,
             };
       setNavigation({ screen: 'workspace', target: nextTarget });
       return;
@@ -1385,18 +1380,18 @@ function pathsEqual(a: string | undefined, b: string | undefined): boolean {
 
 function areRepoRoutesEqual(a: RepoRoute, b: RepoRoute): boolean {
   if (a.kind !== b.kind) return false;
-  if (a.kind === 'new' && b.kind === 'new') return pathsEqual(a.notePath, b.notePath);
+  if (a.kind === 'new' && b.kind === 'new') return pathsEqual(a.filePath, b.filePath);
   if (a.kind === 'repo' && b.kind === 'repo') {
-    return a.owner === b.owner && a.repo === b.repo && pathsEqual(a.notePath, b.notePath);
+    return a.owner === b.owner && a.repo === b.repo && pathsEqual(a.filePath, b.filePath);
   }
   return false;
 }
 
 function updateRepoRouteNotePath(route: RepoRoute, notePath: string | undefined): RepoRoute {
   if (route.kind === 'repo') {
-    return { kind: 'repo', owner: route.owner, repo: route.repo, notePath };
+    return { kind: 'repo', owner: route.owner, repo: route.repo, filePath: notePath };
   }
-  return { kind: 'new', notePath };
+  return { kind: 'new', filePath: notePath };
 }
 
 function deriveAppNavigation(route: Route, recents: RecentRepo[]): AppNavigationState {
@@ -1425,7 +1420,7 @@ function deriveAppNavigation(route: Route, recents: RecentRepo[]): AppNavigation
         replace: true,
         target: {
           repo: { kind: 'new', slug: 'new' },
-          notePath: 'README.md',
+          filePath: 'README.md',
         },
       };
     }
@@ -1436,7 +1431,7 @@ function deriveAppNavigation(route: Route, recents: RecentRepo[]): AppNavigation
       screen: 'workspace',
       target: {
         repo: { kind: 'new', slug: 'new' },
-        notePath: route.notePath,
+        filePath: route.filePath,
       },
     };
   }
@@ -1449,7 +1444,7 @@ function deriveAppNavigation(route: Route, recents: RecentRepo[]): AppNavigation
         repo: route.repo,
         slug: `${route.owner}/${route.repo}`,
       },
-      notePath: route.notePath,
+      filePath: route.filePath,
     },
   };
 }
@@ -1460,13 +1455,13 @@ function areAppNavigationsEqual(a: AppNavigationState, b: AppNavigationState): b
   if (a.target === undefined || b.target === undefined) return a.target === b.target;
   if (a.target.repo.kind !== b.target.repo.kind) return false;
   if (a.target.repo.kind === 'new' && b.target.repo.kind === 'new') {
-    return pathsEqual(a.target.notePath, b.target.notePath);
+    return pathsEqual(a.target.filePath, b.target.filePath);
   }
   if (a.target.repo.kind === 'github' && b.target.repo.kind === 'github') {
     return (
       a.target.repo.owner === b.target.repo.owner &&
       a.target.repo.repo === b.target.repo.repo &&
-      pathsEqual(a.target.notePath, b.target.notePath)
+      pathsEqual(a.target.filePath, b.target.filePath)
     );
   }
   return false;
@@ -1474,19 +1469,19 @@ function areAppNavigationsEqual(a: AppNavigationState, b: AppNavigationState): b
 
 function toRepoRoute(target: AppNavigationTarget | undefined): RepoRoute {
   if (target === undefined || target.repo.kind === 'new') {
-    return { kind: 'new', notePath: target?.notePath };
+    return { kind: 'new', filePath: target?.filePath };
   }
   return {
     kind: 'repo',
     owner: target.repo.owner,
     repo: target.repo.repo,
-    notePath: target.notePath,
+    filePath: target.filePath,
   };
 }
 
 function toAppNavigationTarget(route: RepoRoute, slug: string): AppNavigationTarget {
   if (route.kind === 'new') {
-    return { repo: { kind: 'new', slug: 'new' }, notePath: route.notePath };
+    return { repo: { kind: 'new', slug: 'new' }, filePath: route.filePath };
   }
   return {
     repo: {
@@ -1495,7 +1490,7 @@ function toAppNavigationTarget(route: RepoRoute, slug: string): AppNavigationTar
       repo: route.repo,
       slug,
     },
-    notePath: route.notePath,
+    filePath: route.filePath,
   };
 }
 

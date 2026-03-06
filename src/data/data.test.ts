@@ -4,7 +4,13 @@ import { useEffect, useState } from 'react';
 import { beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { RepoMetadata } from '../lib/backend';
 import type { RepoRoute } from '../ui/routing';
-import { LocalStore, listRecentRepos, markRepoLinked, recordAutoSyncRun, setLastActiveFileId } from '../storage/local';
+import {
+  LocalStore,
+  listRecentRepos,
+  markRepoLinked,
+  recordAutoSyncRun,
+  setLastActiveFileId,
+} from '../storage/local';
 import type { RemoteFile } from '../sync/git-sync';
 import type { RepoDataState, ImportedAsset } from '../data';
 
@@ -236,7 +242,7 @@ describe('useRepoData', () => {
     if (!welcome) throw new Error('Missing welcome note');
 
     const { result } = renderHook(() => {
-      const [routeState, setRouteState] = useState<RepoRoute>({ kind: 'new', notePath: alpha.path });
+      const [routeState, setRouteState] = useState<RepoRoute>({ kind: 'new', filePath: alpha.path });
       const data = useRepoData({ slug: 'new', route: routeState });
       useEffect(() => {
         if (data.routeSync === undefined) return;
@@ -247,14 +253,14 @@ describe('useRepoData', () => {
 
     await waitFor(() => expect(result.current.data.state.activePath).toBe(alpha.path));
     expect(result.current.data.state.activeFile?.content).toBe('alpha text');
-    expect(result.current.routeState.notePath).toBe(alpha.path);
+    expect(result.current.routeState.filePath).toBe(alpha.path);
 
     await act(async () => {
       await result.current.data.actions.selectFile(welcome.path);
     });
 
     await waitFor(() => expect(result.current.data.state.activePath).toBe(welcome.path));
-    expect(result.current.routeState.notePath).toBe(welcome.path);
+    expect(result.current.routeState.filePath).toBe(welcome.path);
   });
 
   test('activates the route note path when the file exists locally', async () => {
@@ -275,7 +281,7 @@ describe('useRepoData', () => {
     setRepoMetadata(writableMeta);
 
     const recordRecent = vi.fn<RecordRecentFn>();
-    const route: RepoRoute = { kind: 'repo', owner: 'acme', repo: 'docs', notePath: target.path };
+    const route: RepoRoute = { kind: 'repo', owner: 'acme', repo: 'docs', filePath: target.path };
     const { result } = renderRepoData({ slug, route, recordRecent });
 
     await waitFor(() => expect(result.current.state.activePath).toBe(target.path));
@@ -319,7 +325,7 @@ describe('useRepoData', () => {
     });
 
     const recordRecent = vi.fn<RecordRecentFn>();
-    const route: RepoRoute = { kind: 'repo', owner: 'acme', repo: 'docs', notePath: 'guides/Intro.md' };
+    const route: RepoRoute = { kind: 'repo', owner: 'acme', repo: 'docs', filePath: 'guides/Intro.md' };
     const { result } = renderRepoData({ slug, route, recordRecent });
 
     await waitFor(() => expect(result.current.state.activePath).toBe('guides/Intro.md'));
@@ -570,9 +576,9 @@ describe('useRepoData', () => {
       expect(entry.altText.startsWith('Pasted image ')).toBe(true);
 
       await waitFor(() =>
-        expect(result.current.state.files.some((meta) => meta.path === entry.assetPath && meta.kind === 'binary')).toBe(
-          true
-        )
+        expect(
+          result.current.state.files.some((meta) => meta.path === entry.assetPath && meta.kind === 'binary')
+        ).toBe(true)
       );
 
       let refreshedStore = new LocalStore(slug);
@@ -1126,8 +1132,8 @@ describe('useRepoData', () => {
 
     const { result } = renderHook(() => {
       const value = useRepoData({ slug, route: { kind: 'repo', owner: 'octo', repo: 'public' } });
-      if (value.routeSync?.route.notePath !== undefined) {
-        activePathHistory.push(value.routeSync.route.notePath);
+      if (value.routeSync?.route.filePath !== undefined) {
+        activePathHistory.push(value.routeSync.route.filePath);
       }
       return value;
     });
@@ -1147,7 +1153,10 @@ describe('useRepoData', () => {
     // An oscillating history would be: ['docs/guide.md', 'README.md', 'docs/guide.md', ...]
     let oscillations = 0;
     for (let i = 2; i < activePathHistory.length; i++) {
-      if (activePathHistory[i] === activePathHistory[i - 2] && activePathHistory[i] !== activePathHistory[i - 1]) {
+      if (
+        activePathHistory[i] === activePathHistory[i - 2] &&
+        activePathHistory[i] !== activePathHistory[i - 1]
+      ) {
         oscillations++;
       }
     }

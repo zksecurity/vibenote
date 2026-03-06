@@ -46,10 +46,17 @@ function RepoViewInner({ state, dispatch, helpers }: RepoViewProps) {
   let slug = workspace.target.slug;
   let hasSession = state.session.status === 'signed-in';
   let user = state.session.user;
-  let { canEdit, canRead, canSync, linked: repoLinked, manageUrl, defaultBranch, errorType: repoErrorType } =
-    workspace.access;
+  let {
+    canEdit,
+    canRead,
+    canSync,
+    linked: repoLinked,
+    manageUrl,
+    defaultBranch,
+    errorType: repoErrorType,
+  } = workspace.access;
   let activeFile = workspace.document.activeFile;
-  let activePath = state.navigation.target?.notePath ?? workspace.document.activePath;
+  let activePath = state.navigation.target?.filePath ?? workspace.document.activePath;
   let files = workspace.tree.files;
   let folders = workspace.tree.folders;
   let autosync = workspace.sync.autosync;
@@ -66,7 +73,11 @@ function RepoViewInner({ state, dispatch, helpers }: RepoViewProps) {
 
   const activeIsMarkdown = activeFile !== undefined && isMarkdownFile(activeFile);
   const canShare =
-    hasSession && workspace.target.kind === 'github' && activePath !== undefined && canEdit && activeIsMarkdown;
+    hasSession &&
+    workspace.target.kind === 'github' &&
+    activePath !== undefined &&
+    canEdit &&
+    activeIsMarkdown;
   const shareDisabled = share.status === 'idle' || share.status === 'loading';
 
   // error states that require user action (these trigger a custom full sized banner)
@@ -257,8 +268,8 @@ function RepoViewInner({ state, dispatch, helpers }: RepoViewProps) {
                     share.link
                       ? 'Manage share link'
                       : shareDisabled
-                      ? 'Checking share status'
-                      : 'Create share link'
+                        ? 'Checking share status'
+                        : 'Create share link'
                   }
                   aria-label={share.link ? 'Manage share link' : 'Create share link'}
                   disabled={shareDisabled}
@@ -367,7 +378,12 @@ function RepoViewInner({ state, dispatch, helpers }: RepoViewProps) {
                 <span className="badge">Read-only</span>
                 <span className="alert-text">You can view, but not edit files in this repository.</span>
                 {hasSession && (
-                  <button className="btn primary" onClick={() => dispatch({ type: 'repo.request-access', owner: repoOwner!, repo: repoName! })}>
+                  <button
+                    className="btn primary"
+                    onClick={() =>
+                      dispatch({ type: 'repo.request-access', owner: repoOwner!, repo: repoName! })
+                    }
+                  >
                     Get Write Access
                   </button>
                 )}
@@ -425,7 +441,9 @@ function RepoViewInner({ state, dispatch, helpers }: RepoViewProps) {
                     {hasSession ? (
                       <button
                         className="btn primary"
-                        onClick={() => dispatch({ type: 'repo.request-access', owner: repoOwner!, repo: repoName! })}
+                        onClick={() =>
+                          dispatch({ type: 'repo.request-access', owner: repoOwner!, repo: repoName! })
+                        }
                       >
                         Get Read/Write Access
                       </button>

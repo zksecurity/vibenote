@@ -157,13 +157,13 @@ function routeFromNavigation(navigation: AppNavigationState): Route | undefined 
   if (navigation.screen === 'home') return { kind: 'home' };
   if (navigation.screen !== 'workspace' || navigation.target === undefined) return undefined;
   if (navigation.target.repo.kind === 'new') {
-    return { kind: 'new', notePath: navigation.target.notePath };
+    return { kind: 'new', filePath: navigation.target.filePath };
   }
   return {
     kind: 'repo',
     owner: navigation.target.repo.owner,
     repo: navigation.target.repo.repo,
-    notePath: navigation.target.notePath,
+    filePath: navigation.target.filePath,
   };
 }
 
@@ -172,9 +172,9 @@ function routesEqual(a: Route | undefined, b: Route | undefined) {
   if (a.kind !== b.kind) return false;
   if (a.kind === 'home' && b.kind === 'home') return true;
   if (a.kind === 'start' && b.kind === 'start') return true;
-  if (a.kind === 'new' && b.kind === 'new') return a.notePath === b.notePath;
+  if (a.kind === 'new' && b.kind === 'new') return a.filePath === b.filePath;
   if (a.kind === 'repo' && b.kind === 'repo') {
-    return a.owner === b.owner && a.repo === b.repo && a.notePath === b.notePath;
+    return a.owner === b.owner && a.repo === b.repo && a.filePath === b.filePath;
   }
   return false;
 }
@@ -283,14 +283,14 @@ describe('useAppData contract', () => {
       result.current.dispatch({ type: 'note.create', parentDir: '', name: 'Plan' });
     });
 
-    await waitFor(() => expect(result.current.state.navigation.target?.notePath).toBe('Plan.md'));
+    await waitFor(() => expect(result.current.state.navigation.target?.filePath).toBe('Plan.md'));
     await waitFor(() => expect(result.current.state.workspace?.document.activeFile?.path).toBe('Plan.md'));
 
     act(() => {
       result.current.dispatch({ type: 'file.rename', path: 'Plan.md', name: 'Roadmap' });
     });
 
-    await waitFor(() => expect(result.current.state.navigation.target?.notePath).toBe('Roadmap.md'));
+    await waitFor(() => expect(result.current.state.navigation.target?.filePath).toBe('Roadmap.md'));
     expect(result.current.state.workspace?.document.activeFile?.path).toBe('Roadmap.md');
     expect(result.current.state.workspace?.tree.files.some((file) => file.path === 'Roadmap.md')).toBe(true);
   });
@@ -303,15 +303,17 @@ describe('useAppData contract', () => {
       result.current.dispatch({ type: 'note.create', parentDir: 'docs', name: 'Guide' });
     });
 
-    await waitFor(() => expect(result.current.state.navigation.target?.notePath).toBe('docs/Guide.md'));
+    await waitFor(() => expect(result.current.state.navigation.target?.filePath).toBe('docs/Guide.md'));
 
     act(() => {
       result.current.dispatch({ type: 'folder.rename', path: 'docs', name: 'guides' });
     });
 
-    await waitFor(() => expect(result.current.state.navigation.target?.notePath).toBe('guides/Guide.md'));
+    await waitFor(() => expect(result.current.state.navigation.target?.filePath).toBe('guides/Guide.md'));
     expect(result.current.state.workspace?.document.activeFile?.path).toBe('guides/Guide.md');
-    expect(result.current.state.workspace?.tree.files.some((file) => file.path === 'guides/Guide.md')).toBe(true);
+    expect(result.current.state.workspace?.tree.files.some((file) => file.path === 'guides/Guide.md')).toBe(
+      true
+    );
   });
 
   test('tracks repo probe state and ignores stale probe results', async () => {
