@@ -227,7 +227,7 @@ type AppDataAction =
   | {
       type: 'repo.activate';
       repo: { kind: 'new' } | { kind: 'github'; owner: string; repo: string };
-      notePath?: string;
+      filePath?: string;
     }
   | { type: 'repo.probe'; owner: string; repo: string }
   | { type: 'repo.request-access'; owner: string; repo: string }
@@ -987,7 +987,7 @@ function useAppData({ route }: { route: Route }): AppDataResult {
     if (action.type === 'repo.activate') {
       let nextTarget: AppNavigationTarget =
         action.repo.kind === 'new'
-          ? { repo: { kind: 'new', slug: 'new' }, filePath: action.notePath }
+          ? { repo: { kind: 'new', slug: 'new' }, filePath: action.filePath }
           : {
               repo: {
                 kind: 'github',
@@ -995,7 +995,7 @@ function useAppData({ route }: { route: Route }): AppDataResult {
                 repo: action.repo.repo,
                 slug: `${action.repo.owner}/${action.repo.repo}`,
               },
-              filePath: action.notePath,
+              filePath: action.filePath,
             };
       setNavigation({ screen: 'workspace', target: nextTarget });
       return;
