@@ -231,13 +231,7 @@ type AppState = {
     };
 
     /** Share-link state for the active markdown note. */
-    share: {
-      status: ShareState['status'];
-      link?: {
-        url: string;
-      };
-      error?: string;
-    };
+    share: ShareState;
   };
 };
 
@@ -1129,14 +1123,7 @@ function useWorkspaceAppData({ app, route }: { app: AppShellDataResult; route: R
         syncing: workspaceData.state.syncing,
         statusMessage: workspaceData.state.statusMessage,
       },
-      share: {
-        status: workspaceData.state.share.status,
-        link:
-          workspaceData.state.share.link === undefined
-            ? undefined
-            : { url: workspaceData.state.share.link.url },
-        error: workspaceData.state.share.error,
-      },
+      share: workspaceData.state.share,
     },
   };
 
