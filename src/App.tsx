@@ -12,7 +12,7 @@ export function App() {
   useEffect(() => {
     let target = state.workspace?.target;
     document.title =
-      target !== undefined && target.kind === 'github' ? `${target.owner}/${target.repo}` : 'VibeNote';
+      target !== undefined && target.kind === 'repo' ? `${target.owner}/${target.repo}` : 'VibeNote';
   }, [state.workspace?.target]);
 
   useEffect(() => {
@@ -36,13 +36,13 @@ export function App() {
 function routeFromNavigation(navigation: AppNavigationState): Route | undefined {
   if (navigation.screen === 'home') return { kind: 'home' } as const;
   if (navigation.screen !== 'workspace' || navigation.target === undefined) return undefined;
-  if (navigation.target.repo.kind === 'new') {
+  if (navigation.target.kind === 'new') {
     return { kind: 'new', filePath: navigation.target.filePath } as const;
   }
   return {
     kind: 'repo',
-    owner: navigation.target.repo.owner,
-    repo: navigation.target.repo.repo,
+    owner: navigation.target.owner,
+    repo: navigation.target.repo,
     filePath: navigation.target.filePath,
   } as const;
 }

@@ -51,13 +51,12 @@ import { prepareClipboardImage } from './lib/image-processing';
 import { relativePathBetween, COMMON_ASSET_DIR } from './lib/pathing';
 import type { Route, RepoRoute } from './ui/routing';
 
-export { useAppData, useRepoData };
+export { useAppData, useRepoData, repoRouteToSlug };
 export type {
   AppDataAction,
   AppDataResult,
   AppDataState,
   AppNavigationState,
-  AppNavigationTarget,
   RepoAccessState,
   RepoDataInputs,
   RepoDataState,
@@ -157,35 +156,49 @@ type RepoDataInputs = {
   route: RepoRoute;
 };
 
-type AppNavigationTarget =
-  | { repo: { kind: 'new'; slug: 'new' }; filePath?: string }
-  | { repo: { kind: 'github'; slug: string; owner: string; repo: string }; filePath?: string };
-
 type AppNavigationState = {
+  /** Which top-level screen the app should currently render. */
   screen: 'resolving' | 'home' | 'workspace';
-  target?: AppNavigationTarget;
+  /** Active workspace target when the app is on the workspace screen. */
+  target?: RepoRoute;
+  /** Whether the next route sync should replace browser history. */
   replace?: boolean;
 };
 
 type RepoProbeState = {
+  /** Lifecycle of the latest repo probe request from the switcher UI. */
   status: 'idle' | 'checking' | 'ready';
+  /** Owner currently being probed, if any. */
   owner?: string;
+  /** Repo currently being probed, if any. */
   repo?: string;
+  /** Whether the probed repo appears reachable from the current session. */
   exists?: boolean;
 };
 
+/** App-level contract consumed by the UI shell. */
 type AppDataState = {
+  /** Current auth/session state for GitHub-backed features. */
   session: {
     status: 'signed-out' | 'signed-in';
     user: AppUser | undefined;
   };
+
+  /** Canonical app location, synced to the URL by App.tsx. */
   navigation: AppNavigationState;
+
+  /** Cross-workspace repo state that should survive switching between repos. */
   repos: {
     recents: RecentRepo[];
     probe: RepoProbeState;
   };
+
+  /** State for the active repo/new-note workspace, if the user is currently in one. */
   workspace?: {
-    target: AppNavigationTarget['repo'];
+    /** The repo/new route this workspace represents. */
+    target: RepoRoute;
+
+    /** Access and GitHub integration status for the active target. */
     access: {
       status: RepoQueryStatus;
       level: RepoAccessLevel;
@@ -197,19 +210,27 @@ type AppDataState = {
       defaultBranch: string | undefined;
       errorType: RepoAccessErrorType | undefined;
     };
+
+    /** Tree data rendered by the file sidebar. */
     tree: {
       files: FileMeta[];
       folders: string[];
     };
+
+    /** Currently opened file within the workspace. */
     document: {
       activeFile: RepoFile | undefined;
       activePath: string | undefined;
     };
+
+    /** Sync-related state surfaced to the header and status banner. */
     sync: {
       autosync: boolean;
       syncing: boolean;
       statusMessage: string | undefined;
     };
+
+    /** Share-link state for the active markdown note. */
     share: {
       status: ShareState['status'];
       link?: {
@@ -220,17 +241,27 @@ type AppDataState = {
   };
 };
 
+// Action protocol emitted by the UI.
+// Actions are intents, not imperative callbacks: the UI asks for something to
+// happen and then observes the resulting state update.
 type AppDataAction =
+  // App-level navigation and session lifecycle.
   | { type: 'navigation.go-home' }
   | { type: 'session.sign-in' }
   | { type: 'session.sign-out' }
+
+  // Repo selection and access checks.
+  // Open a workspace target and optionally seed the desired file path.
   | {
       type: 'repo.activate';
       repo: { kind: 'new' } | { kind: 'github'; owner: string; repo: string };
       filePath?: string;
     }
+  // Check whether an owner/repo appears reachable from the current session.
   | { type: 'repo.probe'; owner: string; repo: string }
   | { type: 'repo.request-access'; owner: string; repo: string }
+
+  // File/folder selection and local edits within the active workspace.
   | { type: 'note.open'; path?: string }
   | { type: 'note.create'; parentDir: string; name: string }
   | { type: 'file.save'; path: string; contents: string }
@@ -241,10 +272,18 @@ type AppDataAction =
   | { type: 'folder.rename'; path: string; name: string }
   | { type: 'folder.move'; path: string; targetDir: string }
   | { type: 'folder.delete'; path: string }
+
+  // Editor-specific file imports that create assets plus markdown references.
+  // Import pasted files into repo storage and attach them to the current note.
   | { type: 'assets.import'; notePath: string; files: File[] }
+
+  // Sync controls for the active workspace.
   | { type: 'sync.run'; source: 'user' | 'auto' }
   | { type: 'sync.set-autosync'; enabled: boolean }
+
+  // Share-link lifecycle for the active markdown note.
   | { type: 'share.create'; notePath: string }
+  // Reload the cached share-link status for the active note target.
   | { type: 'share.refresh'; notePath: string }
   | { type: 'share.revoke'; notePath: string };
 
@@ -485,6 +524,7 @@ function useRepoWorkspaceData({ slug, route }: RepoDataInputs): {
   const ensureActivePath = (nextPath: string | undefined, options?: { replace?: boolean }) => {
     if (pathsEqual(route.filePath, nextPath)) return;
     // Keep path changes as data so the app-level adapter can sync the router.
+    // hack: we navigate on the next event loop task to give React state time to update active doc
     setTimeout(() => {
       setRouteSync({
         revision: ++routeRevisionRef.current,
@@ -835,6 +875,17 @@ function useRepoWorkspaceData({ slug, route }: RepoDataInputs): {
   return { state, actions, routeSync };
 }
 
+/**
+ * Data layer entry point for the repo-scoped implementation.
+ *
+ * Invariants for callers:
+ * - `slug` and `route` are always in sync, and never change throughout the component lifetime
+ * - callers can treat the hook as owning the current repo route after mount
+ * - `routeSync` is the only supported way for this layer to request route updates
+ *
+ * The wrapper keeps those routing mechanics localized so the workspace hook can
+ * stay focused on repo state, sync, and file operations.
+ */
 function useRepoData({ slug, route }: RepoDataInputs): {
   state: RepoDataState;
   actions: RepoDataActions;
@@ -853,6 +904,9 @@ function useRepoData({ slug, route }: RepoDataInputs): {
     setRouteState((prev) => (areRepoRoutesEqual(prev, routeSync.route) ? prev : routeSync.route));
   }, [routeSync?.revision]);
 
+  // Remember recently opened repos once we know the current repo is reachable.
+  // TODO this shouldn't be a useEffect, the only place a repo ever becomes reachable is after
+  // fetching metadata, so just record it there
   useEffect(() => {
     if (routeState.kind !== 'repo') return;
     if (!state.canRead) return;
@@ -887,8 +941,8 @@ function useAppData({ route }: { route: Route }): AppDataResult {
   }, [route, recents]);
 
   let workspaceTarget = navigation.screen === 'workspace' ? navigation.target : undefined;
-  let repoRoute = toRepoRoute(workspaceTarget);
-  let slug = workspaceTarget?.repo.slug ?? 'new';
+  let repoRoute = workspaceTarget ?? { kind: 'new' };
+  let slug = repoRouteToSlug(repoRoute);
   let workspaceData = useRepoData({ slug, route: repoRoute });
 
   useEffect(() => {
@@ -899,13 +953,13 @@ function useAppData({ route }: { route: Route }): AppDataResult {
       areAppNavigationsEqual(prev, {
         screen: 'workspace',
         replace: nextRouteSync.replace,
-        target: toAppNavigationTarget(nextRouteSync.route, slug),
+        target: nextRouteSync.route,
       })
         ? prev
         : {
             screen: 'workspace',
             replace: nextRouteSync.replace,
-            target: toAppNavigationTarget(nextRouteSync.route, slug),
+            target: nextRouteSync.route,
           }
     );
   }, [navigation.screen, workspaceData.routeSync?.revision, slug]);
@@ -935,7 +989,7 @@ function useAppData({ route }: { route: Route }): AppDataResult {
       workspaceTarget === undefined
         ? undefined
         : {
-            target: workspaceTarget.repo,
+            target: workspaceTarget,
             access: {
               status: workspaceData.state.repoQueryStatus,
               level: workspaceData.state.canEdit ? 'write' : workspaceData.state.canRead ? 'read' : 'none',
@@ -985,16 +1039,13 @@ function useAppData({ route }: { route: Route }): AppDataResult {
       return;
     }
     if (action.type === 'repo.activate') {
-      let nextTarget: AppNavigationTarget =
+      let nextTarget: RepoRoute =
         action.repo.kind === 'new'
-          ? { repo: { kind: 'new', slug: 'new' }, filePath: action.filePath }
+          ? { kind: 'new', filePath: action.filePath }
           : {
-              repo: {
-                kind: 'github',
-                owner: action.repo.owner,
-                repo: action.repo.repo,
-                slug: `${action.repo.owner}/${action.repo.repo}`,
-              },
+              kind: 'repo',
+              owner: action.repo.owner,
+              repo: action.repo.repo,
               filePath: action.filePath,
             };
       setNavigation({ screen: 'workspace', target: nextTarget });
@@ -1401,14 +1452,7 @@ function deriveAppNavigation(route: Route, recents: RecentRepo[]): AppNavigation
       return {
         screen: 'workspace',
         replace: true,
-        target: {
-          repo: {
-            kind: 'github',
-            owner: candidate.owner,
-            repo: candidate.repo,
-            slug: candidate.slug,
-          },
-        },
+        target: { kind: 'repo', owner: candidate.owner, repo: candidate.repo },
       };
     }
     return { screen: 'home', replace: true };
@@ -1418,10 +1462,7 @@ function deriveAppNavigation(route: Route, recents: RecentRepo[]): AppNavigation
       return {
         screen: 'workspace',
         replace: true,
-        target: {
-          repo: { kind: 'new', slug: 'new' },
-          filePath: 'README.md',
-        },
+        target: { kind: 'new', filePath: 'README.md' },
       };
     }
     return { screen: 'home' };
@@ -1429,23 +1470,12 @@ function deriveAppNavigation(route: Route, recents: RecentRepo[]): AppNavigation
   if (route.kind === 'new') {
     return {
       screen: 'workspace',
-      target: {
-        repo: { kind: 'new', slug: 'new' },
-        filePath: route.filePath,
-      },
+      target: { kind: 'new', filePath: route.filePath },
     };
   }
   return {
     screen: 'workspace',
-    target: {
-      repo: {
-        kind: 'github',
-        owner: route.owner,
-        repo: route.repo,
-        slug: `${route.owner}/${route.repo}`,
-      },
-      filePath: route.filePath,
-    },
+    target: { kind: 'repo', owner: route.owner, repo: route.repo, filePath: route.filePath },
   };
 }
 
@@ -1453,45 +1483,12 @@ function areAppNavigationsEqual(a: AppNavigationState, b: AppNavigationState): b
   if (a.screen !== b.screen) return false;
   if (a.replace !== b.replace) return false;
   if (a.target === undefined || b.target === undefined) return a.target === b.target;
-  if (a.target.repo.kind !== b.target.repo.kind) return false;
-  if (a.target.repo.kind === 'new' && b.target.repo.kind === 'new') {
-    return pathsEqual(a.target.filePath, b.target.filePath);
-  }
-  if (a.target.repo.kind === 'github' && b.target.repo.kind === 'github') {
-    return (
-      a.target.repo.owner === b.target.repo.owner &&
-      a.target.repo.repo === b.target.repo.repo &&
-      pathsEqual(a.target.filePath, b.target.filePath)
-    );
-  }
-  return false;
+  return areRepoRoutesEqual(a.target, b.target);
 }
 
-function toRepoRoute(target: AppNavigationTarget | undefined): RepoRoute {
-  if (target === undefined || target.repo.kind === 'new') {
-    return { kind: 'new', filePath: target?.filePath };
-  }
-  return {
-    kind: 'repo',
-    owner: target.repo.owner,
-    repo: target.repo.repo,
-    filePath: target.filePath,
-  };
-}
-
-function toAppNavigationTarget(route: RepoRoute, slug: string): AppNavigationTarget {
-  if (route.kind === 'new') {
-    return { repo: { kind: 'new', slug: 'new' }, filePath: route.filePath };
-  }
-  return {
-    repo: {
-      kind: 'github',
-      owner: route.owner,
-      repo: route.repo,
-      slug,
-    },
-    filePath: route.filePath,
-  };
+function repoRouteToSlug(route: RepoRoute): string {
+  if (route.kind === 'new') return 'new';
+  return `${route.owner}/${route.repo}`;
 }
 
 function isPathInsideDir(path: string, dir: string): boolean {

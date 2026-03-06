@@ -7,7 +7,7 @@ import { AssetViewer } from './AssetViewer';
 import { RepoSwitcher } from './RepoSwitcher';
 import { Toggle } from './Toggle';
 import { GitHubIcon, ExternalLinkIcon, NotesIcon, CloseIcon, SyncIcon, ShareIcon } from './RepoIcons';
-import type { AppDataAction, AppDataResult, AppDataState } from '../data';
+import { repoRouteToSlug, type AppDataAction, type AppDataResult, type AppDataState } from '../data';
 import type { FileMeta } from '../storage/local';
 import {
   getExpandedFolders,
@@ -36,14 +36,21 @@ const primaryModifier = detectPrimaryShortcut();
 export function RepoView({ state, dispatch, helpers }: RepoViewProps) {
   let workspace = state.workspace;
   if (workspace === undefined) return null;
-  return <RepoViewInner key={workspace.target.slug} state={state} dispatch={dispatch} helpers={helpers} />;
+  return (
+    <RepoViewInner
+      key={repoRouteToSlug(workspace.target)}
+      state={state}
+      dispatch={dispatch}
+      helpers={helpers}
+    />
+  );
 }
 
 function RepoViewInner({ state, dispatch, helpers }: RepoViewProps) {
   let workspace = state.workspace;
   if (workspace === undefined) return null;
 
-  let slug = workspace.target.slug;
+  let slug = repoRouteToSlug(workspace.target);
   let hasSession = state.session.status === 'signed-in';
   let user = state.session.user;
   let {
@@ -65,25 +72,21 @@ function RepoViewInner({ state, dispatch, helpers }: RepoViewProps) {
   let share = workspace.share;
 
   const userAvatarSrc = user?.avatarDataUrl ?? user?.avatarUrl ?? undefined;
-  let repoOwner = workspace.target.kind === 'github' ? workspace.target.owner : undefined;
-  let repoName = workspace.target.kind === 'github' ? workspace.target.repo : undefined;
+  let repoOwner = workspace.target.kind === 'repo' ? workspace.target.owner : undefined;
+  let repoName = workspace.target.kind === 'repo' ? workspace.target.repo : undefined;
   const showSidebar = canRead;
   const isReadOnly = !canEdit && canRead;
   const layoutClass = showSidebar ? '' : 'single';
 
   const activeIsMarkdown = activeFile !== undefined && isMarkdownFile(activeFile);
   const canShare =
-    hasSession &&
-    workspace.target.kind === 'github' &&
-    activePath !== undefined &&
-    canEdit &&
-    activeIsMarkdown;
+    hasSession && workspace.target.kind === 'repo' && activePath !== undefined && canEdit && activeIsMarkdown;
   const shareDisabled = share.status === 'idle' || share.status === 'loading';
 
   // error states that require user action (these trigger a custom full sized banner)
   const needsSessionRefresh = repoLinked && repoErrorType === 'auth';
   const needsInstall = hasSession && repoErrorType === 'not-found';
-  const needsUserAction = workspace.target.kind === 'github' && (needsSessionRefresh || needsInstall);
+  const needsUserAction = workspace.target.kind === 'repo' && (needsSessionRefresh || needsInstall);
 
   // Pure UI state: sidebar visibility and account menu.
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -105,7 +108,7 @@ function RepoViewInner({ state, dispatch, helpers }: RepoViewProps) {
 
   // Keyboard shortcuts: Cmd/Ctrl+K and "g","r" open the repo switcher even when the tree is focused.
   const repoShortcutLabel = primaryModifier === 'meta' ? '⌘K' : 'Ctrl+K';
-  const repoButtonBaseTitle = workspace.target.kind === 'github' ? 'Change repository' : 'Choose repository';
+  const repoButtonBaseTitle = workspace.target.kind === 'repo' ? 'Change repository' : 'Choose repository';
   const repoButtonTitle = `${repoButtonBaseTitle} (${repoShortcutLabel})`;
 
   useEffect(() => {
@@ -206,7 +209,7 @@ function RepoViewInner({ state, dispatch, helpers }: RepoViewProps) {
           >
             <span className="brand">VibeNote</span>
           </button>
-          {workspace.target.kind === 'github' ? (
+          {workspace.target.kind === 'repo' ? (
             <span className="repo-anchor align-workspace">
               <button
                 type="button"
@@ -268,8 +271,8 @@ function RepoViewInner({ state, dispatch, helpers }: RepoViewProps) {
                     share.link
                       ? 'Manage share link'
                       : shareDisabled
-                        ? 'Checking share status'
-                        : 'Create share link'
+                      ? 'Checking share status'
+                      : 'Create share link'
                   }
                   aria-label={share.link ? 'Manage share link' : 'Create share link'}
                   disabled={shareDisabled}

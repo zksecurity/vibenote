@@ -156,13 +156,13 @@ function setRepoMetadata(meta: RepoMetadata) {
 function routeFromNavigation(navigation: AppNavigationState): Route | undefined {
   if (navigation.screen === 'home') return { kind: 'home' };
   if (navigation.screen !== 'workspace' || navigation.target === undefined) return undefined;
-  if (navigation.target.repo.kind === 'new') {
+  if (navigation.target.kind === 'new') {
     return { kind: 'new', filePath: navigation.target.filePath };
   }
   return {
     kind: 'repo',
-    owner: navigation.target.repo.owner,
-    repo: navigation.target.repo.repo,
+    owner: navigation.target.owner,
+    repo: navigation.target.repo,
     filePath: navigation.target.filePath,
   };
 }
@@ -221,11 +221,8 @@ describe('useAppData contract', () => {
     await waitFor(() => expect(result.current.state.workspace?.document.activePath).toBe('README.md'));
 
     expect(result.current.state.navigation.screen).toBe('workspace');
-    expect(result.current.state.navigation.target).toEqual({
-      repo: { kind: 'new', slug: 'new' },
-      notePath: 'README.md',
-    });
-    expect(result.current.state.workspace?.target).toEqual({ kind: 'new', slug: 'new' });
+    expect(result.current.state.navigation.target).toEqual({ kind: 'new', filePath: 'README.md' });
+    expect(result.current.state.workspace?.target).toEqual({ kind: 'new', filePath: 'README.md' });
   });
 
   test('derives the start route from the most recent repository', async () => {
@@ -236,13 +233,12 @@ describe('useAppData contract', () => {
     await waitFor(() => expect(result.current.state.navigation.screen).toBe('workspace'));
 
     let target = result.current.state.navigation.target;
-    if (target === undefined || target.repo.kind !== 'github') {
+    if (target === undefined || target.kind !== 'repo') {
       throw new Error('Expected a GitHub workspace target');
     }
 
-    expect(target.repo.owner).toBe('acme');
-    expect(target.repo.repo).toBe('docs');
-    expect(target.repo.slug).toBe('acme/docs');
+    expect(target.owner).toBe('acme');
+    expect(target.repo).toBe('docs');
     expect(result.current.state.repos.recents.map((entry) => entry.slug)).toEqual(['acme/docs']);
   });
 
@@ -260,12 +256,12 @@ describe('useAppData contract', () => {
     await waitFor(() => expect(result.current.state.repos.recents[0]?.slug).toBe('acme/docs'));
 
     let target = result.current.state.navigation.target;
-    if (target === undefined || target.repo.kind !== 'github') {
+    if (target === undefined || target.kind !== 'repo') {
       throw new Error('Expected a GitHub workspace target');
     }
 
-    expect(target.repo.owner).toBe('acme');
-    expect(target.repo.repo).toBe('docs');
+    expect(target.owner).toBe('acme');
+    expect(target.repo).toBe('docs');
     expect(listRecentRepos()[0]?.slug).toBe('acme/docs');
 
     act(() => {
