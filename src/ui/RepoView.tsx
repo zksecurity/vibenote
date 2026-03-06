@@ -26,7 +26,7 @@ import { ShareDialog } from './ShareDialog';
 import { useOnClickOutside } from './useOnClickOutside';
 
 type RepoViewProps = {
-  state: AppState;
+  state: AppState & { workspace: NonNullable<AppState['workspace']> };
   dispatch: (action: AppAction) => void;
   helpers: AppDataResult['helpers'];
 };
@@ -35,20 +35,6 @@ const primaryModifier = detectPrimaryShortcut();
 
 export function RepoView({ state, dispatch, helpers }: RepoViewProps) {
   let workspace = state.workspace;
-  if (workspace === undefined) return null;
-  return (
-    <RepoViewInner
-      key={repoRouteToSlug(workspace.target)}
-      state={state}
-      dispatch={dispatch}
-      helpers={helpers}
-    />
-  );
-}
-
-function RepoViewInner({ state, dispatch, helpers }: RepoViewProps) {
-  let workspace = state.workspace;
-  if (workspace === undefined) return null;
 
   let slug = repoRouteToSlug(workspace.target);
   let hasSession = state.session.status === 'signed-in';

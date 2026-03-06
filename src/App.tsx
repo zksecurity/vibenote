@@ -1,12 +1,27 @@
 import React, { useEffect } from 'react';
-import { repoRouteToSlug, useAppShellData, useWorkspaceAppData, type AppNavigationState } from './data';
+import { repoRouteToSlug, type AppNavigationState } from './data';
+import { AppShellProvider, RepoDataProvider, useAppDataContext, useAppShellContext } from './data-context';
 import { useRoute, type Route } from './ui/routing';
 import { RepoView } from './ui/RepoView';
 import { HomeView } from './ui/HomeView';
 
 export function App() {
   const { route, navigate } = useRoute();
-  let app = useAppShellData({ route });
+  return (
+    <AppShellProvider route={route}>
+      <AppScreens route={route} navigate={navigate} />
+    </AppShellProvider>
+  );
+}
+
+function AppScreens({
+  route,
+  navigate,
+}: {
+  route: Route;
+  navigate: (route: Route, options?: { replace?: boolean }) => void;
+}) {
+  let app = useAppShellContext();
 
   // Adjust page title based on route
   useEffect(() => {
@@ -31,22 +46,22 @@ export function App() {
   // Mount repo state behind a slug key so repo-local hooks can assume owner/repo stay fixed.
   if (app.state.navigation.screen === 'workspace' && app.state.navigation.target !== undefined) {
     let target = app.state.navigation.target;
-    return <RepoWorkspaceScreen key={repoRouteToSlug(target)} route={target} app={app} />;
+    return (
+      <RepoDataProvider key={repoRouteToSlug(target)} route={target}>
+        <RepoWorkspaceScreen />
+      </RepoDataProvider>
+    );
   }
 
   return null;
 }
 
-function RepoWorkspaceScreen({
-  route,
-  app,
-}: {
-  route: NonNullable<AppNavigationState['target']>;
-  app: ReturnType<typeof useAppShellData>;
-}) {
+function RepoWorkspaceScreen() {
   // Combine app-level shell state with the repo-scoped workspace data for RepoView.
-  let data = useWorkspaceAppData({ app, route });
-  return <RepoView state={data.state} dispatch={data.dispatch} helpers={data.helpers} />;
+  let data = useAppDataContext();
+  let workspace = data.state.workspace;
+  if (workspace === undefined) return null;
+  return <RepoView state={{ ...data.state, workspace }} dispatch={data.dispatch} helpers={data.helpers} />;
 }
 
 function routeFromNavigation(navigation: AppNavigationState): Route | undefined {
