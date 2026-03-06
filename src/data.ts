@@ -54,6 +54,7 @@ import type { Route, RepoRoute } from './ui/routing';
 export { useAppShellData, useWorkspaceAppData, useRepoData, repoRouteToSlug };
 export type {
   AppAction,
+  AppQueries,
   AppDataResult,
   AppState,
   AppNavigationState,
@@ -190,7 +191,6 @@ type AppState = {
   /** Cross-workspace repo state that should survive switching between repos. */
   repos: {
     recents: RecentRepo[];
-    probe: RepoProbeState;
   };
 
   /** State for the active repo/new-note workspace, if the user is currently in one. */
@@ -280,6 +280,7 @@ type AppAction =
 type AppDataResult = {
   state: AppState;
   dispatch: (action: AppAction) => void;
+  queries: AppQueries;
   helpers: {
     importPastedAssets: (params: { notePath: string; files: File[] }) => Promise<ImportedAsset[]>;
   };
@@ -291,9 +292,14 @@ type AppShellState = {
   repos: AppState['repos'];
 };
 
+type AppQueries = {
+  getRepoProbe: (owner: string, repo: string) => RepoProbeState | undefined;
+};
+
 type AppShellDataResult = {
   state: AppShellState;
   dispatch: (action: AppAction) => void;
+  queries: AppQueries;
   setWorkspaceNavigation: (route: RepoRoute, options?: { replace?: boolean }) => void;
   syncSession: (session: AppShellState['session']) => void;
   refreshRecents: () => void;
@@ -929,11 +935,11 @@ function useAppShellData({ route }: { route: Route }): AppShellDataResult {
   // App-lifetime state: routing, recents, probe state, and coarse session info.
   let [session, setSession] = useState<AppShellState['session']>(() => readAppSessionState());
   let [recents, setRecents] = useState<RecentRepo[]>(() => listRecentRepos());
-  let [probe, setProbe] = useState<RepoProbeState>({ status: 'idle' });
+  let [probeCache, setProbeCache] = useState<Record<string, RepoProbeState>>({});
   let [navigation, setNavigation] = useState<AppNavigationState>(() =>
     deriveAppNavigation(route, listRecentRepos())
   );
-  let probeRevisionRef = useRef(0);
+  let probeRevisionRef = useRef<Record<string, number>>({});
 
   let refreshSession = useCallback(() => {
     let next = readAppSessionState();
@@ -953,6 +959,13 @@ function useAppShellData({ route }: { route: Route }): AppShellDataResult {
     };
     setNavigation((prev) => (areAppNavigationsEqual(prev, next) ? prev : next));
   }, []);
+
+  let queries = useMemo<AppQueries>(
+    () => ({
+      getRepoProbe: (owner, repo) => probeCache[repoProbeKey(owner, repo)],
+    }),
+    [probeCache]
+  );
 
   useEffect(() => {
     let onStorage = () => {
@@ -1019,11 +1032,28 @@ function useAppShellData({ route }: { route: Route }): AppShellDataResult {
         return;
       }
       if (action.type === 'repo.probe') {
-        let revision = ++probeRevisionRef.current;
-        setProbe({ status: 'checking', owner: action.owner, repo: action.repo });
+        let key = repoProbeKey(action.owner, action.repo);
+        let revision = (probeRevisionRef.current[key] ?? 0) + 1;
+        probeRevisionRef.current[key] = revision;
+        setProbeCache((prev) => {
+          let nextProbe: RepoProbeState = { status: 'checking', owner: action.owner, repo: action.repo };
+          let current = prev[key];
+          if (current !== undefined && areRepoProbesEqual(current, nextProbe)) return prev;
+          return { ...prev, [key]: nextProbe };
+        });
         void repoExists(action.owner, action.repo).then((exists) => {
-          if (probeRevisionRef.current !== revision) return;
-          setProbe({ status: 'ready', owner: action.owner, repo: action.repo, exists });
+          if (probeRevisionRef.current[key] !== revision) return;
+          setProbeCache((prev) => {
+            let nextProbe: RepoProbeState = {
+              status: 'ready',
+              owner: action.owner,
+              repo: action.repo,
+              exists,
+            };
+            let current = prev[key];
+            if (current !== undefined && areRepoProbesEqual(current, nextProbe)) return prev;
+            return { ...prev, [key]: nextProbe };
+          });
         });
       }
     },
@@ -1036,10 +1066,10 @@ function useAppShellData({ route }: { route: Route }): AppShellDataResult {
       navigation,
       repos: {
         recents,
-        probe,
       },
     },
     dispatch,
+    queries,
     setWorkspaceNavigation,
     syncSession: useCallback((next) => {
       setSession((prev) => (areSessionStatesEqual(prev, next) ? prev : next));
@@ -1219,6 +1249,7 @@ function useWorkspaceAppData({ app, route }: { app: AppShellDataResult; route: R
   return {
     state,
     dispatch,
+    queries: app.queries,
     helpers: {
       importPastedAssets: (params) => workspaceData.actions.importPastedAssets(params),
     },
@@ -1591,6 +1622,19 @@ function areSessionStatesEqual(a: AppShellState['session'], b: AppShellState['se
     left.name === right.name &&
     left.avatarUrl === right.avatarUrl &&
     left.avatarDataUrl === right.avatarDataUrl
+  );
+}
+
+function repoProbeKey(owner: string, repo: string) {
+  return `${owner.toLowerCase()}/${repo.toLowerCase()}`;
+}
+
+function areRepoProbesEqual(a: RepoProbeState, b: RepoProbeState) {
+  return (
+    a.status === b.status &&
+    a.owner === b.owner &&
+    a.repo === b.repo &&
+    a.exists === b.exists
   );
 }
 

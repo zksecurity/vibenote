@@ -215,6 +215,7 @@ function HomeDataHarness({
         workspace: undefined,
       },
       dispatch: app.dispatch,
+      queries: app.queries,
       helpers: {
         importPastedAssets: async () => [],
       },
@@ -593,12 +594,14 @@ describe('useAppData contract', () => {
     );
   });
 
-  test('tracks repo probe state and ignores stale probe results', async () => {
+  test('tracks probe state per repo and ignores stale results for the same repo', async () => {
     let firstProbe = createDeferred<boolean>();
     let secondProbe = createDeferred<boolean>();
+    let thirdProbe = createDeferred<boolean>();
     mockRepoExists
       .mockImplementationOnce(() => firstProbe.promise)
-      .mockImplementationOnce(() => secondProbe.promise);
+      .mockImplementationOnce(() => secondProbe.promise)
+      .mockImplementationOnce(() => thirdProbe.promise);
 
     let { result } = renderAppData({ kind: 'home' });
 
@@ -606,7 +609,7 @@ describe('useAppData contract', () => {
       result.current.dispatch({ type: 'repo.probe', owner: 'acme', repo: 'docs' });
     });
 
-    expect(result.current.state.repos.probe).toEqual({
+    expect(result.current.queries.getRepoProbe('acme', 'docs')).toEqual({
       status: 'checking',
       owner: 'acme',
       repo: 'docs',
@@ -616,7 +619,7 @@ describe('useAppData contract', () => {
       result.current.dispatch({ type: 'repo.probe', owner: 'space', repo: 'wiki' });
     });
 
-    expect(result.current.state.repos.probe).toEqual({
+    expect(result.current.queries.getRepoProbe('space', 'wiki')).toEqual({
       status: 'checking',
       owner: 'space',
       repo: 'wiki',
@@ -627,7 +630,16 @@ describe('useAppData contract', () => {
       await firstProbe.promise;
     });
 
-    expect(result.current.state.repos.probe).toEqual({
+    await waitFor(() =>
+      expect(result.current.queries.getRepoProbe('acme', 'docs')).toEqual({
+        status: 'ready',
+        owner: 'acme',
+        repo: 'docs',
+        exists: true,
+      })
+    );
+
+    expect(result.current.queries.getRepoProbe('space', 'wiki')).toEqual({
       status: 'checking',
       owner: 'space',
       repo: 'wiki',
@@ -639,11 +651,35 @@ describe('useAppData contract', () => {
     });
 
     await waitFor(() =>
-      expect(result.current.state.repos.probe).toEqual({
+      expect(result.current.queries.getRepoProbe('space', 'wiki')).toEqual({
         status: 'ready',
         owner: 'space',
         repo: 'wiki',
         exists: false,
+      })
+    );
+
+    act(() => {
+      result.current.dispatch({ type: 'repo.probe', owner: 'space', repo: 'wiki' });
+    });
+
+    expect(result.current.queries.getRepoProbe('space', 'wiki')).toEqual({
+      status: 'checking',
+      owner: 'space',
+      repo: 'wiki',
+    });
+
+    await act(async () => {
+      thirdProbe.resolve(true);
+      await thirdProbe.promise;
+    });
+
+    await waitFor(() =>
+      expect(result.current.queries.getRepoProbe('space', 'wiki')).toEqual({
+        status: 'ready',
+        owner: 'space',
+        repo: 'wiki',
+        exists: true,
       })
     );
   });

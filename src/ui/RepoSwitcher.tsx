@@ -1,16 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import type { AppAction } from '../data';
+import type { AppAction, AppQueries } from '../data';
 import type { RecentRepo } from '../storage/local';
 import { useOnClickOutside } from './useOnClickOutside';
 
 type Props = {
   dispatch: (action: AppAction) => void;
-  probe: {
-    status: 'idle' | 'checking' | 'ready';
-    owner?: string;
-    repo?: string;
-    exists?: boolean;
-  };
+  queries: AppQueries;
   recents: RecentRepo[];
   onClose: () => void;
   triggerRef?: RefObject<HTMLElement | null>;
@@ -25,11 +20,18 @@ function parseOwnerRepo(input: string): Parsed {
   return { owner, repo };
 }
 
-export function RepoSwitcher({ dispatch, probe, recents, onClose, triggerRef }: Props) {
+export function RepoSwitcher({ dispatch, queries, recents, onClose, triggerRef }: Props) {
   const [input, setInput] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const panelRef = useOnClickOutside(onClose, { trigger: triggerRef });
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const dispatchRef = useRef(dispatch);
+  const parsed = parseOwnerRepo(input);
+  const probe = parsed === null ? undefined : queries.getRepoProbe(parsed.owner, parsed.repo);
+
+  useEffect(() => {
+    dispatchRef.current = dispatch;
+  }, [dispatch]);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -52,19 +54,22 @@ export function RepoSwitcher({ dispatch, probe, recents, onClose, triggerRef }: 
     setSelectedIndex(0);
   }, [suggestions.length]);
 
-  // Debounced existence check for precise owner/repo inputs
+  // Debounced existence check for precise owner/repo inputs.
+  // Once a matching probe is already in-flight or cached, do not re-dispatch it.
   useEffect(() => {
-    const parsed = parseOwnerRepo(input);
     if (!parsed) {
       return;
     }
-    const t = setTimeout(async () => {
-      dispatch({ type: 'repo.probe', owner: parsed.owner, repo: parsed.repo });
+    if (probe?.status === 'checking' || probe?.status === 'ready') {
+      return;
+    }
+    const t = setTimeout(() => {
+      dispatchRef.current({ type: 'repo.probe', owner: parsed.owner, repo: parsed.repo });
     }, 300);
     return () => {
       clearTimeout(t);
     };
-  }, [dispatch, input]);
+  }, [input, parsed?.owner, parsed?.repo, probe?.status]);
 
   const goTo = (owner: string, repo: string) => {
     dispatch({ type: 'repo.activate', target: { kind: 'repo', owner, repo } });
@@ -84,13 +89,8 @@ export function RepoSwitcher({ dispatch, probe, recents, onClose, triggerRef }: 
     if (parsed) goTo(parsed.owner, parsed.repo);
   };
 
-  const parsed = parseOwnerRepo(input);
-  const probeMatchesInput =
-    parsed !== null &&
-    probe.owner?.toLowerCase() === parsed.owner.toLowerCase() &&
-    probe.repo?.toLowerCase() === parsed.repo.toLowerCase();
-  const checking = probeMatchesInput && probe.status === 'checking';
-  const exists = probeMatchesInput && probe.status === 'ready' ? (probe.exists ?? null) : null;
+  const checking = probe?.status === 'checking';
+  const exists = probe?.status === 'ready' ? (probe.exists ?? null) : null;
 
   const statusText = checking
     ? 'Checking repository…'
