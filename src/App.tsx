@@ -61,7 +61,14 @@ function RepoWorkspaceScreen() {
   let data = useAppDataContext();
   let workspace = data.state.workspace;
   if (workspace === undefined) return null;
-  return <RepoView state={{ ...data.state, workspace }} dispatch={data.dispatch} helpers={data.helpers} />;
+  return (
+    <RepoView
+      state={{ ...data.state, workspace }}
+      dispatch={data.dispatch}
+      queries={data.queries}
+      helpers={data.helpers}
+    />
+  );
 }
 
 function routeFromNavigation(navigation: AppNavigationState): Route | undefined {

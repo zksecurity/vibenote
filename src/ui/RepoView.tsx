@@ -28,12 +28,13 @@ import { useOnClickOutside } from './useOnClickOutside';
 type RepoViewProps = {
   state: AppState & { workspace: NonNullable<AppState['workspace']> };
   dispatch: (action: AppAction) => void;
+  queries: AppDataResult['queries'];
   helpers: AppDataResult['helpers'];
 };
 
 const primaryModifier = detectPrimaryShortcut();
 
-export function RepoView({ state, dispatch, helpers }: RepoViewProps) {
+export function RepoView({ state, dispatch, queries, helpers }: RepoViewProps) {
   let workspace = state.workspace;
 
   let slug = repoRouteToSlug(workspace.target);
@@ -497,8 +498,8 @@ export function RepoView({ state, dispatch, helpers }: RepoViewProps) {
       {showSwitcher && (
         <RepoSwitcher
           recents={state.repos.recents}
-          probe={state.repos.probe}
           dispatch={dispatch}
+          queries={queries}
           onClose={() => setShowSwitcher(false)}
           triggerRef={repoButtonRef}
         />
