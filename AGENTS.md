@@ -43,6 +43,8 @@ Typical workflow:
 
 The dev frontend talks to the **production backend** (see `VITE_VIBENOTE_API_BASE` in `.env`), so e2e tests exercise real API flows — shares get committed to GitHub, sync hits the real server, etc.
 
+For large-scale UI/data-hook refactors, a generic "open the changed UI" check is not enough. Run the dedicated smoke checklist in `docs/browser-smoke.md` and record what you exercised.
+
 ### Commit Conventions
 
 - Do NOT commit unless asked. Even if you were asked to commit within a session, don't commit more changes in the same session without being asked.
