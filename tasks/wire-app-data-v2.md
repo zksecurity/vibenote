@@ -1,5 +1,6 @@
 ---
-status: todo
+status: done
+completed: 2026-03-06
 created: 2026-03-06
 ---
 
