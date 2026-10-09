@@ -79,6 +79,8 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
 
     autosync,
     syncing,
+    unsyncedPaths,
+    hasUnsyncedChanges,
     statusMessage,
     share,
     defaultBranch,
@@ -262,10 +264,23 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
                   className={`btn icon sync-btn ${syncing ? 'syncing' : ''}`}
                   onClick={actions.syncNow}
                   disabled={syncing}
-                  aria-label={syncing ? 'Syncing' : 'Sync now'}
-                  title={syncing ? 'Syncing…' : 'Sync now'}
+                  aria-label={
+                    syncing
+                      ? 'Syncing'
+                      : hasUnsyncedChanges
+                      ? 'Sync now — unsynced changes'
+                      : 'Sync now — all changes uploaded'
+                  }
+                  title={
+                    syncing
+                      ? 'Syncing…'
+                      : hasUnsyncedChanges
+                      ? 'Changes not yet synced to GitHub. Sync now.'
+                      : 'All local changes uploaded to GitHub. Sync now.'
+                  }
                 >
                   <SyncIcon syncing={syncing} />
+                  {hasUnsyncedChanges && <span className="unsynced-dot sync-unsynced-dot" aria-hidden="true" />}
                 </button>
               )}
               {user !== undefined && (
@@ -307,6 +322,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
               </div>
             </div>
             <FileSidebar
+              unsyncedPaths={unsyncedPaths}
               files={files}
               folders={folders}
               canEdit={canEdit}
@@ -500,6 +516,7 @@ function RepoViewInner({ slug, route, navigate, recordRecent }: RepoViewProps) {
 }
 
 type FileSidebarProps = {
+  unsyncedPaths: string[];
   files: FileMeta[];
   folders: string[];
   canEdit: boolean;
@@ -520,6 +537,7 @@ function FileSidebar(props: FileSidebarProps) {
   let {
     canEdit,
     files,
+    unsyncedPaths,
     slug,
     folders,
     activePath,
@@ -543,8 +561,9 @@ function FileSidebar(props: FileSidebarProps) {
         dir: extractDir(file.path),
         title: stripExtension(basename(file.path)),
         kind: file.kind,
+        unsynced: unsyncedPaths.includes(file.path),
       })),
-    [files]
+    [files, unsyncedPaths]
   );
 
   // make sure that for every folder, its parent folders is also included (otherwise expanding doesn't work)

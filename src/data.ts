@@ -15,6 +15,7 @@ import {
   getRepoStore,
   computeSyncedHash,
   extractDir,
+  listTombstones,
 } from './storage/local';
 import {
   signInWithGitHubApp,
@@ -103,6 +104,8 @@ type RepoDataState = {
   // sync state
   autosync: boolean;
   syncing: boolean;
+  unsyncedPaths: string[];
+  hasUnsyncedChanges: boolean;
 
   // note sharing state
   share: ShareState;
@@ -219,6 +222,24 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
     canSync,
     defaultBranch,
   });
+
+  // A successful upload only clears the dot if the current text matches its confirmed snapshot.
+  let { unsyncedPaths, hasUnsyncedChanges } = useMemo(() => {
+    if (!canEdit) return { unsyncedPaths: [], hasUnsyncedChanges: false };
+    let store = getRepoStore(slug);
+    let tombstones = listTombstones(slug);
+    let renamedPaths = new Set(tombstones.flatMap((entry) => entry.type === 'rename' ? [entry.to] : []));
+    let paths = localFiles.flatMap((meta) => {
+      let doc = store.loadFileById(meta.id);
+      if (doc === null) return [];
+      // New assets may not have a remote SHA yet; their missing baseline is already dirty.
+      if (doc.lastSyncedHash === undefined) return [doc.path];
+      let hash = computeSyncedHash(doc.kind, doc.content, doc.lastRemoteSha);
+      let uncertainUpload = doc.pendingUploads?.some((upload) => upload.path === doc.path) === true;
+      return doc.lastSyncedHash !== hash || uncertainUpload || renamedPaths.has(doc.path) ? [doc.path] : [];
+    });
+    return { unsyncedPaths: paths, hasUnsyncedChanges: paths.length > 0 || tombstones.length > 0 };
+  }, [slug, localFiles, canEdit]);
 
   // Derive the files/folders from whichever source is powering the tree.
   let files = isReadOnly ? readOnlyFiles : localFiles;
@@ -697,6 +718,8 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
 
     autosync,
     syncing,
+    unsyncedPaths,
+    hasUnsyncedChanges,
     share: shareState,
     statusMessage,
     defaultBranch,
@@ -848,6 +871,7 @@ function useSync(params: { slug: string; canSync: boolean; defaultBranch?: strin
   let [syncing, setSyncing] = useState(false);
   let timerRef = useRef<number | undefined>(undefined);
   let inFlightRef = useRef(false);
+  let foregroundPendingRef = useRef(false);
 
   // Pick up persisted autosync preferences when mounting for a repo.
   useEffect(() => {
@@ -883,6 +907,11 @@ function useSync(params: { slug: string; canSync: boolean; defaultBranch?: strin
     } finally {
       inFlightRef.current = false;
       setSyncing(false);
+      // A return to the app during an upload must also pull anything that arrived later.
+      if (foregroundPendingRef.current) {
+        foregroundPendingRef.current = false;
+        void performSync({ silent: true });
+      }
     }
   };
 
@@ -910,6 +939,30 @@ function useSync(params: { slug: string; canSync: boolean; defaultBranch?: strin
     if (noAutosync) return;
     let id = window.setInterval(() => scheduleAutoSync(0), AUTO_SYNC_POLL_INTERVAL_MS);
     return () => window.clearInterval(id);
+  }, [noAutosync, slug]);
+
+  // Foreground handoffs bypass debounce, but never bypass the autosync preference.
+  useEffect(() => {
+    if (noAutosync) return;
+    let onForeground = () => {
+      if (document.visibilityState !== 'visible' || navigator.onLine === false) return;
+      if (timerRef.current !== undefined) {
+        window.clearTimeout(timerRef.current);
+        timerRef.current = undefined;
+      }
+      if (inFlightRef.current) {
+        foregroundPendingRef.current = true;
+        return;
+      }
+      void performSync({ silent: true });
+    };
+    document.addEventListener('visibilitychange', onForeground);
+    window.addEventListener('online', onForeground);
+    return () => {
+      document.removeEventListener('visibilitychange', onForeground);
+      window.removeEventListener('online', onForeground);
+      foregroundPendingRef.current = false;
+    };
   }, [noAutosync, slug]);
 
   const setAutosync = (enabled: boolean) => {

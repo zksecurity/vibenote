@@ -1772,3 +1772,26 @@ textarea:focus-visible {
     font-size: 0.9rem;
   }
 }
+
+/* Small dirty indicators describe upload state, independent of the sync spinner. */
+.unsynced-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #57606a;
+  flex-shrink: 0;
+}
+.file-unsynced-dot {
+  margin-left: 8px;
+  vertical-align: middle;
+}
+.sync-btn {
+  position: relative;
+}
+.sync-unsynced-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  box-shadow: 0 0 0 2px white;
+}

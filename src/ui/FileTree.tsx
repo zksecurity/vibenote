@@ -6,6 +6,7 @@ const treeIconSize = 16;
 const treeIconStrokeWidth = 1.8;
 
 export type FileEntry = {
+  unsynced?: boolean;
   name: string; // filename including extension
   path: string; // dir + name
   dir: string; // '' for root
@@ -42,7 +43,14 @@ type FolderNode = {
   name: string;
   children: (FolderNode | FileNode)[];
 };
-type FileNode = { kind: 'file'; name: string; dir: string; path: string; title: string };
+type FileNode = {
+  unsynced?: boolean;
+  kind: 'file';
+  name: string;
+  dir: string;
+  path: string;
+  title: string;
+};
 
 export function FileTree(props: FileTreeProps) {
   // Rebuild the nested node structure whenever the note list changes.
@@ -803,7 +811,17 @@ function Row(props: {
           />
         </form>
       ) : (
-        <span className="tree-title">{node.name}</span>
+        <span className="tree-title">
+          {node.name}
+          {node.unsynced && (
+            <span
+              className="unsynced-dot file-unsynced-dot"
+              role="img"
+              aria-label="Not synced to GitHub"
+              title="Not synced to GitHub"
+            />
+          )}
+        </span>
       )}
       {isMenuHere && (
         <TreeMenu
@@ -957,7 +975,14 @@ function buildTree(files: FileEntry[], folders: string[]): FolderNode {
   for (let d of folders) addFolder(d);
   for (let f of files) {
     const parent = addFolder(f.dir);
-    parent.children.push({ kind: 'file', name: f.name, dir: f.dir, path: f.path, title: f.title });
+    parent.children.push({
+      kind: 'file',
+      unsynced: f.unsynced,
+      name: f.name,
+      dir: f.dir,
+      path: f.path,
+      title: f.title,
+    });
   }
   // Sort like GitHub: folders A→Z, then files A→Z
   const sortNode = (n: FolderNode) => {
