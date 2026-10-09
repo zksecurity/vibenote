@@ -14,6 +14,7 @@
   --success-shadow: 0 10px 20px rgba(46, 164, 79, 0.25);
   --text: #1f2328;
   --muted: #57606a;
+  --attention: #9a6700;
   --radius: 12px;
   --shadow: 0 1px 2px rgba(15, 23, 42, 0.08), 0 8px 24px rgba(15, 23, 42, 0.06);
   --shadow-soft: 0 12px 36px rgba(15, 23, 42, 0.12);
@@ -1771,4 +1772,26 @@ textarea:focus-visible {
   .btn {
     font-size: 0.9rem;
   }
+}
+
+/* Small dirty indicators describe upload state, independent of the sync spinner. */
+.unsynced-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--attention);
+  flex-shrink: 0;
+}
+.tree-icon.file-unsynced {
+  color: var(--attention);
+}
+.sync-btn {
+  position: relative;
+}
+.sync-unsynced-dot {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  box-shadow: 0 0 0 2px white;
 }

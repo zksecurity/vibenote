@@ -1,10 +1,18 @@
 import { Buffer } from 'node:buffer';
-import { act, renderHook, waitFor } from '@testing-library/react';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { useEffect, useState } from 'react';
-import { beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { RepoMetadata } from '../lib/backend';
 import type { RepoRoute } from '../ui/routing';
-import { LocalStore, markRepoLinked, recordAutoSyncRun, setLastActiveFileId } from '../storage/local';
+import {
+  LocalStore,
+  markRepoLinked,
+  recordAutoSyncRun,
+  setLastActiveFileId,
+  markSynced,
+  computeSyncedHash,
+  recordPendingUpload,
+} from '../storage/local';
 import type { RemoteFile } from '../sync/git-sync';
 import type { RepoDataState, ImportedAsset } from '../data';
 
@@ -178,6 +186,7 @@ function renderRepoData(initial: RenderRepoDataProps) {
 }
 
 describe('useRepoData', () => {
+  afterEach(cleanup);
   beforeEach(() => {
     localStorage.clear();
 
@@ -780,6 +789,157 @@ describe('useRepoData', () => {
     expect(seenNeedsInstall.every((flag) => flag === false)).toBe(true);
     expect(seenCanEdit.every((flag) => flag === true)).toBe(true);
   });
+
+  async function renderSyncWorkspace() {
+    let slug = 'acme/docs';
+    let store = new LocalStore(slug);
+    let id = store.createFile('Seed.md', 'initial text');
+    markSynced(slug, id, {
+      remoteSha: 'initial-sha',
+      syncedHash: computeSyncedHash('markdown', 'initial text', 'initial-sha'),
+    });
+    markRepoLinked(slug);
+    recordAutoSyncRun(slug, Date.now());
+    mockGetSessionToken.mockReturnValue('session-token');
+    setRepoMetadata(writableMeta);
+    mockSyncBidirectional.mockResolvedValue({
+      pulled: 0,
+      pushed: 0,
+      merged: 0,
+      deletedRemote: 0,
+      deletedLocal: 0,
+    });
+    let hook = renderRepoData({
+      slug,
+      route: { kind: 'repo', owner: 'acme', repo: 'docs' },
+      recordRecent: vi.fn(),
+    });
+    await waitFor(() => expect(hook.result.current.state.repoQueryStatus).toBe('ready'));
+    return { ...hook, store, slug, id };
+  }
+
+  test('dirty indicators follow confirmed content, including typing during an upload', async () => {
+    let { result, slug, id } = await renderSyncWorkspace();
+    expect(result.current.state.hasUnsyncedChanges).toBe(false);
+    act(() => result.current.actions.saveFile('Seed.md', 'uploaded version'));
+    expect(result.current.state.unsyncedPaths).toEqual(['Seed.md']);
+    act(() => result.current.actions.saveFile('Seed.md', 'newer typing'));
+    act(() =>
+      markSynced(slug, id, {
+        remoteSha: 'uploaded-sha',
+        syncedHash: computeSyncedHash('markdown', 'uploaded version', 'uploaded-sha'),
+      })
+    );
+    expect(result.current.state.hasUnsyncedChanges).toBe(true);
+    act(() =>
+      markSynced(slug, id, {
+        remoteSha: 'newest-sha',
+        syncedHash: computeSyncedHash('markdown', 'newer typing', 'newest-sha'),
+      })
+    );
+    expect(result.current.state.unsyncedPaths).toEqual([]);
+    act(() => result.current.actions.deleteFile('Seed.md'));
+    expect(result.current.state.unsyncedPaths).toEqual([]);
+    expect(result.current.state.hasUnsyncedChanges).toBe(true);
+  });
+
+  test('uncertain publication stays dirty when text is reverted before its fingerprint is persisted', async () => {
+    let { result, slug, id } = await renderSyncWorkspace();
+    act(() => result.current.actions.saveFile('Seed.md', 'uncertain text'));
+    let deferred = createDeferred<{ pulled: number; pushed: number; merged: number; deletedRemote: number; deletedLocal: number }>();
+    mockSyncBidirectional.mockReturnValueOnce(deferred.promise);
+    let running: Promise<void> = Promise.resolve();
+    act(() => { running = result.current.actions.syncNow(); });
+    act(() => result.current.actions.saveFile('Seed.md', 'initial text'));
+    // Recording a fingerprint does not emit a storage change. Completion must recheck it.
+    act(() => {
+      recordPendingUpload(slug, id, {
+        path: 'Seed.md',
+        remoteSha: 'uncertain-sha',
+        syncedHash: computeSyncedHash('markdown', 'uncertain text'),
+      });
+    });
+    await act(async () => {
+      deferred.reject(new Error('response lost'));
+      await running;
+    });
+    expect(result.current.state.hasUnsyncedChanges).toBe(true);
+  });
+
+  test('failed sync leaves dirty indicators and reverting text clears them', async () => {
+    let { result } = await renderSyncWorkspace();
+    act(() => result.current.actions.saveFile('Seed.md', 'unsent text'));
+    mockSyncBidirectional.mockRejectedValueOnce(new Error('offline'));
+    await act(async () => result.current.actions.syncNow());
+    expect(result.current.state.hasUnsyncedChanges).toBe(true);
+    act(() => result.current.actions.saveFile('Seed.md', 'initial text'));
+    expect(result.current.state.hasUnsyncedChanges).toBe(false);
+  });
+
+  test('new notes and renamed files are marked until confirmed', async () => {
+    let { result } = await renderSyncWorkspace();
+    act(() => result.current.actions.renameFile('Seed.md', 'Renamed'));
+    expect(result.current.state.unsyncedPaths).toContain('Renamed.md');
+    act(() => result.current.actions.createNote('', 'New'));
+    expect(result.current.state.unsyncedPaths).toContain('New.md');
+  });
+
+  test('foreground and reconnect sync bypass debounce only with autosync enabled', async () => {
+    let { result, unmount } = await renderSyncWorkspace();
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('online'));
+    });
+    expect(mockSyncBidirectional).not.toHaveBeenCalled();
+    act(() => result.current.actions.setAutosync(true));
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+    expect(mockSyncBidirectional).toHaveBeenCalledTimes(1);
+    await act(async () => window.dispatchEvent(new Event('online')));
+    expect(mockSyncBidirectional).toHaveBeenCalledTimes(2);
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+    expect(mockSyncBidirectional).toHaveBeenCalledTimes(2);
+    act(() => result.current.actions.setAutosync(false));
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+    expect(mockSyncBidirectional).toHaveBeenCalledTimes(2);
+    unmount();
+    await act(async () => window.dispatchEvent(new Event('online')));
+    expect(mockSyncBidirectional).toHaveBeenCalledTimes(2);
+  });
+
+  test.each([false, true])(
+    'foreground during upload queues one followup unless autosync is disabled (%s)',
+    async (disable) => {
+      let { result } = await renderSyncWorkspace();
+      vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+      act(() => result.current.actions.setAutosync(true));
+      let deferred = createDeferred<{
+        pulled: number;
+        pushed: number;
+        merged: number;
+        deletedRemote: number;
+        deletedLocal: number;
+      }>();
+      mockSyncBidirectional.mockReturnValueOnce(deferred.promise);
+      let running: Promise<void> = Promise.resolve();
+      act(() => {
+        running = result.current.actions.syncNow();
+      });
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      expect(mockSyncBidirectional).toHaveBeenCalledTimes(1);
+      if (disable) act(() => result.current.actions.setAutosync(false));
+      await act(async () => {
+        deferred.resolve({ pulled: 0, pushed: 1, merged: 0, deletedRemote: 0, deletedLocal: 0 });
+        await running;
+      });
+      expect(mockSyncBidirectional).toHaveBeenCalledTimes(disable ? 1 : 2);
+    }
+  );
 
   // Autosync should run quietly in the background without flickering UI state.
   test('autosync schedules background sync without surfacing UI noise', async () => {

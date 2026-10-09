@@ -6,6 +6,7 @@ const treeIconSize = 16;
 const treeIconStrokeWidth = 1.8;
 
 export type FileEntry = {
+  unsynced?: boolean;
   name: string; // filename including extension
   path: string; // dir + name
   dir: string; // '' for root
@@ -42,7 +43,14 @@ type FolderNode = {
   name: string;
   children: (FolderNode | FileNode)[];
 };
-type FileNode = { kind: 'file'; name: string; dir: string; path: string; title: string };
+type FileNode = {
+  unsynced?: boolean;
+  kind: 'file';
+  name: string;
+  dir: string;
+  path: string;
+  title: string;
+};
 
 export function FileTree(props: FileTreeProps) {
   // Rebuild the nested node structure whenever the note list changes.
@@ -778,7 +786,7 @@ function Row(props: {
       onDoubleClick={() => props.onSelectFile(node.path)}
     >
       <span className="tree-disclosure-spacer" />
-      <Icon kind="file" />
+      <Icon kind="file" unsynced={node.unsynced} />
       {isEditing ? (
         <form
           className="tree-edit-form"
@@ -879,9 +887,11 @@ function TreeMenu({ actions, onClose }: { actions: MenuAction[]; onClose: () => 
 function Icon({
   kind,
   open,
+  unsynced = false,
 }: {
   kind: 'file' | 'folder' | 'folder-open' | 'file-leaf' | 'file-md' | 'folder-closed' | 'folder';
   open?: boolean;
+  unsynced?: boolean;
 }) {
   let isFolder = kind === 'folder';
   let className = 'tree-icon';
@@ -890,11 +900,32 @@ function Icon({
     IconSvg = open ? FolderOpenIcon : FolderIcon;
     className += open ? ' folder-open' : ' folder';
   } else {
-    className += ' file';
+    className += unsynced ? ' file file-unsynced' : ' file';
   }
   return (
-    <span className={className} aria-hidden>
-      <IconSvg size={treeIconSize} strokeWidth={treeIconStrokeWidth} />
+    <span
+      className={className}
+      aria-hidden={unsynced ? undefined : true}
+      role={unsynced ? 'img' : undefined}
+      aria-label={unsynced ? 'Modified — not synced to GitHub' : undefined}
+      title={unsynced ? 'Modified — not synced to GitHub' : undefined}
+    >
+      <IconSvg size={treeIconSize} strokeWidth={treeIconStrokeWidth}>
+        {unsynced && (
+          <text
+            x="12"
+            y="18"
+            textAnchor="middle"
+            fontSize="9"
+            fontFamily="system-ui"
+            fontWeight="700"
+            stroke="none"
+            fill="currentColor"
+          >
+            M
+          </text>
+        )}
+      </IconSvg>
     </span>
   );
 }
@@ -957,7 +988,14 @@ function buildTree(files: FileEntry[], folders: string[]): FolderNode {
   for (let d of folders) addFolder(d);
   for (let f of files) {
     const parent = addFolder(f.dir);
-    parent.children.push({ kind: 'file', name: f.name, dir: f.dir, path: f.path, title: f.title });
+    parent.children.push({
+      kind: 'file',
+      unsynced: f.unsynced,
+      name: f.name,
+      dir: f.dir,
+      path: f.path,
+      title: f.title,
+    });
   }
   // Sort like GitHub: folders A→Z, then files A→Z
   const sortNode = (n: FolderNode) => {
