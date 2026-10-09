@@ -843,15 +843,25 @@ describe('useRepoData', () => {
     expect(result.current.state.hasUnsyncedChanges).toBe(true);
   });
 
-  test('uncertain publication stays dirty even when text is reverted to the confirmed base', async () => {
+  test('uncertain publication stays dirty when text is reverted before its fingerprint is persisted', async () => {
     let { result, slug, id } = await renderSyncWorkspace();
+    act(() => result.current.actions.saveFile('Seed.md', 'uncertain text'));
+    let deferred = createDeferred<{ pulled: number; pushed: number; merged: number; deletedRemote: number; deletedLocal: number }>();
+    mockSyncBidirectional.mockReturnValueOnce(deferred.promise);
+    let running: Promise<void> = Promise.resolve();
+    act(() => { running = result.current.actions.syncNow(); });
+    act(() => result.current.actions.saveFile('Seed.md', 'initial text'));
+    // Recording a fingerprint does not emit a storage change. Completion must recheck it.
     act(() => {
       recordPendingUpload(slug, id, {
         path: 'Seed.md',
         remoteSha: 'uncertain-sha',
         syncedHash: computeSyncedHash('markdown', 'uncertain text'),
       });
-      result.current.actions.saveFile('Seed.md', 'initial text');
+    });
+    await act(async () => {
+      deferred.reject(new Error('response lost'));
+      await running;
     });
     expect(result.current.state.hasUnsyncedChanges).toBe(true);
   });

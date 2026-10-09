@@ -224,6 +224,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
   });
 
   // A successful upload only clears the dot if the current text matches its confirmed snapshot.
+  // Pending fingerprints do not emit storage events, so also recheck when syncing changes.
   let { unsyncedPaths, hasUnsyncedChanges } = useMemo(() => {
     if (!canEdit) return { unsyncedPaths: [], hasUnsyncedChanges: false };
     let store = getRepoStore(slug);
@@ -239,7 +240,7 @@ function useRepoData({ slug, route, recordRecent, setActivePath }: RepoDataInput
       return doc.lastSyncedHash !== hash || uncertainUpload || renamedPaths.has(doc.path) ? [doc.path] : [];
     });
     return { unsyncedPaths: paths, hasUnsyncedChanges: paths.length > 0 || tombstones.length > 0 };
-  }, [slug, localFiles, canEdit]);
+  }, [slug, localFiles, canEdit, syncing]);
 
   // Derive the files/folders from whichever source is powering the tree.
   let files = isReadOnly ? readOnlyFiles : localFiles;
