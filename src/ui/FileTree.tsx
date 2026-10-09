@@ -786,7 +786,7 @@ function Row(props: {
       onDoubleClick={() => props.onSelectFile(node.path)}
     >
       <span className="tree-disclosure-spacer" />
-      <Icon kind="file" />
+      <Icon kind="file" unsynced={node.unsynced} />
       {isEditing ? (
         <form
           className="tree-edit-form"
@@ -811,17 +811,7 @@ function Row(props: {
           />
         </form>
       ) : (
-        <span className="tree-title">
-          {node.name}
-          {node.unsynced && (
-            <span
-              className="unsynced-dot file-unsynced-dot"
-              role="img"
-              aria-label="Not synced to GitHub"
-              title="Not synced to GitHub"
-            />
-          )}
-        </span>
+        <span className="tree-title">{node.name}</span>
       )}
       {isMenuHere && (
         <TreeMenu
@@ -897,9 +887,11 @@ function TreeMenu({ actions, onClose }: { actions: MenuAction[]; onClose: () => 
 function Icon({
   kind,
   open,
+  unsynced = false,
 }: {
   kind: 'file' | 'folder' | 'folder-open' | 'file-leaf' | 'file-md' | 'folder-closed' | 'folder';
   open?: boolean;
+  unsynced?: boolean;
 }) {
   let isFolder = kind === 'folder';
   let className = 'tree-icon';
@@ -908,11 +900,32 @@ function Icon({
     IconSvg = open ? FolderOpenIcon : FolderIcon;
     className += open ? ' folder-open' : ' folder';
   } else {
-    className += ' file';
+    className += unsynced ? ' file file-unsynced' : ' file';
   }
   return (
-    <span className={className} aria-hidden>
-      <IconSvg size={treeIconSize} strokeWidth={treeIconStrokeWidth} />
+    <span
+      className={className}
+      aria-hidden={unsynced ? undefined : true}
+      role={unsynced ? 'img' : undefined}
+      aria-label={unsynced ? 'Modified — not synced to GitHub' : undefined}
+      title={unsynced ? 'Modified — not synced to GitHub' : undefined}
+    >
+      <IconSvg size={treeIconSize} strokeWidth={treeIconStrokeWidth}>
+        {unsynced && (
+          <text
+            x="12"
+            y="18"
+            textAnchor="middle"
+            fontSize="9"
+            fontFamily="system-ui"
+            fontWeight="700"
+            stroke="none"
+            fill="currentColor"
+          >
+            M
+          </text>
+        )}
+      </IconSvg>
     </span>
   );
 }
