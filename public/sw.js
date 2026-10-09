@@ -4,6 +4,9 @@
 
 const APP_SHELL_CACHE = 'vibenote-app-shell-v1';
 const ASSET_CACHE = 'vibenote-asset-v1';
+// Also reject flushes from older pages and stop replaying queued writes.
+// Offline app-shell caching remains enabled.
+const ENABLE_BACKGROUND_FLUSH = false;
 const APP_SHELL_URLS = [
   '/',
   '/start',
@@ -220,7 +223,7 @@ async function processQueue() {
 
 self.addEventListener('message', (event) => {
   const data = event.data;
-  if (!data || data.type !== 'vibenote-flush') return;
+  if (!ENABLE_BACKGROUND_FLUSH || !data || data.type !== 'vibenote-flush') return;
   event.waitUntil(
     (async () => {
       await queuePayload(data.payload);
@@ -235,7 +238,7 @@ self.addEventListener('message', (event) => {
 });
 
 self.addEventListener('sync', (event) => {
-  if (event.tag === 'vibenote-flush') {
+  if (ENABLE_BACKGROUND_FLUSH && event.tag === 'vibenote-flush') {
     event.waitUntil(processQueue());
   }
 });

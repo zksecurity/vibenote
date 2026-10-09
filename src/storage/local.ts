@@ -25,6 +25,7 @@ export {
   kindFromPath,
   debugLog,
   setDebugEnabled,
+  recordPendingUpload,
 };
 
 type FileKind = 'markdown' | 'binary' | 'asset-url' | 'text';
@@ -46,7 +47,10 @@ type StoredFile = StoredFileMeta & {
   text: string;
   lastRemoteSha?: string;
   lastSyncedHash?: string;
+  pendingUploads?: PendingFileUpload[];
 };
+
+type PendingFileUpload = { path: string; remoteSha: string; syncedHash: string };
 
 type FileMeta = {
   id: string;
@@ -59,6 +63,7 @@ type RepoFile = FileMeta & {
   content: string; // markdown uses UTF-8 text, binary uses base64 payloads
   lastRemoteSha?: string;
   lastSyncedHash?: string;
+  pendingUploads?: PendingFileUpload[];
 };
 
 type MarkdownFile = RepoFile & { kind: 'markdown' };
@@ -779,9 +784,30 @@ export function markSynced(slug: string, id: string, patch: { remoteSha?: string
   if (!doc) return;
   if (patch.remoteSha !== undefined) doc.lastRemoteSha = patch.remoteSha;
   if (patch.syncedHash !== undefined) doc.lastSyncedHash = patch.syncedHash;
+  // Acknowledging an upload also resolves earlier attempts for this file.
+  // Keep newer attempts in case their publication response was lost too.
+  let acknowledgedIndex = doc.pendingUploads?.findIndex(
+    (upload) => upload.path === doc.path && upload.remoteSha === patch.remoteSha
+  );
+  if (acknowledgedIndex !== undefined && acknowledgedIndex >= 0) {
+    let remaining = doc.pendingUploads?.slice(acknowledgedIndex + 1);
+    doc.pendingUploads = remaining?.length === 0 ? undefined : remaining;
+  }
   localStorage.setItem(key, serializeFile(doc));
   debugLog(slug, 'markSynced', { id, patch });
   emitRepoChange(slug);
+}
+
+function recordPendingUpload(slug: string, id: string, upload: PendingFileUpload) {
+  let doc = loadFileForKey(slug, id);
+  if (doc === null) return;
+  let previous = doc.pendingUploads ?? [];
+  doc.pendingUploads = [
+    ...previous.filter((entry) => entry.path !== upload.path || entry.remoteSha !== upload.remoteSha),
+    upload,
+  ];
+  // Record only metadata: preserve any text typed since the upload snapshot.
+  localStorage.setItem(`${repoKey(slug, 'note')}:${id}`, serializeFile(doc));
 }
 
 export function updateFile(slug: string, id: string, content: string, kind?: FileKind) {
@@ -1070,6 +1096,7 @@ function toStoredFile(doc: RepoFile): StoredFile {
     text: doc.content,
     lastRemoteSha: doc.lastRemoteSha,
     lastSyncedHash: doc.lastSyncedHash,
+    pendingUploads: doc.pendingUploads,
   };
 }
 
@@ -1081,7 +1108,23 @@ function normalizeFile(raw: unknown): RepoFile | null {
   let lastRemoteSha = typeof stored.lastRemoteSha === 'string' ? stored.lastRemoteSha : undefined;
   let lastSyncedHash = typeof stored.lastSyncedHash === 'string' ? stored.lastSyncedHash : undefined;
   let content = typeof stored.text === 'string' ? stored.text : '';
-  return { ...meta, content, lastRemoteSha, lastSyncedHash };
+  let pendingUploads = Array.isArray(stored.pendingUploads)
+    ? stored.pendingUploads.filter(isPendingFileUpload)
+    : undefined;
+  return { ...meta, content, lastRemoteSha, lastSyncedHash, pendingUploads };
+}
+
+function isPendingFileUpload(value: unknown): value is PendingFileUpload {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    'path' in value &&
+    typeof value.path === 'string' &&
+    'remoteSha' in value &&
+    typeof value.remoteSha === 'string' &&
+    'syncedHash' in value &&
+    typeof value.syncedHash === 'string'
+  );
 }
 
 function joinPath(dir: string, file: string) {
