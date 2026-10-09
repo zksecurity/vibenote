@@ -17,6 +17,7 @@ import {
   findByRemoteSha,
   findBySyncedHash,
   markSynced,
+  recordPendingUpload,
   updateFile,
   moveFilePath,
   debugLog,
@@ -363,7 +364,8 @@ async function commitChanges(
     encoding?: 'utf-8' | 'base64';
     delete?: boolean;
     blobSha?: string;
-  }>
+  }>,
+  beforePublish?: (result: CommitResponse) => void
 ): Promise<CommitResponse> {
   let token = await requireAccessToken();
   if (changes.length === 0) {
@@ -526,6 +528,9 @@ async function commitChanges(
   let commitJson = await commitRes.json();
   let newCommitSha = String(commitJson.sha || '');
 
+  // Persist the upload fingerprints before the ref can become visible remotely.
+  beforePublish?.({ commitSha: newCommitSha, blobShas });
+
   if (isInitialCommit || !headSha) {
     let createRefPath = `/repos/${ownerEncoded}/${repoEncoded}/git/refs`;
     let createRes = await githubRequest(token, 'POST', createRefPath, {
@@ -591,6 +596,8 @@ async function githubRequest(
     method,
     headers,
   };
+  // Branch-addressed reads must not replay a snapshot from before our own sync.
+  if (method === 'GET') init.cache = 'no-store';
   if (body !== undefined) {
     init.body = JSON.stringify(body);
   }
@@ -750,6 +757,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
 
   type PendingUpload = {
     payload: PutFilePayload;
+    doc: RepoFile;
     onApplied: (newCommitSha: string, newBlobSha?: string) => void;
   };
   type PendingDelete = {
@@ -762,11 +770,15 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
 
   const queueUpload = (
     payload: PutFilePayload,
-    options: { onPending?: () => void; onApplied: (newCommitSha: string, newBlobSha?: string) => void }
+    options: {
+      doc: RepoFile;
+      onPending?: () => void;
+      onApplied: (newCommitSha: string, newBlobSha?: string) => void;
+    }
   ) => {
     // TODO why does this exist?? why not call onPending directly?
     options.onPending?.();
-    pendingUploads.push({ payload, onApplied: options.onApplied });
+    pendingUploads.push({ payload, doc: options.doc, onApplied: options.onApplied });
   };
 
   const applyUploadResult = (params: {
@@ -804,7 +816,17 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
     const message = 'vibenote: sync changes';
     let res: CommitResponse | null = null;
     res = await withGitHubContext({ operation: 'batch', paths: pathsForContext }, async () => {
-      return await commitChanges(config, message, [...serializedDeletes, ...serializedUploads]);
+      return await commitChanges(config, message, [...serializedDeletes, ...serializedUploads], (result) => {
+        for (let entry of pendingUploads) {
+          let remoteSha = extractBlobSha(result, entry.payload.path) ?? entry.payload.blobSha;
+          if (remoteSha === undefined) throw new Error(`Missing upload SHA for ${entry.payload.path}`);
+          recordPendingUpload(storeSlug, entry.doc.id, {
+            path: entry.payload.path,
+            remoteSha,
+            syncedHash: syncedHashForDoc(entry.doc, remoteSha),
+          });
+        }
+      });
     });
     const commitResult = res ?? { commitSha: '', blobShas: {} };
     for (const entry of pendingUploads) {
@@ -864,6 +886,20 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         continue;
       }
     }
+    // A matching pending blob is our own successful upload, even if we never
+    // received its response. Advance the base without replacing newer typing.
+    let ownUpload = local.doc.pendingUploads?.find(
+      (upload) => upload.path === e.path && upload.remoteSha === e.sha
+    );
+    if (ownUpload !== undefined) {
+      markSynced(storeSlug, local.id, {
+        remoteSha: ownUpload.remoteSha,
+        syncedHash: ownUpload.syncedHash,
+      });
+      let recovered = store.loadFileById(local.id);
+      if (recovered === null) continue;
+      local = { id: local.id, doc: recovered };
+    }
     const { id, doc } = local;
     const lastRemoteSha = doc.lastRemoteSha;
     let localHash = computeLocalHash(doc);
@@ -877,6 +913,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
           continue;
         }
         queueUpload(payload, {
+          doc,
           onPending: () => {
             remoteMap.set(doc.path, doc.lastRemoteSha ?? 'pending');
           },
@@ -925,6 +962,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
           continue;
         }
         queueUpload(payload, {
+          doc,
           onPending: () => {
             remoteMap.set(doc.path, doc.lastRemoteSha ?? 'pending');
           },
@@ -951,6 +989,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
           queueUpload(
             { path: doc.path, content: mergedText, baseSha: rf.sha, kind: 'markdown' },
             {
+              doc: { ...doc, content: mergedText },
               onPending: () => {
                 remoteMap.set(doc.path, doc.lastRemoteSha ?? 'pending');
               },
@@ -1003,6 +1042,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
           continue;
         }
         queueUpload(payload, {
+          doc,
           onPending: () => {
             remoteMap.set(doc.path, doc.lastRemoteSha ?? 'pending');
           },
@@ -1092,6 +1132,7 @@ export async function syncBidirectional(store: LocalStore, slug: string): Promis
         }
         if (payload) {
           queueUpload(payload, {
+            doc,
             onPending: () => {
               remoteMap.set(t.to, doc.lastRemoteSha ?? 'pending');
             },

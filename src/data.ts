@@ -66,6 +66,9 @@ export type {
 const AUTO_SYNC_MIN_INTERVAL_MS = 60_000;
 const AUTO_SYNC_DEBOUNCE_MS = 10_000;
 const AUTO_SYNC_POLL_INTERVAL_MS = 180_000;
+// The service-worker writer bypasses sync bookkeeping and can race normal sync.
+// Keep it disabled until it can participate in the same sync transaction.
+const ENABLE_BACKGROUND_FLUSH = false;
 
 type ShareState = {
   status: 'idle' | 'loading' | 'ready' | 'error';
@@ -926,7 +929,7 @@ function useSync(params: { slug: string; canSync: boolean; defaultBranch?: strin
   // FIXME: I don't think this works well, since it's not using our well-tested sync logic
   // consider disabling for now, or fixing soon
   useEffect(() => {
-    if (noSync || !('serviceWorker' in navigator)) return;
+    if (!ENABLE_BACKGROUND_FLUSH || noSync || !('serviceWorker' in navigator)) return;
 
     const flushViaServiceWorker = async () => {
       try {
