@@ -362,7 +362,7 @@ describe('Tier 2 — Opaque shares', () => {
 // --- Repo keys ---
 
 describe('Repo keys', () => {
-  it('11. repoId collision rejected for different repo', async () => {
+  it('11. registered repoId answers the same for any repo and keeps its binding', async () => {
     const collisionRepoIdBytes = crypto.randomBytes(8);
     const collisionRepoId = collisionRepoIdBytes.toString('base64url');
 
@@ -384,15 +384,33 @@ describe('Repo keys', () => {
     });
     expect(res1.status).toBe(201);
 
-    // Second: try to register same repoId for repo B — should fail
-    const res2 = await fetch(`${baseUrl}/v1/repo-id`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ repoId: collisionRepoId, owner: 'repo-b-owner', repo: 'repo-b' }),
+    // Re-registering for repo A and registering for repo B get identical answers,
+    // so a link holder cannot confirm which repository the repoId belongs to
+    const answers = [];
+    for (const target of [
+      { owner: 'repo-a-owner', repo: 'repo-a' },
+      { owner: 'repo-b-owner', repo: 'repo-b' },
+    ]) {
+      const res = await fetch(`${baseUrl}/v1/repo-id`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repoId: collisionRepoId, ...target }),
+      });
+      answers.push({ status: res.status, body: await res.json() });
+    }
+    expect(answers[0]).toEqual({ status: 200, body: { ok: true } });
+    expect(answers[1]).toEqual(answers[0]);
+
+    // The binding still points to repo A
+    const shareIdBytes = crypto.randomBytes(16);
+    setupRepoMock('repo-a-owner', 'repo-a', {
+      [`.shares/opaque/${shareIdBytes.toString('base64url')}`]: 'notes/hello.md',
+      'notes/hello.md': MARKDOWN_BODY,
     });
-    expect(res2.status).toBe(404);
-    const json = await res2.json();
-    expect(json.error).toBe('repository not found or insufficient permissions');
+    const content = await fetch(
+      `${baseUrl}/v1/git-shares/${makeOpaqueSegment(collisionRepoIdBytes, shareIdBytes)}/content`,
+    );
+    expect(content.status).toBe(200);
   });
 });
 
@@ -543,7 +561,7 @@ describe('POST /v1/repo-id', () => {
     expect(res1.status).toBe(201);
 
     const res2 = await fetch(`${baseUrl}/v1/repo-id`, { method: 'POST', headers, body });
-    expect(res2.status).toBe(201);
+    expect(res2.status).toBe(200);
   });
 
   it('21. different repoId for same repo rejected', async () => {
@@ -705,7 +723,8 @@ describe('Repository identity binding', () => {
         body: JSON.stringify({ repoId, owner: ENC_OWNER, repo: ENC_REPO }),
       });
     };
-    expect((await register(REPO_ID)).status).toBe(404);
+    // The old repoId stays bound to the old repository (the uniform answer changes nothing)
+    expect((await register(REPO_ID)).status).toBe(200);
     expect((await register(crypto.randomBytes(8).toString('base64url'))).status).toBe(201);
   });
 });

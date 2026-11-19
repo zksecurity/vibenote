@@ -374,6 +374,14 @@ function gitShareEndpoints(app: express.Express) {
 
       const REPO_ACCESS_DENIED = 'repository not found or insufficient permissions';
 
+      // A registered repoId gets the same answer for every request, without contacting GitHub.
+      // Anyone holding an opaque link knows its repoId, so an answer that depended on owner/repo
+      // would confirm a guessed repository name. Clients check where a new link resolves instead.
+      if (repoIdStore.get(repoId) !== undefined) {
+        res.status(200).json({ ok: true });
+        return;
+      }
+
       // Resolve the GitHub App installation for this repo.
       let installationId: number;
       try {
@@ -412,15 +420,6 @@ function gitShareEndpoints(app: express.Express) {
       try {
         githubRepoId = await fetchGitHubRepoId(owner, repo);
       } catch {
-        throw HttpError(404, REPO_ACCESS_DENIED);
-      }
-
-      // Reject if repoId already registered for a different repo (prevent collision DoS)
-      const existing = repoIdStore.get(repoId);
-      if (
-        existing &&
-        (existing.owner !== owner || existing.repo !== repo || existing.githubRepoId !== githubRepoId)
-      ) {
         throw HttpError(404, REPO_ACCESS_DENIED);
       }
 

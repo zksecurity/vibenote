@@ -208,6 +208,22 @@ async function registerRepoId(repoId: string, owner: string, repo: string): Prom
   if (!res.ok) throw new Error(`repo-id registration failed (${res.status})`);
 }
 
+// Registration answers the same for every request once a repoId is registered, so it cannot tell
+// whether the repoId is bound to this repository (e.g. if another repository copied it and
+// registered first). Check that the new link resolves to this owner before handing it out.
+async function verifyShareResolves(segment: string, owner: string): Promise<void> {
+  const base = getApiBase();
+  const res = await fetch(`${base}/v1/git-shares/${segment}`);
+  const meta: unknown = res.ok ? await res.json() : undefined;
+  const resolvedOwner =
+    typeof meta === 'object' && meta !== null && 'owner' in meta && typeof meta.owner === 'string'
+      ? meta.owner
+      : undefined;
+  if (resolvedOwner === undefined || resolvedOwner.toLowerCase() !== owner.toLowerCase()) {
+    throw new Error('share link does not resolve to this repository');
+  }
+}
+
 // --- Ensure repoId ---
 // Read .shares/.repo-id from the local store (preferred, populated by sync) or
 // directly from the GitHub API. If absent, generate and commit a fresh one.
@@ -266,7 +282,9 @@ async function createGitShare(owner: string, repo: string, notePath: string): Pr
   const id = store.createFile(opaqueDescriptorPath(shareId), notePath, { kind: 'text' });
   markSynced(slug, id, { remoteSha: sha, syncedHash: hashText(notePath) });
 
-  const url = `${window.location.origin}/s/${computeOpaqueSegment(repoId, shareId)}`;
+  const segment = computeOpaqueSegment(repoId, shareId);
+  await verifyShareResolves(segment, owner);
+  const url = `${window.location.origin}/s/${segment}`;
   return { shareId, url };
 }
 

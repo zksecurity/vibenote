@@ -79,6 +79,7 @@ The shareId is not hidden: anyone can decode it from the segment. A link holder 
 
 - Tier 2 descriptors live at `.shares/opaque/<shareId>`, which the tier 1 endpoint cannot address (share ids contain no `/`). A decoded shareId sent to the tier 1 endpoint resolves exactly like a nonexistent share, for a correct and a wrong repository guess alike.
 - The server looks up GitHub App installations per owner, never per repository, so a wrong repository name takes the same path as a right one: a single contents request, which GitHub answers with 404 for an inaccessible repository just as for a missing file.
+- `POST /v1/repo-id` answers the same `200` for every request with an already registered repoId, without contacting GitHub, since the repoId is part of every link. The client therefore checks that a new link resolves to its own owner before handing it out.
 
 **What Tier 2 does NOT protect:** The Tier 1 endpoint is always available to anyone who knows `owner/repo/shareId` of a tier 1 share. Descriptor filenames inside `.shares/` are visible to anyone with repo read access.
 
