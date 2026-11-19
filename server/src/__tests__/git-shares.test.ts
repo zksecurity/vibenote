@@ -9,6 +9,7 @@ import fs from 'node:fs/promises';
 const {
   mockGetOwnerInstallationId,
   mockInstallationRequest,
+  githubRepoIds,
   REPO_ID_FILE,
   TEMP_DIR,
 } = vi.hoisted(() => {
@@ -18,6 +19,8 @@ const {
   return {
     mockGetOwnerInstallationId: vi.fn() as any,
     mockInstallationRequest: vi.fn() as any,
+    // GitHub's numeric id per "/repos/<owner>/<repo>" metadata path; unlisted repos get DEFAULT_GITHUB_REPO_ID
+    githubRepoIds: new Map<string, number>(),
     TEMP_DIR: dir,
     REPO_ID_FILE: path.join(dir, 'repo-ids.json'),
   };
@@ -41,10 +44,18 @@ vi.mock('../env.ts', () => ({
   },
 }));
 
+const DEFAULT_GITHUB_REPO_ID = 4242;
+
+// Repository metadata requests are answered from githubRepoIds; everything else goes to the per-test mock.
 vi.mock('../github-app.ts', () => ({
   getOwnerInstallationId: mockGetOwnerInstallationId,
   getInstallationToken: vi.fn().mockResolvedValue('fake-token'),
-  installationRequest: mockInstallationRequest,
+  installationRequest: async (env: any, installationId: number, urlPath: string, init?: RequestInit) => {
+    if (/^\/repos\/[^/]+\/[^/]+$/.test(urlPath)) {
+      return Response.json({ id: githubRepoIds.get(urlPath) ?? DEFAULT_GITHUB_REPO_ID });
+    }
+    return mockInstallationRequest(env, installationId, urlPath, init);
+  },
 }));
 
 // --- Now import the modules under test (after mocks are in place) ---
@@ -646,5 +657,44 @@ describe('Tier 2 descriptors via Tier 1', () => {
       // Every case makes the same single GitHub request, so timing does not tell them apart either
       expect(mockInstallationRequest).toHaveBeenCalledTimes(1);
     }
+  });
+});
+
+// --- Repo IDs are bound to GitHub's repository identity ---
+
+describe('Repository identity binding', () => {
+  it('27. opaque links stop resolving when the stored name belongs to a different repository', async () => {
+    const { SEGMENT, SHARE_ID, ENC_OWNER, ENC_REPO } = await registerTier2Repo();
+    setupRepoMock(ENC_OWNER, ENC_REPO, {
+      [`.shares/opaque/${SHARE_ID}`]: 'notes/private.md',
+      'notes/private.md': MARKDOWN_BODY,
+    });
+    const before = await fetch(`${baseUrl}/v1/git-shares/${SEGMENT}/content`);
+    expect(before.status).toBe(200);
+
+    // The name is now taken by another repository that serves the same descriptor
+    githubRepoIds.set(`/repos/${ENC_OWNER}/${ENC_REPO}`, 9999);
+    const after = await fetch(`${baseUrl}/v1/git-shares/${SEGMENT}/content`);
+    expect(after.status).toBe(404);
+    expect(await after.json()).toEqual({ error: 'share not found' });
+  });
+
+  it('28. a repository reusing a registered name gets its own repoId, not the old one', async () => {
+    const { REPO_ID, ENC_OWNER, ENC_REPO } = await registerTier2Repo();
+    githubRepoIds.set(`/repos/${ENC_OWNER}/${ENC_REPO}`, 7777);
+    const register = async (repoId: string) => {
+      mockInstallationRequest.mockImplementation(async (_env: any, _id: number, urlPath: string) =>
+        urlPath.includes('.shares/.repo-id')
+          ? new Response(repoId, { status: 200 })
+          : new Response('not found', { status: 404 }),
+      );
+      return fetch(`${baseUrl}/v1/repo-id`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repoId, owner: ENC_OWNER, repo: ENC_REPO }),
+      });
+    };
+    expect((await register(REPO_ID)).status).toBe(404);
+    expect((await register(crypto.randomBytes(8).toString('base64url'))).status).toBe(201);
   });
 });

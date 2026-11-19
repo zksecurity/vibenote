@@ -53,6 +53,7 @@ const MAX_NOTE_BYTES = 2 * 1024 * 1024;
 const MAX_ASSET_BYTES = 25 * 1024 * 1024;
 // .shares/.repo-id holds an 11-character id plus optional whitespace.
 const MAX_REPO_ID_FILE_BYTES = 64;
+const MAX_REPO_METADATA_BYTES = 256 * 1024;
 
 // --- Repo ID store ---
 
@@ -83,6 +84,32 @@ async function fetchRepoFile(
     throw HttpError(404, 'share not found');
   }
   return res;
+}
+
+// Read GitHub's numeric id of the repository currently at owner/repo. Renames redirect to the same
+// repository; a reused name resolves to a different id.
+async function fetchGitHubRepoId(owner: string, repo: string): Promise<number> {
+  let installationId: number;
+  try {
+    installationId = await getOwnerInstallationId(env, owner);
+  } catch {
+    throw HttpError(404, 'share not found');
+  }
+  const url = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+  const res = await installationRequest(env, installationId, url, {
+    headers: { Accept: 'application/vnd.github+json' },
+  });
+  if (!res.ok) throw HttpError(404, 'share not found');
+  let json: unknown;
+  try {
+    json = JSON.parse(await readTextBounded(res, MAX_REPO_METADATA_BYTES));
+  } catch {
+    throw HttpError(404, 'share not found');
+  }
+  if (typeof json !== 'object' || json === null || !('id' in json) || typeof json.id !== 'number') {
+    throw HttpError(404, 'share not found');
+  }
+  return json.id;
 }
 
 // Share descriptors are plain-text files whose entire content is the note path.
@@ -227,7 +254,9 @@ function openCacheKey(owner: string, repo: string, shareId: string): string {
 
 // --- Tier 2 param extraction ---
 
-function getOpaqueShareParams(req: express.Request): { owner: string; repo: string; descriptorPath: string } {
+async function getOpaqueShareParams(
+  req: express.Request
+): Promise<{ owner: string; repo: string; descriptorPath: string }> {
   const GENERIC = 'share not found';
   const params = req.params as Record<string, string | undefined>;
   const segment = (params.segment ?? '').trim();
@@ -238,6 +267,10 @@ function getOpaqueShareParams(req: express.Request): { owner: string; repo: stri
   const { repoId, shareId } = decoded;
   const record = repoIdStore.get(repoId);
   if (!record) throw HttpError(404, GENERIC);
+  // The stored name must still belong to the repository the repoId was registered for
+  if ((await fetchGitHubRepoId(record.owner, record.repo)) !== record.githubRepoId) {
+    throw HttpError(404, GENERIC);
+  }
 
   return { owner: record.owner, repo: record.repo, descriptorPath: opaqueDescriptorPath(shareId) };
 }
@@ -259,7 +292,7 @@ function gitShareEndpoints(app: express.Express) {
     handleErrors(async (req, res) => {
       const params = req.params as Record<string, string | undefined>;
       const segment = (params.segment ?? '').trim();
-      const { owner, repo, descriptorPath } = getOpaqueShareParams(req);
+      const { owner, repo, descriptorPath } = await getOpaqueShareParams(req);
       const notePath = await fetchSharePath(owner, repo, descriptorPath);
       await serveContent(res, owner, repo, notePath, opaqueCacheKey(segment));
     })
@@ -268,7 +301,7 @@ function gitShareEndpoints(app: express.Express) {
   app.get(
     '/v1/git-shares/:segment',
     handleErrors(async (req, res) => {
-      const { owner, repo, descriptorPath } = getOpaqueShareParams(req);
+      const { owner, repo, descriptorPath } = await getOpaqueShareParams(req);
       await fetchSharePath(owner, repo, descriptorPath); // validate share exists
       // Return owner (repo owner name) but not repo or shareId — URL stays opaque.
       res.json({ owner });
@@ -280,7 +313,7 @@ function gitShareEndpoints(app: express.Express) {
     handleErrors(async (req, res) => {
       const params = req.params as Record<string, string | undefined>;
       const segment = (params.segment ?? '').trim();
-      const { owner, repo, descriptorPath } = getOpaqueShareParams(req);
+      const { owner, repo, descriptorPath } = await getOpaqueShareParams(req);
       const notePath = await fetchSharePath(owner, repo, descriptorPath);
       await serveAsset(req, res, owner, repo, notePath, opaqueCacheKey(segment));
     })
@@ -371,15 +404,30 @@ function gitShareEndpoints(app: express.Express) {
         throw HttpError(404, REPO_ACCESS_DENIED);
       }
 
-      // Reject if repoId already registered for a different repo (prevent collision DoS)
-      const existing = repoIdStore.get(repoId);
-      if (existing && (existing.owner !== owner || existing.repo !== repo)) {
+      let githubRepoId: number;
+      try {
+        githubRepoId = await fetchGitHubRepoId(owner, repo);
+      } catch {
         throw HttpError(404, REPO_ACCESS_DENIED);
       }
 
-      // Enforce one repoId per repo — reject if this repo already has a different repoId
+      // Reject if repoId already registered for a different repo (prevent collision DoS)
+      const existing = repoIdStore.get(repoId);
+      if (
+        existing &&
+        (existing.owner !== owner || existing.repo !== repo || existing.githubRepoId !== githubRepoId)
+      ) {
+        throw HttpError(404, REPO_ACCESS_DENIED);
+      }
+
+      // Enforce one repoId per repo — reject if this repo already has a different repoId.
+      // A binding of the same name to an older repository does not count: that name was reused.
       const existingByRepo = repoIdStore.getByRepo(owner, repo);
-      if (existingByRepo && existingByRepo.repoId !== repoId) {
+      if (
+        existingByRepo &&
+        existingByRepo.repoId !== repoId &&
+        existingByRepo.githubRepoId === githubRepoId
+      ) {
         throw HttpError(404, REPO_ACCESS_DENIED);
       }
 
@@ -387,6 +435,7 @@ function gitShareEndpoints(app: express.Express) {
         repoId,
         owner,
         repo,
+        githubRepoId,
         registeredAt: new Date().toISOString(),
       });
 

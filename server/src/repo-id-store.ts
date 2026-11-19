@@ -5,6 +5,9 @@ export type RepoIdRecord = {
   repoId: string;
   owner: string;
   repo: string;
+  // GitHub's immutable numeric repository id. Names can be reused by a different repository after a
+  // rename, transfer or deletion, so resolution checks that the name still belongs to this repository.
+  githubRepoId: number;
   registeredAt: string;
 };
 
@@ -89,7 +92,7 @@ class RepoIdStore implements RepoIdStoreInstance {
     this.#records.clear();
     this.#repos.clear();
     for (let record of records) {
-      if (!record || typeof record.repoId !== 'string') continue;
+      if (!record || typeof record.repoId !== 'string' || typeof record.githubRepoId !== 'number') continue;
       this.#records.set(record.repoId, record);
       this.#repos.set(`${record.owner}/${record.repo}`, record.repoId);
     }
