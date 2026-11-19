@@ -90,6 +90,8 @@ export async function handleAuthCallback(
     throw HttpError(400, 'invalid returnTo origin');
   }
   let returnToUrl = new URL(returnTo);
+  // GitHub redirects without a code when the user cancels authorization
+  if (code === '') throw HttpError(400, 'missing authorization code');
   let tokens = await exchangeCode(env, code, callbackUrl, stateToken);
   let user = await fetchGitHubUser(tokens.accessToken);
   let accessOrigin = returnToUrl.origin;
@@ -269,7 +271,11 @@ async function exchangeCode(
   if (!response.ok) {
     throw new Error(`token exchange failed: ${response.status}`);
   }
-  let json = await response.json();
+  let json: unknown = await response.json();
+  // GitHub answers 200 with an `error` field for invalid, expired or reused codes
+  if (typeof json === 'object' && json !== null && 'error' in json) {
+    throw HttpError(400, 'authorization code rejected');
+  }
   return parseOAuthTokenResponse(json);
 }
 

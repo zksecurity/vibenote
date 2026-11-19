@@ -41,8 +41,11 @@ beforeAll(async () => {
 function stubGitHub(name: string) {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (url: string) => {
+    vi.fn(async (url: string, init?: RequestInit) => {
       if (url === 'https://github.com/login/oauth/access_token') {
+        if (typeof init?.body === 'string' && init.body.includes('"code":"stale"')) {
+          return Response.json({ error: 'bad_verification_code' });
+        }
         return Response.json({
           access_token: 'access',
           token_type: 'bearer',
@@ -86,5 +89,17 @@ describe('OAuth callback page', () => {
       .update(scripts[0] ?? '')
       .digest('base64');
     expect(CALLBACK_PAGE_CSP).toContain(`script-src 'sha256-${hash}'`);
+  });
+});
+
+describe('OAuth callback errors', () => {
+  it('treats a missing or rejected authorization code as a client error', async () => {
+    stubGitHub('Mallory');
+    let state = await signState({ returnTo: 'https://vibenote.test/', t: Date.now() }, SECRET);
+    for (let code of ['', 'stale']) {
+      await expect(
+        handleAuthCallback(env, store, code, state, 'https://api.vibenote.test/callback')
+      ).rejects.toMatchObject({ status: 400 });
+    }
   });
 });
