@@ -9,6 +9,8 @@ type InstallationToken = {
 };
 
 const GITHUB_API_BASE = 'https://api.github.com';
+// Deadline for GitHub to start responding. Response bodies are bounded in size by their readers.
+const GITHUB_RESPONSE_TIMEOUT_MS = 10_000;
 
 const installationTokenCache = new Map<number, InstallationToken>();
 let privateKeyCache:
@@ -52,7 +54,7 @@ export async function getInstallationToken(env: Env, installationId: number): Pr
     return cached.token;
   }
   const jwt = await getAppJwt(env);
-  const res = await fetch(`${GITHUB_API_BASE}/app/installations/${installationId}/access_tokens`, {
+  const res = await githubFetch(`${GITHUB_API_BASE}/app/installations/${installationId}/access_tokens`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${jwt}`,
@@ -79,6 +81,18 @@ export async function getInstallationToken(env: Env, installationId: number): Pr
   return json.token;
 }
 
+// Fetch from GitHub, aborting when no response arrives within the deadline. The deadline ends once
+// headers arrive, so a large asset streamed to a slow client is not cut off.
+export async function githubFetch(url: string, init?: RequestInit): Promise<Response> {
+  let controller = new AbortController();
+  let timer = setTimeout(() => controller.abort(), GITHUB_RESPONSE_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function installationRequest(
   env: Env,
   installationId: number,
@@ -90,7 +104,7 @@ export async function installationRequest(
   const headers = new Headers(init?.headers);
   headers.set('Authorization', `Bearer ${token}`);
   headers.set('Accept', headers.get('Accept') ?? 'application/vnd.github.raw');
-  return await fetch(url, { ...init, headers });
+  return await githubFetch(url, { ...init, headers });
 }
 
 async function getAppJwt(env: Env): Promise<string> {
@@ -130,7 +144,7 @@ async function fetchInstallations(env: Env): Promise<void> {
   let byOwner = new Map<string, number>();
   const perPage = 100;
   for (let page = 1; ; page++) {
-    const res = await fetch(`${GITHUB_API_BASE}/app/installations?per_page=${perPage}&page=${page}`, {
+    const res = await githubFetch(`${GITHUB_API_BASE}/app/installations?per_page=${perPage}&page=${page}`, {
       headers: {
         Authorization: `Bearer ${jwt}`,
         Accept: 'application/vnd.github+json',

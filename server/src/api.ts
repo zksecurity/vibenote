@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import type { Env } from './env.ts';
 import { signSession, verifySession, signState, verifyState, type SessionClaims } from './jwt.ts';
 import type { SessionStoreInstance, SessionRecord } from './session-store.ts';
+import { githubFetch } from './github-app.ts';
 
 export type { SessionClaims };
 export { CALLBACK_PAGE_CSP };
@@ -227,7 +228,7 @@ async function fetchGitHubUser(accessToken: string): Promise<{
   name: string | null;
   avatarUrl: string | null;
 }> {
-  let ures = await fetch('https://api.github.com/user', {
+  let ures = await githubFetch('https://api.github.com/user', {
     headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/vnd.github+json' },
   });
   if (!ures.ok) {
@@ -250,7 +251,7 @@ async function exchangeCode(
     redirect_uri: callbackUrl,
     state: stateToken,
   };
-  let response = await fetch('https://github.com/login/oauth/access_token', {
+  let response = await githubFetch('https://github.com/login/oauth/access_token', {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -269,7 +270,7 @@ async function refreshWithToken(env: Env, refreshToken: string): Promise<OAuthTo
     grant_type: 'refresh_token',
     refresh_token: refreshToken,
   };
-  let response = await fetch('https://github.com/login/oauth/access_token', {
+  let response = await githubFetch('https://github.com/login/oauth/access_token', {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

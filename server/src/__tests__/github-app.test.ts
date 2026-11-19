@@ -1,9 +1,13 @@
 // @vitest-environment node
-// Tests for GitHub App installation lookup.
+// Tests for GitHub App helpers: installation lookup and request deadlines.
 import { describe, it, expect, vi } from 'vitest';
 import crypto from 'node:crypto';
+import http from 'node:http';
 import type { Env } from '../env.ts';
-import { getOwnerInstallationId } from '../github-app.ts';
+import { getOwnerInstallationId, githubFetch } from '../github-app.ts';
+
+// The global setup file stubs fetch with vi.fn(). We need the real one.
+const realFetch = globalThis.fetch.bind(globalThis);
 
 const { privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
 
@@ -47,5 +51,27 @@ describe('getOwnerInstallationId', () => {
     // One list load served all lookups, and no per-repository endpoint was used
     expect(requests).toHaveLength(2);
     expect(requests.every((url) => url.startsWith('https://api.github.com/app/installations?'))).toBe(true);
+  });
+});
+
+describe('githubFetch', () => {
+  it('aborts when GitHub does not respond within the deadline', async () => {
+    // A server that accepts requests and never answers
+    let server = http.createServer(() => {});
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+    let address = server.address();
+    if (address === null || typeof address === 'string') throw Error('unexpected server address');
+    vi.stubGlobal('fetch', realFetch);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      let pending = githubFetch(`http://127.0.0.1:${address.port}/`);
+      let settled = expect(pending).rejects.toThrow();
+      await vi.advanceTimersByTimeAsync(10_000);
+      await settled;
+    } finally {
+      vi.useRealTimers();
+      server.closeAllConnections();
+      server.close();
+    }
   });
 });
