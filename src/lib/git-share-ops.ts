@@ -288,7 +288,9 @@ async function createGitShare(owner: string, repo: string, notePath: string): Pr
     throw error;
   }
   const store = getRepoStore(slug);
-  const id = store.createFile(descriptorPath, notePath, { kind: 'text' });
+  // A sync running during the check may already have imported the descriptor
+  const id =
+    store.findMetaByPath(descriptorPath)?.id ?? store.createFile(descriptorPath, notePath, { kind: 'text' });
   markSynced(slug, id, { remoteSha: sha, syncedHash: hashText(notePath) });
 
   const url = `${window.location.origin}/s/${segment}`;

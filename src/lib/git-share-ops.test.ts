@@ -7,8 +7,12 @@ vi.mock('../auth/app-auth', () => ({
 }));
 
 import { createGitShare, lookupCachedShare } from './git-share-ops';
+import { getRepoStore } from '../storage/local';
 
 let deletedPaths: string[] = [];
+let putPath = '';
+// Runs while the backend checks the new link, like a sync that happens at the same time
+let duringVerification = () => {};
 
 // Stub GitHub and the backend; `resolvedOwner` is what the backend reports for the new link.
 function stubFetch(resolvedOwner: string | undefined) {
@@ -18,13 +22,17 @@ function stubFetch(resolvedOwner: string | undefined) {
       if (url.endsWith('/contents/.shares/.repo-id')) {
         return Response.json({ sha: 'repo-id-sha', content: btoa('AAAAAAAAAAA') });
       }
-      if (init?.method === 'PUT') return Response.json({ content: { sha: 'descriptor-sha' } });
+      if (init?.method === 'PUT') {
+        putPath = decodeURIComponent(new URL(url).pathname.replace(/^\/repos\/[^/]+\/[^/]+\/contents\//, ''));
+        return Response.json({ content: { sha: 'descriptor-sha' } });
+      }
       if (init?.method === 'DELETE') {
         deletedPaths.push(new URL(url).pathname);
         return Response.json({});
       }
       if (url === 'https://api.vibenote.test/v1/repo-id') return Response.json({ ok: true });
       if (url.startsWith('https://api.vibenote.test/v1/git-shares/')) {
+        duringVerification();
         return resolvedOwner === undefined
           ? Response.json({ error: 'share not found' }, { status: 404 })
           : Response.json({ owner: resolvedOwner });
@@ -58,5 +66,17 @@ describe('createGitShare', () => {
     expect(deletedPaths.every((p) => p.includes('/contents/.shares/opaque/'))).toBe(true);
     expect(lookupCachedShare('acme', 'notes-b', 'notes/hello.md')).toBeNull();
     expect(lookupCachedShare('acme', 'notes-c', 'notes/hello.md')).toBeNull();
+  });
+
+  it('reuses a descriptor that a concurrent sync already imported', async () => {
+    stubFetch('acme');
+    let store = getRepoStore('acme/notes-d');
+    duringVerification = () => store.createFile(putPath, 'notes/hello.md', { kind: 'text' });
+    try {
+      await createGitShare('acme', 'notes-d', 'notes/hello.md');
+    } finally {
+      duringVerification = () => {};
+    }
+    expect(store.listFiles().filter((meta) => meta.path === putPath)).toHaveLength(1);
   });
 });
