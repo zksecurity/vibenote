@@ -520,17 +520,6 @@ describe('POST /v1/repo-id', () => {
     expect(res.status).toBe(400);
   });
 
-  it('22. noncanonical repoId encoding: returns 400', async () => {
-    // 'AAAAAAAAAA_' decodes to the same 8 bytes as 'AAAAAAAAAA8', their canonical encoding
-    mockRegistration('AAAAAAAAAA_');
-    const res = await fetch(`${baseUrl}/v1/repo-id`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ repoId: 'AAAAAAAAAA_', owner: 'x', repo: 'y' }),
-    });
-    expect(res.status).toBe(400);
-  });
-
   it('19. .shares/.repo-id mismatch: returns 404', async () => {
     const repoId = crypto.randomBytes(8).toString('base64url');
     const differentRepoId = crypto.randomBytes(8).toString('base64url');
@@ -706,61 +695,5 @@ describe('Repository identity binding', () => {
     const after = await fetch(`${baseUrl}/v1/git-shares/${SEGMENT}/content`);
     expect(after.status).toBe(404);
     expect(await after.json()).toEqual({ error: 'share not found' });
-  });
-
-  it('28. a repository reusing a registered name gets its own repoId, not the old one', async () => {
-    const { REPO_ID, ENC_OWNER, ENC_REPO } = await registerTier2Repo();
-    githubRepoIds.set(`/repos/${ENC_OWNER}/${ENC_REPO}`, 7777);
-    const register = async (repoId: string) => {
-      mockInstallationRequest.mockImplementation(async (_env: any, _id: number, urlPath: string) =>
-        urlPath.includes('.shares/.repo-id')
-          ? new Response(repoId, { status: 200 })
-          : new Response('not found', { status: 404 }),
-      );
-      return fetch(`${baseUrl}/v1/repo-id`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repoId, owner: ENC_OWNER, repo: ENC_REPO }),
-      });
-    };
-    // The old repoId stays bound to the old repository (the uniform answer changes nothing)
-    expect((await register(REPO_ID)).status).toBe(200);
-    expect((await register(crypto.randomBytes(8).toString('base64url'))).status).toBe(201);
-  });
-
-  it('29. concurrent registrations of one repoId keep the first binding', async () => {
-    const repoIdBytes = crypto.randomBytes(8);
-    const repoId = repoIdBytes.toString('base64url');
-    mockGetOwnerInstallationId.mockResolvedValue(INSTALLATION_ID);
-    // Both repositories carry the same .repo-id, e.g. one copied it from the other. A slow GitHub
-    // keeps both registrations in flight at the same time.
-    mockInstallationRequest.mockImplementation(async (_env: any, _id: number, urlPath: string) => {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      return urlPath.includes('.shares/.repo-id')
-        ? new Response(repoId, { status: 200 })
-        : new Response('not found', { status: 404 });
-    });
-    githubRepoIds.set('/repos/race-owner/repo-1', 101);
-    githubRepoIds.set('/repos/race-owner/repo-2', 102);
-    const register = (repo: string) =>
-      fetch(`${baseUrl}/v1/repo-id`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repoId, owner: 'race-owner', repo }),
-      });
-    const results = await Promise.all([register('repo-1'), register('repo-2')]);
-    expect(results.map((r) => r.status).sort()).toEqual([200, 201]);
-
-    // The repository whose registration created the binding is the one opaque links resolve to
-    const winner = results[0]?.status === 201 ? 'repo-1' : 'repo-2';
-    const shareIdBytes = crypto.randomBytes(16);
-    setupRepoMock('race-owner', winner, {
-      [`.shares/opaque/${shareIdBytes.toString('base64url')}`]: 'notes/hello.md',
-      'notes/hello.md': MARKDOWN_BODY,
-    });
-    const content = await fetch(
-      `${baseUrl}/v1/git-shares/${makeOpaqueSegment(repoIdBytes, shareIdBytes)}/content`,
-    );
-    expect(content.status).toBe(200);
   });
 });

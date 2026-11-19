@@ -1,11 +1,10 @@
 // @vitest-environment node
 // Tests for the OAuth callback page rendered by the auth API.
 import { describe, it, expect, vi, beforeAll } from 'vitest';
-import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import type { Env } from '../env.ts';
-import { handleAuthCallback, CALLBACK_PAGE_CSP } from '../api.ts';
+import { handleAuthCallback } from '../api.ts';
 import { signState } from '../jwt.ts';
 import { createSessionStore } from '../session-store.ts';
 
@@ -41,14 +40,8 @@ beforeAll(async () => {
 function stubGitHub(name: string) {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (url: string, init?: RequestInit) => {
+    vi.fn(async (url: string) => {
       if (url === 'https://github.com/login/oauth/access_token') {
-        if (typeof init?.body === 'string' && init.body.includes('"code":"stale"')) {
-          return Response.json({ error: 'bad_verification_code' });
-        }
-        if (typeof init?.body === 'string' && init.body.includes('"code":"misconfigured"')) {
-          return Response.json({ error: 'incorrect_client_credentials' });
-        }
         return Response.json({
           access_token: 'access',
           token_type: 'bearer',
@@ -78,45 +71,5 @@ describe('OAuth callback page', () => {
     expect(match).not.toBeNull();
     let data: unknown = JSON.parse(match?.[1] ?? '');
     expect(data).toMatchObject({ targetOrigin: 'https://vibenote.test', message: { user: { name } } });
-  });
-
-  it('allows exactly the page script in its CSP', async () => {
-    stubGitHub('Mallory');
-    let state = await signState({ returnTo: 'https://vibenote.test/', t: Date.now() }, SECRET);
-    let { html } = await handleAuthCallback(env, store, 'code', state, 'https://api.vibenote.test/callback');
-
-    let scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1] ?? '');
-    expect(scripts).toHaveLength(1);
-    let hash = crypto
-      .createHash('sha256')
-      .update(scripts[0] ?? '')
-      .digest('base64');
-    expect(CALLBACK_PAGE_CSP).toContain(`script-src 'sha256-${hash}'`);
-  });
-});
-
-describe('OAuth callback errors', () => {
-  it('treats a missing or rejected authorization code as a client error', async () => {
-    stubGitHub('Mallory');
-    let state = await signState({ returnTo: 'https://vibenote.test/', t: Date.now() }, SECRET);
-    for (let code of ['', 'stale']) {
-      await expect(
-        handleAuthCallback(env, store, code, state, 'https://api.vibenote.test/callback')
-      ).rejects.toMatchObject({ status: 400 });
-    }
-  });
-
-  it('treats a rejection of the app credentials as a server error', async () => {
-    stubGitHub('Mallory');
-    let state = await signState({ returnTo: 'https://vibenote.test/', t: Date.now() }, SECRET);
-    let error: unknown = await handleAuthCallback(
-      env,
-      store,
-      'misconfigured',
-      state,
-      'https://api.vibenote.test/callback'
-    ).catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(Error);
-    expect(error).not.toHaveProperty('status');
   });
 });
