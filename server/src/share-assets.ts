@@ -44,7 +44,9 @@ function encodeAssetPath(pathValue: string): string {
     .join('/');
 }
 
-function extractRelativeAssetRefs(markdown: string): string[] {
+function extractRelativeAssetRefs(rawMarkdown: string): string[] {
+  // Line-based patterns below expect `\n` line endings
+  const markdown = rawMarkdown.replace(/\r\n?/g, '\n');
   const added = new Set<string>();
   const add = (raw: string | undefined) => {
     let target = normalizeLinkTarget(raw);
@@ -101,8 +103,9 @@ function extractRelativeAssetRefs(markdown: string): string[] {
 
 // Values of src/href attributes on asset-bearing HTML tags. Each tag is parsed once, left to right,
 // honoring quoted attribute values (which may contain `<` or `>`), and the search resumes after it,
-// so the scan is linear in the note size. A tag still open at the end of the note ends the search;
-// assets of tags nested in its unterminated text are not collected and fail closed.
+// so the scan is linear in the note size. Quoted values end on their line: an unclosed quote, as in an
+// unfinished example in a code block, makes the candidate not a tag and the search resumes at the
+// end of that line. A tag still open at the end of the note ends the search.
 function extractHtmlAssetRefs(markdown: string): string[] {
   let refs: string[] = [];
   let tagStart = /<(?:img|a|audio|video|source|track)\b/gi;
@@ -152,8 +155,10 @@ function parseTagAttributes(
     while (i < text.length && /\s/.test(text.charAt(i))) i++;
     let quote = text.charAt(i);
     if (quote === '"' || quote === "'") {
-      let close = text.indexOf(quote, i + 1);
-      if (close === -1) return undefined;
+      let close = i + 1;
+      while (close < text.length && text.charAt(close) !== quote && text.charAt(close) !== '\n') close++;
+      if (close === text.length) return undefined;
+      if (text.charAt(close) === '\n') return { attributes: [], end: close };
       attributes.push({ name, value: text.slice(i + 1, close) });
       i = close + 1;
     } else {
@@ -213,10 +218,11 @@ function captureUrl(raw: string | undefined): string | undefined {
 
 function extractReferenceDefinitions(markdown: string): Map<string, string> {
   const map = new Map<string, string>();
-  // The destination and the title may each start on the next line. Matching at most one line break
-  // in each gap keeps every attempt to a few lines.
+  // The destination and the title may each start on the next line. Each gap allows at most one line
+  // break, and its alternatives start with different characters, so no span of whitespace can be
+  // split in several ways: an attempt stays linear in its few lines.
   const definitionPattern =
-    /^[ \t]*\[([^[\]]+)\]:[ \t]*\n?[ \t]*(<[^<>\n]+>|\S+)(?:(?:[ \t]+|[ \t]*\n[ \t]*)["'(][^"'()\n]*["')])?[ \t]*$/gim;
+    /^[ \t]*\[([^[\]]+)\]:[ \t]*(?:\n[ \t]*)?(<[^<>\n]+>|\S+)(?:(?:[ \t]+(?:\n[ \t]*)?|\n[ \t]*)(?:"[^"\n]*"|'[^'\n]*'|\([^()\n]*\)))?[ \t]*$/gim;
   let match: RegExpExecArray | null;
   while ((match = definitionPattern.exec(markdown)) !== null) {
     const labelRaw = match[1];

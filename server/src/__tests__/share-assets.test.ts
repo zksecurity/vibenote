@@ -99,6 +99,21 @@ describe('share asset helpers', () => {
     ]);
   });
 
+  it('handles CRLF notes, titles with parentheses and unfinished HTML in code blocks', () => {
+    const markdown = [
+      '![Ref][ref]',
+      '',
+      '[ref]: img/a.png "Diagram (v1)"',
+      '```',
+      '<img src="example.png',
+      '```',
+      '<img',
+      '  src="img/b.png">',
+    ].join('\r\n');
+    const paths = collectAssetPaths('notes/shared.md', markdown);
+    expect([...paths].sort()).toEqual(['notes/img/a.png', 'notes/img/b.png']);
+  });
+
   it('ignores src lookalikes that are not asset attributes', () => {
     const paths = collectAssetPaths('notes/shared.md', '<img data-src="img/a.png" alt="src=\'img/b.png\'">');
     expect(paths.size).toBe(0);
@@ -115,6 +130,8 @@ describe('share asset helpers', () => {
       '<a ' + 'src="x" '.repeat(size / 8),
       '<a x="'.repeat(size / 6),
       '[x](' + '(a)'.repeat(size / 3),
+      '[a]:' + ' '.repeat(size) + '\n\n',
+      '<a x="' + 'a <a y="'.repeat(size / 8),
       '\n'.repeat(size),
     ];
     for (const input of inputs) {
