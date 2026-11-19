@@ -268,22 +268,29 @@ async function createGitShare(owner: string, repo: string, notePath: string): Pr
   const repoId = await ensureRepoId(token, owner, repo);
   await registerRepoId(repoId, owner, repo);
 
-  // Commit a new share file and mirror it to the local store immediately
+  // Commit a new share file, check that its link resolves to this repository, and only then
+  // mirror it to the local store. A share whose link does not work is removed again.
   const shareId = generateShareId();
-  const sha = await putRepoFile(
-    token,
-    owner,
-    repo,
-    opaqueDescriptorPath(shareId),
-    notePath,
-    `share: ${notePath}`
-  );
+  const descriptorPath = opaqueDescriptorPath(shareId);
+  const sha = await putRepoFile(token, owner, repo, descriptorPath, notePath, `share: ${notePath}`);
+  const segment = computeOpaqueSegment(repoId, shareId);
+  try {
+    await verifyShareResolves(segment, owner);
+  } catch (error) {
+    await deleteRepoFile(
+      token,
+      owner,
+      repo,
+      descriptorPath,
+      sha,
+      `share: remove unusable link for ${notePath}`
+    );
+    throw error;
+  }
   const store = getRepoStore(slug);
-  const id = store.createFile(opaqueDescriptorPath(shareId), notePath, { kind: 'text' });
+  const id = store.createFile(descriptorPath, notePath, { kind: 'text' });
   markSynced(slug, id, { remoteSha: sha, syncedHash: hashText(notePath) });
 
-  const segment = computeOpaqueSegment(repoId, shareId);
-  await verifyShareResolves(segment, owner);
   const url = `${window.location.origin}/s/${segment}`;
   return { shareId, url };
 }

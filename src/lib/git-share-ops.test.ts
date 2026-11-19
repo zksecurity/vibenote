@@ -6,7 +6,9 @@ vi.mock('../auth/app-auth', () => ({
   getApiBase: () => 'https://api.vibenote.test',
 }));
 
-import { createGitShare } from './git-share-ops';
+import { createGitShare, lookupCachedShare } from './git-share-ops';
+
+let deletedPaths: string[] = [];
 
 // Stub GitHub and the backend; `resolvedOwner` is what the backend reports for the new link.
 function stubFetch(resolvedOwner: string | undefined) {
@@ -17,6 +19,10 @@ function stubFetch(resolvedOwner: string | undefined) {
         return Response.json({ sha: 'repo-id-sha', content: btoa('AAAAAAAAAAA') });
       }
       if (init?.method === 'PUT') return Response.json({ content: { sha: 'descriptor-sha' } });
+      if (init?.method === 'DELETE') {
+        deletedPaths.push(new URL(url).pathname);
+        return Response.json({});
+      }
       if (url === 'https://api.vibenote.test/v1/repo-id') return Response.json({ ok: true });
       if (url.startsWith('https://api.vibenote.test/v1/git-shares/')) {
         return resolvedOwner === undefined
@@ -33,6 +39,7 @@ describe('createGitShare', () => {
     stubFetch('Acme');
     let link = await createGitShare('acme', 'notes-a', 'notes/hello.md');
     expect(link.url).toMatch(/\/s\/[A-Za-z0-9_-]{32}$/);
+    expect(lookupCachedShare('acme', 'notes-a', 'notes/hello.md')).toEqual(link);
   });
 
   it('refuses a link that resolves elsewhere or not at all', async () => {
@@ -45,5 +52,11 @@ describe('createGitShare', () => {
     await expect(createGitShare('acme', 'notes-c', 'notes/hello.md')).rejects.toThrow(
       'share link does not resolve to this repository'
     );
+
+    // The unusable descriptors were removed again and never cached
+    expect(deletedPaths).toHaveLength(2);
+    expect(deletedPaths.every((p) => p.includes('/contents/.shares/opaque/'))).toBe(true);
+    expect(lookupCachedShare('acme', 'notes-b', 'notes/hello.md')).toBeNull();
+    expect(lookupCachedShare('acme', 'notes-c', 'notes/hello.md')).toBeNull();
   });
 });
