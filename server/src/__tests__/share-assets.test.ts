@@ -73,4 +73,27 @@ describe('share asset helpers', () => {
     expect(paths.has('notes/media/intro.webm')).toBe(true);
     expect(paths.has('notes/media/captions.vtt')).toBe(true);
   });
+
+  it('collects both targets of a linked image', () => {
+    const paths = collectAssetPaths('notes/shared.md', '[![Badge](img/badge.png)](files/report.pdf)');
+    expect(paths.has('notes/img/badge.png')).toBe(true);
+    expect(paths.has('notes/files/report.pdf')).toBe(true);
+  });
+
+  it('scans adversarial markdown in linear time', () => {
+    // Each of these took minutes per MiB with the previous backtracking patterns.
+    const size = 1 << 20;
+    const inputs = [
+      '['.repeat(size),
+      '![x]('.repeat(size / 5),
+      '[a[b]'.repeat(size / 5),
+      '<a '.repeat(size / 3),
+      '\n'.repeat(size),
+    ];
+    for (const input of inputs) {
+      let start = performance.now();
+      extractRelativeAssetRefs(input);
+      expect(performance.now() - start).toBeLessThan(1000);
+    }
+  });
 });

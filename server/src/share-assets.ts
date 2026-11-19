@@ -51,19 +51,26 @@ function extractRelativeAssetRefs(markdown: string): string[] {
     if (target) added.add(target);
   };
 
-  const inlinePattern = /(!)?\[[^\]]*]\(([^)]+)\)/g;
-  for (const match of markdown.matchAll(inlinePattern)) {
-    add(captureUrl(match[2]));
+  // Every scanned span excludes its own opening delimiter, so a failed match stops at the next
+  // candidate instead of rescanning the rest of the note. This keeps extraction linear in the note
+  // size even for adversarial input (e.g. thousands of unmatched `[`).
+  // The flat pattern finds links whose text has no brackets; the nested pattern allows one level of
+  // balanced brackets in the text. Together they find both targets of `[![alt](a.png)](b.pdf)`.
+  const inlinePatterns = [/\[[^[\]]*\]\(([^()]+)\)/g, /\[(?:[^[\]]|\[[^[\]]*\])*\]\(([^()]+)\)/g];
+  for (const inlinePattern of inlinePatterns) {
+    for (const match of markdown.matchAll(inlinePattern)) {
+      add(captureUrl(match[1]));
+    }
   }
 
   const htmlAssetPattern =
-    /<(img|a|audio|video|source|track)\b[^>]*?(?:src|href)=["']([^"']+)["'][^>]*>/gi;
+    /<(img|a|audio|video|source|track)\b[^<>]*?(?:src|href)=["']([^"'<>]+)["'][^<>]*>/gi;
   for (const match of markdown.matchAll(htmlAssetPattern)) {
     add(match[2]);
   }
 
   const definitions = extractReferenceDefinitions(markdown);
-  const referencePattern = /(!)?\[([^\]]*)]\[([^\]]*)]/g;
+  const referencePattern = /(!)?\[([^[\]]*)\]\[([^[\]]*)\]/g;
   for (const match of markdown.matchAll(referencePattern)) {
     let label = match[3];
     if (label === undefined) continue;
@@ -136,7 +143,9 @@ function captureUrl(raw: string | undefined): string | undefined {
 
 function extractReferenceDefinitions(markdown: string): Map<string, string> {
   const map = new Map<string, string>();
-  const definitionPattern = /^\s*\[([^\]]+)\]:\s*(<[^>]+>|[^\s]+)(?:\s+["'(][^"'()]*["')])?\s*$/gim;
+  // Definitions are single lines; matching only horizontal whitespace keeps each attempt within its line.
+  const definitionPattern =
+    /^[ \t]*\[([^[\]\n]+)\]:[ \t]*(<[^<>\n]+>|\S+)(?:[ \t]+["'(][^"'()\n]*["')])?[ \t]*$/gim;
   let match: RegExpExecArray | null;
   while ((match = definitionPattern.exec(markdown)) !== null) {
     const labelRaw = match[1];
