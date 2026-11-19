@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import { env } from './env.ts';
 import {
+  CALLBACK_PAGE_CSP,
   createAuthStartRedirect,
   handleAuthCallback,
   buildInstallUrl,
@@ -74,7 +75,7 @@ app.get(
       stateToken,
       callbackURL(req)
     );
-    res.status(200).type('html').send(html);
+    res.status(200).type('html').set('Content-Security-Policy', CALLBACK_PAGE_CSP).send(html);
   })
 );
 
