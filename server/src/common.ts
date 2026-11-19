@@ -23,6 +23,11 @@ function handleErrors<T>(route: (req: express.Request, res: express.Response) =>
     try {
       return await route(req, res);
     } catch (error) {
+      // A streamed response can fail after its headers went out; all we can do is cut the connection
+      if (res.headersSent) {
+        res.destroy();
+        return;
+      }
       if (error instanceof HttpErrorClass) {
         res.status(error.status).json({ error: error.message });
       } else {

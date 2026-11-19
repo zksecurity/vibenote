@@ -4,6 +4,7 @@ import { getRepoInstallationId, installationRequest } from './github-app.ts';
 import { resolveAssetPath, encodeAssetPath, collectAssetPaths } from './share-assets.ts';
 import { createRepoIdStore } from './repo-id-store.ts';
 import { handleErrors, HttpError } from './common.ts';
+import { readTextBounded, pipeBounded } from './bounded-body.ts';
 
 export { gitShareEndpoints };
 
@@ -45,6 +46,14 @@ type AssetCacheEntry = { paths: Set<string>; cachedAt: number; notePath: string 
 const assetCache = new Map<string, AssetCacheEntry>();
 const ASSET_CACHE_TTL_MS = 5 * 60 * 1000;
 
+// --- Upstream size limits ---
+// A share descriptor holds just a note path.
+const MAX_DESCRIPTOR_BYTES = 4 * 1024;
+const MAX_NOTE_BYTES = 2 * 1024 * 1024;
+const MAX_ASSET_BYTES = 25 * 1024 * 1024;
+// .shares/.repo-id holds an 11-character id plus optional whitespace.
+const MAX_REPO_ID_FILE_BYTES = 64;
+
 // --- Repo ID store ---
 
 const repoIdStore = createRepoIdStore({ filePath: env.REPO_ID_STORE_FILE });
@@ -81,7 +90,7 @@ async function fetchRepoFile(
 async function fetchSharePath(owner: string, repo: string, shareId: string): Promise<string> {
   const GENERIC = 'share not found';
   const ghRes = await fetchRepoFile(owner, repo, `.shares/${shareId}`, 'application/vnd.github.raw');
-  const raw = (await ghRes.text()).trim();
+  const raw = (await readTextBounded(ghRes, MAX_DESCRIPTOR_BYTES)).trim();
   if (!raw || !raw.toLowerCase().endsWith('.md')) throw HttpError(404, GENERIC);
   let sanitized = raw.replace(/\\/g, '/').replace(/^\/+/, '');
   if (sanitized.includes('..')) throw HttpError(404, GENERIC);
@@ -129,7 +138,7 @@ async function ensureAssetsLoaded(
     return cached.paths;
   }
   const ghRes = await fetchRepoFile(owner, repo, notePath, 'application/vnd.github.raw');
-  const markdown = await ghRes.text();
+  const markdown = await readTextBounded(ghRes, MAX_NOTE_BYTES);
   return cacheAssets(cacheKey, notePath, markdown);
 }
 
@@ -141,7 +150,7 @@ async function serveContent(
   cacheKey: string
 ): Promise<void> {
   const ghRes = await fetchRepoFile(owner, repo, notePath, 'application/vnd.github.raw');
-  const text = await ghRes.text();
+  const text = await readTextBounded(ghRes, MAX_NOTE_BYTES);
   cacheAssets(cacheKey, notePath, text);
   res
     .status(200)
@@ -166,7 +175,6 @@ async function serveAsset(
   if (!allowedPaths.has(pathCandidate)) throw HttpError(404, 'asset not found');
 
   const ghRes = await fetchRepoFile(owner, repo, pathCandidate, 'application/vnd.github.raw');
-  const buffer = Buffer.from(await ghRes.arrayBuffer());
   const contentType = ghRes.headers.get('Content-Type') ?? 'application/octet-stream';
   const headers: Record<string, string> = {
     'Content-Type': contentType,
@@ -178,7 +186,9 @@ async function serveAsset(
   if (etag) headers.ETag = etag;
   const lastModified = ghRes.headers.get('Last-Modified');
   if (lastModified) headers['Last-Modified'] = lastModified;
-  res.status(200).set(headers).send(buffer);
+  // Stream instead of buffering, so memory use does not grow with asset size or concurrent viewers
+  res.status(200).set(headers);
+  await pipeBounded(ghRes, res, MAX_ASSET_BYTES);
 }
 
 function asTrimmedString(input: unknown): string {
@@ -337,7 +347,13 @@ function gitShareEndpoints(app: express.Express) {
       if (!repoIdFileRes.ok) throw HttpError(404, REPO_ACCESS_DENIED);
 
       // File contains just the raw repoId string, no JSON wrapper
-      const storedRepoId = (await repoIdFileRes.text()).trim();
+      let repoIdFileText: string;
+      try {
+        repoIdFileText = await readTextBounded(repoIdFileRes, MAX_REPO_ID_FILE_BYTES);
+      } catch {
+        throw HttpError(404, REPO_ACCESS_DENIED);
+      }
+      const storedRepoId = repoIdFileText.trim();
       if (storedRepoId !== repoId) {
         throw HttpError(404, REPO_ACCESS_DENIED);
       }
