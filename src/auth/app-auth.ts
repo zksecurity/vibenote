@@ -56,8 +56,12 @@ export async function signInWithGitHubApp(
   url.searchParams.set('returnTo', returnTo || window.location.href);
   const w = window.open(url.toString(), 'vibenote-login', 'width=720,height=640');
   if (!w) return null;
+  const apiOrigin = url.origin;
   return await new Promise((resolve) => {
     const handler = async (ev: MessageEvent) => {
+      // Only the login popup, showing the backend's callback page, may deliver a session.
+      // Any other window holding a reference to this one could otherwise post a forged session.
+      if (ev.source !== w || ev.origin !== apiOrigin) return;
       if (!ev.data || typeof ev.data !== 'object') return;
       const d = ev.data as any;
       if (d.type !== 'vibenote:auth') return;
