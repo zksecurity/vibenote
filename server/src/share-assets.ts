@@ -56,17 +56,20 @@ function extractRelativeAssetRefs(markdown: string): string[] {
   // size even for adversarial input (e.g. thousands of unmatched `[`).
   // The flat pattern finds links whose text has no brackets; the nested pattern allows one level of
   // balanced brackets in the text. Together they find both targets of `[![alt](a.png)](b.pdf)`.
-  const inlinePatterns = [/\[[^[\]]*\]\(([^()]+)\)/g, /\[(?:[^[\]]|\[[^[\]]*\])*\]\(([^()]+)\)/g];
+  // Destinations may likewise contain one level of balanced parentheses, e.g. in `"title (1)"`.
+  const destination = String.raw`\(((?:[^()]|\([^()]*\))+)\)`;
+  const inlinePatterns = [
+    new RegExp(String.raw`\[[^[\]]*\]` + destination, 'g'),
+    new RegExp(String.raw`\[(?:[^[\]]|\[[^[\]]*\])*\]` + destination, 'g'),
+  ];
   for (const inlinePattern of inlinePatterns) {
     for (const match of markdown.matchAll(inlinePattern)) {
       add(captureUrl(match[1]));
     }
   }
 
-  const htmlAssetPattern =
-    /<(img|a|audio|video|source|track)\b[^<>]*?(?:src|href)=["']([^"'<>]+)["'][^<>]*>/gi;
-  for (const match of markdown.matchAll(htmlAssetPattern)) {
-    add(match[2]);
+  for (const ref of extractHtmlAssetRefs(markdown)) {
+    add(ref);
   }
 
   const definitions = extractReferenceDefinitions(markdown);
@@ -94,6 +97,73 @@ function extractRelativeAssetRefs(markdown: string): string[] {
       }
     })
     .filter((ref) => ref !== undefined);
+}
+
+// Values of src/href attributes on asset-bearing HTML tags. Each tag is parsed once, left to right,
+// honoring quoted attribute values (which may contain `<` or `>`), and the search resumes after it,
+// so the scan is linear in the note size. A tag still open at the end of the note ends the search;
+// assets of tags nested in its unterminated text are not collected and fail closed.
+function extractHtmlAssetRefs(markdown: string): string[] {
+  let refs: string[] = [];
+  let tagStart = /<(?:img|a|audio|video|source|track)\b/gi;
+  let match: RegExpExecArray | null;
+  while ((match = tagStart.exec(markdown)) !== null) {
+    let tag = parseTagAttributes(markdown, tagStart.lastIndex);
+    if (tag === undefined) break;
+    for (let attribute of tag.attributes) {
+      if (attribute.name === 'src' || attribute.name === 'href') refs.push(attribute.value);
+    }
+    tagStart.lastIndex = tag.end;
+  }
+  return refs;
+}
+
+// Parse attributes from `start` (just after the tag name) up to the closing `>`. Returns where
+// scanning should resume: after `>`, or at an unquoted `<`, which means this was not a tag.
+function parseTagAttributes(
+  text: string,
+  start: number
+): { attributes: { name: string; value: string }[]; end: number } | undefined {
+  let attributes: { name: string; value: string }[] = [];
+  let i = start;
+  while (i < text.length) {
+    let ch = text.charAt(i);
+    if (ch === '>') return { attributes, end: i + 1 };
+    if (ch === '<') return { attributes: [], end: i };
+    if (/[\s/]/.test(ch)) {
+      i++;
+      continue;
+    }
+    let nameEnd = i;
+    while (nameEnd < text.length && !/[\s=>/<"']/.test(text.charAt(nameEnd))) nameEnd++;
+    if (nameEnd === i) {
+      // A stray quote where a name should be; skip it
+      i++;
+      continue;
+    }
+    let name = text.slice(i, nameEnd).toLowerCase();
+    i = nameEnd;
+    while (i < text.length && /\s/.test(text.charAt(i))) i++;
+    if (text.charAt(i) !== '=') {
+      attributes.push({ name, value: '' });
+      continue;
+    }
+    i++;
+    while (i < text.length && /\s/.test(text.charAt(i))) i++;
+    let quote = text.charAt(i);
+    if (quote === '"' || quote === "'") {
+      let close = text.indexOf(quote, i + 1);
+      if (close === -1) return undefined;
+      attributes.push({ name, value: text.slice(i + 1, close) });
+      i = close + 1;
+    } else {
+      let valueEnd = i;
+      while (valueEnd < text.length && !/[\s>"'<`=]/.test(text.charAt(valueEnd))) valueEnd++;
+      attributes.push({ name, value: text.slice(i, valueEnd) });
+      i = valueEnd;
+    }
+  }
+  return undefined;
 }
 
 function collectAssetPaths(notePath: string, markdown: string): Set<string> {
@@ -143,9 +213,10 @@ function captureUrl(raw: string | undefined): string | undefined {
 
 function extractReferenceDefinitions(markdown: string): Map<string, string> {
   const map = new Map<string, string>();
-  // Definitions are single lines; matching only horizontal whitespace keeps each attempt within its line.
+  // The destination and the title may each start on the next line. Matching at most one line break
+  // in each gap keeps every attempt to a few lines.
   const definitionPattern =
-    /^[ \t]*\[([^[\]\n]+)\]:[ \t]*(<[^<>\n]+>|\S+)(?:[ \t]+["'(][^"'()\n]*["')])?[ \t]*$/gim;
+    /^[ \t]*\[([^[\]]+)\]:[ \t]*\n?[ \t]*(<[^<>\n]+>|\S+)(?:(?:[ \t]+|[ \t]*\n[ \t]*)["'(][^"'()\n]*["')])?[ \t]*$/gim;
   let match: RegExpExecArray | null;
   while ((match = definitionPattern.exec(markdown)) !== null) {
     const labelRaw = match[1];

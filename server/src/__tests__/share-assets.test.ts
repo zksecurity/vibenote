@@ -80,6 +80,30 @@ describe('share asset helpers', () => {
     expect(paths.has('notes/files/report.pdf')).toBe(true);
   });
 
+  it('collects forms that markdown renders as assets', () => {
+    const markdown = [
+      '![Title](img/a.png "Diagram (v1)")',
+      '<img alt="a < b" src="img/b.png">',
+      '<img src=img/c.png>',
+      '![Ref][ref]',
+      '',
+      '[ref]:',
+      '  img/d.png',
+    ].join('\n');
+    const paths = collectAssetPaths('notes/shared.md', markdown);
+    expect([...paths].sort()).toEqual([
+      'notes/img/a.png',
+      'notes/img/b.png',
+      'notes/img/c.png',
+      'notes/img/d.png',
+    ]);
+  });
+
+  it('ignores src lookalikes that are not asset attributes', () => {
+    const paths = collectAssetPaths('notes/shared.md', '<img data-src="img/a.png" alt="src=\'img/b.png\'">');
+    expect(paths.size).toBe(0);
+  });
+
   it('scans adversarial markdown in linear time', () => {
     // Each of these took minutes per MiB with the previous backtracking patterns.
     const size = 1 << 20;
@@ -88,6 +112,9 @@ describe('share asset helpers', () => {
       '![x]('.repeat(size / 5),
       '[a[b]'.repeat(size / 5),
       '<a '.repeat(size / 3),
+      '<a ' + 'src="x" '.repeat(size / 8),
+      '<a x="'.repeat(size / 6),
+      '[x](' + '(a)'.repeat(size / 3),
       '\n'.repeat(size),
     ];
     for (const input of inputs) {
