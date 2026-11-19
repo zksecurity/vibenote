@@ -272,9 +272,11 @@ async function exchangeCode(
     throw new Error(`token exchange failed: ${response.status}`);
   }
   let json: unknown = await response.json();
-  // GitHub answers 200 with an `error` field for invalid, expired or reused codes
+  // GitHub answers 200 with an `error` field. An invalid, expired or reused code is the caller's
+  // error; anything else (e.g. incorrect_client_credentials) is a server misconfiguration.
   if (typeof json === 'object' && json !== null && 'error' in json) {
-    throw HttpError(400, 'authorization code rejected');
+    if (json.error === 'bad_verification_code') throw HttpError(400, 'authorization code rejected');
+    throw new Error(`token exchange failed: ${String(json.error)}`);
   }
   return parseOAuthTokenResponse(json);
 }

@@ -46,6 +46,9 @@ function stubGitHub(name: string) {
         if (typeof init?.body === 'string' && init.body.includes('"code":"stale"')) {
           return Response.json({ error: 'bad_verification_code' });
         }
+        if (typeof init?.body === 'string' && init.body.includes('"code":"misconfigured"')) {
+          return Response.json({ error: 'incorrect_client_credentials' });
+        }
         return Response.json({
           access_token: 'access',
           token_type: 'bearer',
@@ -101,5 +104,19 @@ describe('OAuth callback errors', () => {
         handleAuthCallback(env, store, code, state, 'https://api.vibenote.test/callback')
       ).rejects.toMatchObject({ status: 400 });
     }
+  });
+
+  it('treats a rejection of the app credentials as a server error', async () => {
+    stubGitHub('Mallory');
+    let state = await signState({ returnTo: 'https://vibenote.test/', t: Date.now() }, SECRET);
+    let error: unknown = await handleAuthCallback(
+      env,
+      store,
+      'misconfigured',
+      state,
+      'https://api.vibenote.test/callback'
+    ).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toHaveProperty('status');
   });
 });
