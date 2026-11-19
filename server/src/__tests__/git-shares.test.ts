@@ -502,6 +502,17 @@ describe('POST /v1/repo-id', () => {
     expect(res.status).toBe(400);
   });
 
+  it('22. noncanonical repoId encoding: returns 400', async () => {
+    // 'AAAAAAAAAA_' decodes to the same 8 bytes as 'AAAAAAAAAA8', their canonical encoding
+    mockRegistration('AAAAAAAAAA_');
+    const res = await fetch(`${baseUrl}/v1/repo-id`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repoId: 'AAAAAAAAAA_', owner: 'x', repo: 'y' }),
+    });
+    expect(res.status).toBe(400);
+  });
+
   it('19. .shares/.repo-id mismatch: returns 404', async () => {
     const repoId = crypto.randomBytes(8).toString('base64url');
     const differentRepoId = crypto.randomBytes(8).toString('base64url');

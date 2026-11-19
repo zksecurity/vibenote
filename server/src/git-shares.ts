@@ -34,7 +34,10 @@ function isValidOwnerRepo(owner: string, repo: string): boolean {
 const REPO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
 
 function isValidRepoId(repoId: string): boolean {
-  return REPO_ID_PATTERN.test(repoId);
+  if (!REPO_ID_PATTERN.test(repoId)) return false;
+  // Opaque segments decode to bytes and look up their canonical encoding. A noncanonical spelling
+  // (the last character carries 2 unused bits) would register fine but never resolve.
+  return Buffer.from(repoId, 'base64url').toString('base64url') === repoId;
 }
 
 // --- Asset cache (same pattern as sharing.ts) ---
