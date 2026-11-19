@@ -1,6 +1,6 @@
 import type express from 'express';
 import { env } from './env.ts';
-import { getRepoInstallationId, installationRequest } from './github-app.ts';
+import { getOwnerInstallationId, installationRequest } from './github-app.ts';
 import { resolveAssetPath, encodeAssetPath, collectAssetPaths } from './share-assets.ts';
 import { createRepoIdStore } from './repo-id-store.ts';
 import { handleErrors, HttpError } from './common.ts';
@@ -69,7 +69,7 @@ async function fetchRepoFile(
 ): Promise<Response> {
   let installationId: number;
   try {
-    installationId = await getRepoInstallationId(env, owner, repo);
+    installationId = await getOwnerInstallationId(env, owner);
   } catch {
     throw HttpError(404, 'share not found');
   }
@@ -85,11 +85,23 @@ async function fetchRepoFile(
   return res;
 }
 
-// Fetch .shares/<shareId> and return the note path it contains.
-// Share files are plain text — the entire content is just the note path.
-async function fetchSharePath(owner: string, repo: string, shareId: string): Promise<string> {
+// Share descriptors are plain-text files whose entire content is the note path.
+// Tier 1 descriptors live at .shares/<shareId>, Tier 2 descriptors at .shares/opaque/<shareId>.
+// Share ids cannot contain `/`, so the Tier 1 route can never read a Tier 2 descriptor: a shareId
+// decoded from an opaque link resolves exactly like a nonexistent share there, and does not let a
+// link holder confirm a guessed repository name.
+function openDescriptorPath(shareId: string): string {
+  return `.shares/${shareId}`;
+}
+
+function opaqueDescriptorPath(shareId: string): string {
+  return `.shares/opaque/${shareId}`;
+}
+
+// Fetch a share descriptor and return the note path it contains.
+async function fetchSharePath(owner: string, repo: string, descriptorPath: string): Promise<string> {
   const GENERIC = 'share not found';
-  const ghRes = await fetchRepoFile(owner, repo, `.shares/${shareId}`, 'application/vnd.github.raw');
+  const ghRes = await fetchRepoFile(owner, repo, descriptorPath, 'application/vnd.github.raw');
   const raw = (await readTextBounded(ghRes, MAX_DESCRIPTOR_BYTES)).trim();
   if (!raw || !raw.toLowerCase().endsWith('.md')) throw HttpError(404, GENERIC);
   let sanitized = raw.replace(/\\/g, '/').replace(/^\/+/, '');
@@ -100,8 +112,9 @@ async function fetchSharePath(owner: string, repo: string, shareId: string): Pro
 // --- Opaque segment helpers (Tier 2) ---
 
 // A Tier 2 URL segment is base64url(repoId_bytes[8] || shareId_bytes[16]) = exactly 32 chars.
-// The repoId (8 bytes) maps to owner/repo server-side; the shareId (16 bytes) is the
-// .shares/<shareId>.json filename. Neither is visible in the URL.
+// The repoId (8 bytes) maps to owner/repo server-side; the shareId (16 bytes) names the
+// .shares/opaque/<shareId> descriptor. The URL hides the repository, not the shareId: anyone can
+// decode the segment, which is why Tier 2 descriptors live outside the Tier 1 namespace.
 const OPAQUE_SEGMENT_BYTE_LENGTH = 24; // 8 (repoId) + 16 (shareId)
 const REPO_ID_BYTE_LENGTH = 8;
 // Exactly 32 base64url characters (no padding, no standard base64 +/ chars).
@@ -214,7 +227,7 @@ function openCacheKey(owner: string, repo: string, shareId: string): string {
 
 // --- Tier 2 param extraction ---
 
-function getOpaqueShareParams(req: express.Request): { owner: string; repo: string; shareId: string } {
+function getOpaqueShareParams(req: express.Request): { owner: string; repo: string; descriptorPath: string } {
   const GENERIC = 'share not found';
   const params = req.params as Record<string, string | undefined>;
   const segment = (params.segment ?? '').trim();
@@ -226,7 +239,7 @@ function getOpaqueShareParams(req: express.Request): { owner: string; repo: stri
   const record = repoIdStore.get(repoId);
   if (!record) throw HttpError(404, GENERIC);
 
-  return { owner: record.owner, repo: record.repo, shareId };
+  return { owner: record.owner, repo: record.repo, descriptorPath: opaqueDescriptorPath(shareId) };
 }
 
 function opaqueCacheKey(segment: string): string {
@@ -246,8 +259,8 @@ function gitShareEndpoints(app: express.Express) {
     handleErrors(async (req, res) => {
       const params = req.params as Record<string, string | undefined>;
       const segment = (params.segment ?? '').trim();
-      const { owner, repo, shareId } = getOpaqueShareParams(req);
-      const notePath = await fetchSharePath(owner, repo, shareId);
+      const { owner, repo, descriptorPath } = getOpaqueShareParams(req);
+      const notePath = await fetchSharePath(owner, repo, descriptorPath);
       await serveContent(res, owner, repo, notePath, opaqueCacheKey(segment));
     })
   );
@@ -255,8 +268,8 @@ function gitShareEndpoints(app: express.Express) {
   app.get(
     '/v1/git-shares/:segment',
     handleErrors(async (req, res) => {
-      const { owner, repo, shareId } = getOpaqueShareParams(req);
-      await fetchSharePath(owner, repo, shareId); // validate share exists
+      const { owner, repo, descriptorPath } = getOpaqueShareParams(req);
+      await fetchSharePath(owner, repo, descriptorPath); // validate share exists
       // Return owner (repo owner name) but not repo or shareId — URL stays opaque.
       res.json({ owner });
     })
@@ -267,8 +280,8 @@ function gitShareEndpoints(app: express.Express) {
     handleErrors(async (req, res) => {
       const params = req.params as Record<string, string | undefined>;
       const segment = (params.segment ?? '').trim();
-      const { owner, repo, shareId } = getOpaqueShareParams(req);
-      const notePath = await fetchSharePath(owner, repo, shareId);
+      const { owner, repo, descriptorPath } = getOpaqueShareParams(req);
+      const notePath = await fetchSharePath(owner, repo, descriptorPath);
       await serveAsset(req, res, owner, repo, notePath, opaqueCacheKey(segment));
     })
   );
@@ -281,7 +294,7 @@ function gitShareEndpoints(app: express.Express) {
     '/v1/git-shares/:owner/:repo/:shareId/content',
     handleErrors(async (req, res) => {
       const { owner, repo, shareId } = getOpenShareParams(req);
-      const notePath = await fetchSharePath(owner, repo, shareId);
+      const notePath = await fetchSharePath(owner, repo, openDescriptorPath(shareId));
       await serveContent(res, owner, repo, notePath, openCacheKey(owner, repo, shareId));
     })
   );
@@ -290,7 +303,7 @@ function gitShareEndpoints(app: express.Express) {
     '/v1/git-shares/:owner/:repo/:shareId',
     handleErrors(async (req, res) => {
       const { owner, repo, shareId } = getOpenShareParams(req);
-      await fetchSharePath(owner, repo, shareId); // validate share exists
+      await fetchSharePath(owner, repo, openDescriptorPath(shareId)); // validate share exists
       res.json({ owner, repo, shareId });
     })
   );
@@ -299,7 +312,7 @@ function gitShareEndpoints(app: express.Express) {
     '/v1/git-shares/:owner/:repo/:shareId/assets',
     handleErrors(async (req, res) => {
       const { owner, repo, shareId } = getOpenShareParams(req);
-      const notePath = await fetchSharePath(owner, repo, shareId);
+      const notePath = await fetchSharePath(owner, repo, openDescriptorPath(shareId));
       await serveAsset(req, res, owner, repo, notePath, openCacheKey(owner, repo, shareId));
     })
   );
@@ -327,7 +340,7 @@ function gitShareEndpoints(app: express.Express) {
       // Resolve the GitHub App installation for this repo.
       let installationId: number;
       try {
-        installationId = await getRepoInstallationId(env, owner, repo);
+        installationId = await getOwnerInstallationId(env, owner);
       } catch {
         throw HttpError(404, REPO_ACCESS_DENIED);
       }

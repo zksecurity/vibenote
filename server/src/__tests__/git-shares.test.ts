@@ -7,7 +7,7 @@ import fs from 'node:fs/promises';
 // --- Hoisted mocks (available before vi.mock factories run) ---
 
 const {
-  mockGetRepoInstallationId,
+  mockGetOwnerInstallationId,
   mockInstallationRequest,
   REPO_ID_FILE,
   TEMP_DIR,
@@ -16,7 +16,7 @@ const {
   const os = require('node:os');
   const dir = path.join(os.tmpdir(), `vibenote-git-shares-test-${process.pid}`);
   return {
-    mockGetRepoInstallationId: vi.fn() as any,
+    mockGetOwnerInstallationId: vi.fn() as any,
     mockInstallationRequest: vi.fn() as any,
     TEMP_DIR: dir,
     REPO_ID_FILE: path.join(dir, 'repo-ids.json'),
@@ -42,7 +42,7 @@ vi.mock('../env.ts', () => ({
 }));
 
 vi.mock('../github-app.ts', () => ({
-  getRepoInstallationId: mockGetRepoInstallationId,
+  getOwnerInstallationId: mockGetOwnerInstallationId,
   getInstallationToken: vi.fn().mockResolvedValue('fake-token'),
   installationRequest: mockInstallationRequest,
 }));
@@ -66,10 +66,10 @@ function setupRepoMock(
   repo: string,
   files: Record<string, string | null>,
 ) {
-  mockGetRepoInstallationId.mockImplementation(
-    async (_env: any, o: string, r: string) => {
-      if (o === owner && r === repo) return INSTALLATION_ID;
-      throw new Error('app not installed for repository');
+  mockGetOwnerInstallationId.mockImplementation(
+    async (_env: any, o: string) => {
+      if (o === owner) return INSTALLATION_ID;
+      throw new Error('app not installed for owner');
     },
   );
 
@@ -128,7 +128,7 @@ async function registerTier2Repo(): Promise<{
   const ENC_OWNER = `assets-owner-${REPO_ID}`;
   const ENC_REPO = `assets-repo-${REPO_ID}`;
 
-  mockGetRepoInstallationId.mockResolvedValue(INSTALLATION_ID);
+  mockGetOwnerInstallationId.mockResolvedValue(INSTALLATION_ID);
   mockInstallationRequest.mockImplementation(
     async (_env: any, _installationId: number, urlPath: string) => {
       if (urlPath.includes('.shares/.repo-id')) {
@@ -277,7 +277,7 @@ describe('Tier 2 — Opaque shares', () => {
 
   // Register the repoId in the key store before tier 2 tests
   beforeAll(async () => {
-    mockGetRepoInstallationId.mockResolvedValue(INSTALLATION_ID);
+    mockGetOwnerInstallationId.mockResolvedValue(INSTALLATION_ID);
     mockInstallationRequest.mockImplementation(
       async (_env: any, _installationId: number, urlPath: string) => {
         if (urlPath.includes('.shares/.repo-id')) {
@@ -297,7 +297,7 @@ describe('Tier 2 — Opaque shares', () => {
 
   it('7. happy path: opaque share serves markdown', async () => {
     setupRepoMock(ENC_OWNER, ENC_REPO, {
-      [`.shares/${SHARE_ID}`]: 'notes/private.md',
+      [`.shares/opaque/${SHARE_ID}`]: 'notes/private.md',
       'notes/private.md': MARKDOWN_BODY,
     });
 
@@ -334,7 +334,7 @@ describe('Tier 2 — Opaque shares', () => {
 
   it('10. metadata exposes owner but not repo or shareId', async () => {
     setupRepoMock(ENC_OWNER, ENC_REPO, {
-      [`.shares/${SHARE_ID}`]: 'notes/private.md',
+      [`.shares/opaque/${SHARE_ID}`]: 'notes/private.md',
       'notes/private.md': MARKDOWN_BODY,
     });
 
@@ -356,7 +356,7 @@ describe('Repo keys', () => {
     const collisionRepoId = collisionRepoIdBytes.toString('base64url');
 
     // First: register repoId for repo A
-    mockGetRepoInstallationId.mockResolvedValue(INSTALLATION_ID);
+    mockGetOwnerInstallationId.mockResolvedValue(INSTALLATION_ID);
     mockInstallationRequest.mockImplementation(
       async (_env: any, _installationId: number, urlPath: string) => {
         if (urlPath.includes('.shares/.repo-id')) {
@@ -417,7 +417,7 @@ describe('Assets', () => {
     const { REPO_ID_BYTES, SHARE_ID_BYTES, SEGMENT, ENC_OWNER, ENC_REPO, SHARE_ID } = await registerTier2Repo();
     const imageData = Buffer.from('fake-png-data');
     setupRepoMock(ENC_OWNER, ENC_REPO, {
-      [`.shares/${SHARE_ID}`]: 'notes/private.md',
+      [`.shares/opaque/${SHARE_ID}`]: 'notes/private.md',
       'notes/private.md': '# Private\n\n![img](./photo.jpg)',
       'notes/photo.jpg': imageData.toString('binary'),
     });
@@ -460,7 +460,7 @@ describe('Assets', () => {
 
 describe('POST /v1/repo-id', () => {
   function mockRegistration(repoId: string) {
-    mockGetRepoInstallationId.mockResolvedValue(INSTALLATION_ID);
+    mockGetOwnerInstallationId.mockResolvedValue(INSTALLATION_ID);
     mockInstallationRequest.mockImplementation(
       async (_env: any, _installationId: number, urlPath: string) => {
         if (urlPath.includes('.shares/.repo-id')) {
@@ -494,7 +494,7 @@ describe('POST /v1/repo-id', () => {
   it('19. .shares/.repo-id mismatch: returns 404', async () => {
     const repoId = crypto.randomBytes(8).toString('base64url');
     const differentRepoId = crypto.randomBytes(8).toString('base64url');
-    mockGetRepoInstallationId.mockResolvedValue(INSTALLATION_ID);
+    mockGetOwnerInstallationId.mockResolvedValue(INSTALLATION_ID);
     mockInstallationRequest.mockImplementation(
       async (_env: any, _installationId: number, urlPath: string) => {
         if (urlPath.includes('.shares/.repo-id')) {
@@ -602,8 +602,8 @@ describe('Error indistinguishability', () => {
     const resD = await fetch(`${baseUrl}/v1/git-shares/owner/repo/bad-ext/content`);
 
     // e) Non-existent repo (installation not found)
-    mockGetRepoInstallationId.mockRejectedValue(
-      new Error('app not installed for repository'),
+    mockGetOwnerInstallationId.mockRejectedValue(
+      new Error('app not installed for owner'),
     );
     const resE = await fetch(`${baseUrl}/v1/git-shares/no-owner/no-repo/sometoken/content`);
 
@@ -618,6 +618,33 @@ describe('Error indistinguishability', () => {
     const expectedBody = { error: 'share not found' };
     for (const body of bodies) {
       expect(body).toEqual(expectedBody);
+    }
+  });
+});
+
+// --- Tier 2 descriptors are unreachable from Tier 1 ---
+
+describe('Tier 2 descriptors via Tier 1', () => {
+  it('26. a shareId decoded from an opaque link resolves like a nonexistent share', async () => {
+    const shareId = crypto.randomBytes(16).toString('base64url');
+    setupRepoMock('owner', 'notes', {
+      [`.shares/opaque/${shareId}`]: 'notes/private.md',
+      'notes/private.md': MARKDOWN_BODY,
+    });
+
+    // Correct repository guess, wrong repository guess, and a share that does not exist at all
+    const requests = [
+      `/v1/git-shares/owner/notes/${shareId}`,
+      `/v1/git-shares/owner/guess/${shareId}`,
+      `/v1/git-shares/owner/notes/${crypto.randomBytes(16).toString('base64url')}`,
+    ];
+    for (const path of requests) {
+      mockInstallationRequest.mockClear();
+      const res = await fetch(`${baseUrl}${path}`);
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({ error: 'share not found' });
+      // Every case makes the same single GitHub request, so timing does not tell them apart either
+      expect(mockInstallationRequest).toHaveBeenCalledTimes(1);
     }
   });
 });

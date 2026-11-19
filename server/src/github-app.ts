@@ -18,26 +18,32 @@ let privateKeyCache:
     }
   | undefined;
 
-export async function getRepoInstallationId(env: Env, owner: string, repo: string): Promise<number> {
-  const jwt = await getAppJwt(env);
-  const res = await fetch(`${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/installation`, {
-    headers: {
-      Authorization: `Bearer ${jwt}`,
-      Accept: 'application/vnd.github+json',
-    },
-  });
-  if (res.status === 404) {
-    throw new Error('app not installed for repository');
+// Installation id per account login (lowercased), loaded from the app's installation list.
+// Lookups are per owner, never per repository: whether an owner has installed the app is public
+// anyway, while a per-repo lookup would reveal through its outcome and timing whether a guessed
+// repository name exists. Which repositories an installation can read is enforced by GitHub on the
+// contents request, which answers 404 for an inaccessible repository just like for a missing file.
+let installationsByOwner = new Map<string, number>();
+let installationsLoadedAt = 0;
+let installationsLoading: Promise<void> | undefined;
+// Reload the full list this often, and on a miss (to pick up new installations) at most this often.
+const INSTALLATIONS_MAX_AGE_MS = 5 * 60_000;
+const INSTALLATIONS_MISS_RELOAD_MS = 10_000;
+
+export async function getOwnerInstallationId(env: Env, owner: string): Promise<number> {
+  let key = owner.toLowerCase();
+  let age = Date.now() - installationsLoadedAt;
+  if (
+    age > INSTALLATIONS_MAX_AGE_MS ||
+    (!installationsByOwner.has(key) && age > INSTALLATIONS_MISS_RELOAD_MS)
+  ) {
+    await loadInstallations(env);
   }
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`installation lookup failed (${res.status}): ${text}`);
+  let installationId = installationsByOwner.get(key);
+  if (installationId === undefined) {
+    throw new Error('app not installed for owner');
   }
-  const json = (await res.json()) as { id?: number };
-  if (!json || typeof json.id !== 'number') {
-    throw new Error('installation lookup missing id');
-  }
-  return json.id;
+  return installationId;
 }
 
 export async function getInstallationToken(env: Env, installationId: number): Promise<string> {
@@ -107,4 +113,51 @@ async function importPrivateKey(env: Env) {
   const key = await importPKCS8(pem, 'RS256');
   privateKeyCache = { key, source: pem };
   return key;
+}
+
+// Load all installations of the app, sharing one request among concurrent callers.
+async function loadInstallations(env: Env): Promise<void> {
+  if (installationsLoading === undefined) {
+    installationsLoading = fetchInstallations(env).finally(() => {
+      installationsLoading = undefined;
+    });
+  }
+  await installationsLoading;
+}
+
+async function fetchInstallations(env: Env): Promise<void> {
+  const jwt = await getAppJwt(env);
+  let byOwner = new Map<string, number>();
+  const perPage = 100;
+  for (let page = 1; ; page++) {
+    const res = await fetch(`${GITHUB_API_BASE}/app/installations?per_page=${perPage}&page=${page}`, {
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+        Accept: 'application/vnd.github+json',
+      },
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`installation list failed (${res.status}): ${text}`);
+    }
+    const json: unknown = await res.json();
+    if (!Array.isArray(json)) {
+      throw new Error('installation list is not an array');
+    }
+    for (let item of json) {
+      let entry = parseInstallation(item);
+      if (entry !== undefined) byOwner.set(entry.login.toLowerCase(), entry.id);
+    }
+    if (json.length < perPage) break;
+  }
+  installationsByOwner = byOwner;
+  installationsLoadedAt = Date.now();
+}
+
+function parseInstallation(item: unknown): { id: number; login: string } | undefined {
+  if (typeof item !== 'object' || item === null) return undefined;
+  if (!('id' in item) || typeof item.id !== 'number') return undefined;
+  if (!('account' in item) || typeof item.account !== 'object' || item.account === null) return undefined;
+  if (!('login' in item.account) || typeof item.account.login !== 'string') return undefined;
+  return { id: item.id, login: item.account.login };
 }
