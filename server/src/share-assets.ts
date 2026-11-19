@@ -105,25 +105,32 @@ function extractRelativeAssetRefs(rawMarkdown: string): string[] {
 // markup in them are not assets, and an unfinished HTML example in them must not swallow later tags.
 // Line breaks are kept for the line-based patterns.
 function stripCode(markdown: string): string {
+  // Fences may follow blockquote markers and list indentation
+  let opener = /^(?:[ \t]*>)*[ \t]*(`{3,}|~{3,})(.*)$/;
+  let closer = /^(?:[ \t]*>)*[ \t]*(`{3,}|~{3,})[ \t]*$/;
   let lines = markdown.split('\n');
   let fence: { char: string; length: number } | undefined;
   for (let i = 0; i < lines.length; i++) {
-    let marker = /^ {0,3}(`{3,}|~{3,})/.exec(lines[i] ?? '')?.[1];
+    let line = lines[i] ?? '';
     if (fence === undefined) {
-      if (marker !== undefined) {
+      let open = opener.exec(line);
+      let marker = open?.[1];
+      // A backtick fence's info string has no backticks: "```code``` text" is inline code instead
+      if (marker !== undefined && !(marker.startsWith('`') && (open?.[2] ?? '').includes('`'))) {
         fence = { char: marker.charAt(0), length: marker.length };
         lines[i] = '';
       }
       continue;
     }
     // A closing fence uses the same character, is at least as long, and has nothing after it
-    let closing = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(lines[i] ?? '')?.[1];
+    let closing = closer.exec(line)?.[1];
     if (closing !== undefined && closing.charAt(0) === fence.char && closing.length >= fence.length) {
       fence = undefined;
     }
     lines[i] = '';
   }
-  return lines.join('\n').replace(/`[^`\n]*`/g, '');
+  // Inline code spans; an escaped backtick does not open one
+  return lines.join('\n').replace(/(?<!\\)`[^`\n]*`/g, '');
 }
 
 // Values of src/href attributes on asset-bearing HTML tags. Each tag is parsed once, left to right,

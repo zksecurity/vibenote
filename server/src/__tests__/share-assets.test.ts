@@ -125,6 +125,23 @@ describe('share asset helpers', () => {
     expect([...paths]).toEqual(['notes/img/a.png']);
   });
 
+  it('recognizes code in blockquotes and lists, but not inline code that looks like a fence', () => {
+    const markdown = [
+      '> ```',
+      '> <img src="example.png',
+      '> ```',
+      '- item',
+      '    ```',
+      '    <img src="example.png',
+      '    ```',
+      '<img src="img/a.png">',
+      '```inline``` code, then ![b](img/b.png)',
+      '\\`![c](img/c.png)\\`',
+    ].join('\n');
+    const paths = collectAssetPaths('notes/shared.md', markdown);
+    expect([...paths].sort()).toEqual(['notes/img/a.png', 'notes/img/b.png', 'notes/img/c.png']);
+  });
+
   it('ignores src lookalikes that are not asset attributes', () => {
     const paths = collectAssetPaths('notes/shared.md', '<img data-src="img/a.png" alt="src=\'img/b.png\'">');
     expect(paths.size).toBe(0);
@@ -145,6 +162,8 @@ describe('share asset helpers', () => {
       '<a x="' + 'a <a y="'.repeat(size / 8),
       '<a x="' + '<a '.repeat(size / 3),
       '```\n'.repeat(size / 4),
+      '> '.repeat(size / 2) + '```',
+      '\\`'.repeat(size / 2),
       '\n'.repeat(size),
     ];
     for (const input of inputs) {
