@@ -232,8 +232,7 @@ async function serveAsset(
   const lastModified = ghRes.headers.get('Last-Modified');
   if (lastModified) headers['Last-Modified'] = lastModified;
   // Stream instead of buffering, so memory use does not grow with asset size or concurrent viewers
-  res.status(200).set(headers);
-  await pipeBounded(ghRes, res, MAX_ASSET_BYTES);
+  await pipeBounded(ghRes, res, MAX_ASSET_BYTES, headers);
 }
 
 function asTrimmedString(input: unknown): string {

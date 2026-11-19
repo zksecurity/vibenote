@@ -21,22 +21,33 @@ async function readTextBounded(upstream: Response, maxBytes: number): Promise<st
   return new TextDecoder().decode(Buffer.concat(chunks));
 }
 
-// Stream a response body to the client, aborting once it exceeds `maxBytes`.
-// The caller sets status and headers on `res` before calling this. `pipeline` applies backpressure.
-async function pipeBounded(upstream: Response, res: express.Response, maxBytes: number): Promise<void> {
+// Stream a response body to the client with status 200 and `headers`, aborting once it exceeds
+// `maxBytes`. Status and headers are set only once the first chunk passed the size check, so an
+// early failure still gets a plain error response. `pipeline` applies backpressure.
+async function pipeBounded(
+  upstream: Response,
+  res: express.Response,
+  maxBytes: number,
+  headers: Record<string, string>
+): Promise<void> {
   if (upstream.body === null) {
-    res.end();
+    res.status(200).set(headers).end();
     return;
   }
   await rejectDeclaredOversize(upstream, maxBytes);
   let reader = upstream.body.getReader();
   // Stop reading from GitHub when the client goes away, even while a read is pending
-  res.once('close', () => {
+  let cancel = () => {
     reader.cancel().catch(() => undefined);
-  });
+  };
+  if (res.destroyed) {
+    cancel();
+    return;
+  }
+  res.once('close', cancel);
   let chunks = limitedChunks(reader, maxBytes);
-  // Read the first chunk before anything is sent, so an early failure still gets an error response
   let first = await chunks.next();
+  res.status(200).set(headers);
   if (first.done === true) {
     res.end();
     return;
