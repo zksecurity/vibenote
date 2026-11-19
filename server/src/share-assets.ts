@@ -46,7 +46,7 @@ function encodeAssetPath(pathValue: string): string {
 
 function extractRelativeAssetRefs(rawMarkdown: string): string[] {
   // Line-based patterns below expect `\n` line endings
-  const markdown = rawMarkdown.replace(/\r\n?/g, '\n');
+  const markdown = stripCode(rawMarkdown.replace(/\r\n?/g, '\n'));
   const added = new Set<string>();
   const add = (raw: string | undefined) => {
     let target = normalizeLinkTarget(raw);
@@ -101,11 +101,36 @@ function extractRelativeAssetRefs(rawMarkdown: string): string[] {
     .filter((ref) => ref !== undefined);
 }
 
+// Blank out fenced code blocks and inline code spans, which the viewer renders as text: paths and
+// markup in them are not assets, and an unfinished HTML example in them must not swallow later tags.
+// Line breaks are kept for the line-based patterns.
+function stripCode(markdown: string): string {
+  let lines = markdown.split('\n');
+  let fence: { char: string; length: number } | undefined;
+  for (let i = 0; i < lines.length; i++) {
+    let marker = /^ {0,3}(`{3,}|~{3,})/.exec(lines[i] ?? '')?.[1];
+    if (fence === undefined) {
+      if (marker !== undefined) {
+        fence = { char: marker.charAt(0), length: marker.length };
+        lines[i] = '';
+      }
+      continue;
+    }
+    // A closing fence uses the same character, is at least as long, and has nothing after it
+    let closing = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(lines[i] ?? '')?.[1];
+    if (closing !== undefined && closing.charAt(0) === fence.char && closing.length >= fence.length) {
+      fence = undefined;
+    }
+    lines[i] = '';
+  }
+  return lines.join('\n').replace(/`[^`\n]*`/g, '');
+}
+
 // Values of src/href attributes on asset-bearing HTML tags. Each tag is parsed once, left to right,
-// honoring quoted attribute values (which may contain `<` or `>`), and the search resumes after it,
-// so the scan is linear in the note size. Quoted values end on their line: an unclosed quote, as in an
-// unfinished example in a code block, makes the candidate not a tag and the search resumes at the
-// end of that line. A tag still open at the end of the note ends the search.
+// honoring quoted attribute values (which may contain `<`, `>` or line breaks), and the search resumes
+// after it, so the scan is linear in the note size. An unclosed quote makes the candidate not a tag,
+// and the search resumes after that quote: it was the last quote of its kind, so this happens at most
+// once per kind. A tag still open at the end of the note ends the search.
 function extractHtmlAssetRefs(markdown: string): string[] {
   let refs: string[] = [];
   let tagStart = /<(?:img|a|audio|video|source|track)\b/gi;
@@ -155,10 +180,8 @@ function parseTagAttributes(
     while (i < text.length && /\s/.test(text.charAt(i))) i++;
     let quote = text.charAt(i);
     if (quote === '"' || quote === "'") {
-      let close = i + 1;
-      while (close < text.length && text.charAt(close) !== quote && text.charAt(close) !== '\n') close++;
-      if (close === text.length) return undefined;
-      if (text.charAt(close) === '\n') return { attributes: [], end: close };
+      let close = text.indexOf(quote, i + 1);
+      if (close === -1) return { attributes: [], end: i + 1 };
       attributes.push({ name, value: text.slice(i + 1, close) });
       i = close + 1;
     } else {

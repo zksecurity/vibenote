@@ -114,6 +114,17 @@ describe('share asset helpers', () => {
     expect([...paths].sort()).toEqual(['notes/img/a.png', 'notes/img/b.png']);
   });
 
+  it('collects tags with multi-line attribute values', () => {
+    const paths = collectAssetPaths('notes/shared.md', '<img alt="line one\nline two" src="img/a.png">');
+    expect([...paths]).toEqual(['notes/img/a.png']);
+  });
+
+  it('ignores references inside code, which the viewer renders as text', () => {
+    const markdown = ['```', '![x](secret.txt)', '```', '`![y](other.txt)` ![z](img/a.png)'].join('\n');
+    const paths = collectAssetPaths('notes/shared.md', markdown);
+    expect([...paths]).toEqual(['notes/img/a.png']);
+  });
+
   it('ignores src lookalikes that are not asset attributes', () => {
     const paths = collectAssetPaths('notes/shared.md', '<img data-src="img/a.png" alt="src=\'img/b.png\'">');
     expect(paths.size).toBe(0);
@@ -132,6 +143,8 @@ describe('share asset helpers', () => {
       '[x](' + '(a)'.repeat(size / 3),
       '[a]:' + ' '.repeat(size) + '\n\n',
       '<a x="' + 'a <a y="'.repeat(size / 8),
+      '<a x="' + '<a '.repeat(size / 3),
+      '```\n'.repeat(size / 4),
       '\n'.repeat(size),
     ];
     for (const input of inputs) {
