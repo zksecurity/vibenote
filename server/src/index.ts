@@ -13,7 +13,8 @@ import {
   type SessionClaims,
 } from './api.ts';
 import { createSessionStore } from './session-store.ts';
-import { handleErrors, HttpError, queryParam, requireSession } from './common.ts';
+import { handleErrors, queryParam, requireSession } from './common.ts';
+import { HttpError } from './http-error.ts';
 import { gitShareEndpoints } from './git-shares.ts';
 
 declare module 'express-serve-static-core' {
@@ -108,7 +109,9 @@ app.get(
     let repo = queryParam(req, 'repo');
     let returnTo = queryParam(req, 'returnTo');
     let sanitizedReturnTo = normalizeReturnTo(returnTo, env.ALLOWED_ORIGINS);
-    if (sanitizedReturnTo === null && returnTo.trim().length > 0) throw Error('invalid returnTo origin');
+    if (sanitizedReturnTo === null && returnTo.trim().length > 0) {
+      throw HttpError(400, 'invalid returnTo origin');
+    }
     let url = await buildInstallUrl(env, owner, repo, sanitizedReturnTo ?? '');
     res.json({ url });
   })
@@ -124,7 +127,9 @@ app.get(
     let stateToken = queryParam(req, 'state');
     let returnTo = queryParam(req, 'returnTo');
     let sanitizedReturnTo = normalizeReturnTo(returnTo, env.ALLOWED_ORIGINS);
-    if (sanitizedReturnTo === null && returnTo.trim().length > 0) throw Error('invalid returnTo origin');
+    if (sanitizedReturnTo === null && returnTo.trim().length > 0) {
+      throw HttpError(400, 'invalid returnTo origin');
+    }
     let target = await buildSetupRedirect(
       env,
       stateToken,

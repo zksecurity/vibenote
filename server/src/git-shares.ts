@@ -3,7 +3,8 @@ import { env } from './env.ts';
 import { getOwnerInstallationId, installationRequest } from './github-app.ts';
 import { resolveAssetPath, encodeAssetPath, collectAssetPaths } from './share-assets.ts';
 import { createRepoIdStore } from './repo-id-store.ts';
-import { handleErrors, HttpError } from './common.ts';
+import { handleErrors } from './common.ts';
+import { HttpError } from './http-error.ts';
 import { readTextBounded, pipeBounded } from './bounded-body.ts';
 
 export { gitShareEndpoints };

@@ -2,7 +2,9 @@ import express from 'express';
 import { env } from './env.ts';
 import { verifyBearerSession } from './api.ts';
 
-export { requireSession, handleErrors, HttpError, queryParam };
+import { HttpErrorClass } from './http-error.ts';
+
+export { requireSession, handleErrors, queryParam };
 
 function requireSession(req: express.Request, res: express.Response, next: express.NextFunction) {
   let header = req.header('authorization') || req.header('Authorization');
@@ -31,7 +33,9 @@ function handleErrors<T>(route: (req: express.Request, res: express.Response) =>
       if (error instanceof HttpErrorClass) {
         res.status(error.status).json({ error: error.message });
       } else {
-        res.status(400).json({ error: getErrorMessage(error) });
+        // Unexpected errors can carry upstream responses or server paths; log them, answer generically
+        console.error('[vibenote] request failed', error);
+        res.status(500).json({ error: 'internal error' });
       }
     }
   };
@@ -42,21 +46,4 @@ function handleErrors<T>(route: (req: express.Request, res: express.Response) =>
 function queryParam(req: express.Request, name: string): string {
   let value = req.query[name];
   return typeof value === 'string' ? value : '';
-}
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message) return error.message;
-  return String(error);
-}
-
-function HttpError(status: number, message: string): HttpErrorClass {
-  return new HttpErrorClass(status, message);
-}
-
-class HttpErrorClass extends Error {
-  status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-  }
 }

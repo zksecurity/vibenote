@@ -4,7 +4,7 @@
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type express from 'express';
-import { HttpError } from './common.ts';
+import { HttpError } from './http-error.ts';
 
 export { readTextBounded, pipeBounded };
 

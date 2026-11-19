@@ -4,6 +4,7 @@ import type { Env } from './env.ts';
 import { signSession, verifySession, signState, verifyState, type SessionClaims } from './jwt.ts';
 import type { SessionStoreInstance, SessionRecord } from './session-store.ts';
 import { githubFetch } from './github-app.ts';
+import { HttpError } from './http-error.ts';
 
 export type { SessionClaims };
 export { CALLBACK_PAGE_CSP };
@@ -83,10 +84,10 @@ export async function handleAuthCallback(
   stateToken: string,
   callbackUrl: string
 ): Promise<{ html: string }> {
-  let state = await verifyState(stateToken, env.SESSION_JWT_SECRET);
+  let state = await verifyStateToken(stateToken, env);
   let returnTo = getOptionalString(state, 'returnTo');
   if (returnTo === null || !returnTo.startsWith('http')) {
-    throw Error('invalid returnTo origin');
+    throw HttpError(400, 'invalid returnTo origin');
   }
   let returnToUrl = new URL(returnTo);
   let tokens = await exchangeCode(env, code, callbackUrl, stateToken);
@@ -162,13 +163,13 @@ export async function refreshAccessToken(
 ): Promise<OAuthTokenResult> {
   let record = store.get(sessionId);
   if (!record) {
-    throw new Error('session expired');
+    throw HttpError(401, 'session expired');
   }
 
   // Validate user is still allowed (enforced for preview deployments only)
   if (!isUserAllowed(env, record.login, requestOrigin)) {
     await store.delete(sessionId);
-    throw new Error('user not authorized');
+    throw HttpError(403, 'user not authorized');
   }
 
   let refreshPlain = store.decryptRefreshToken(record.refreshTokenCiphertext);
@@ -206,7 +207,7 @@ export async function buildSetupRedirect(
   installationId: string | null,
   origin: string
 ): Promise<string> {
-  let state = await verifyState(stateToken, env.SESSION_JWT_SECRET);
+  let state = await verifyStateToken(stateToken, env);
   let fallback = getOptionalString(state, 'returnTo') ?? '/';
   let url = new URL(returnTo || fallback, returnTo.startsWith('http') ? undefined : origin);
   if (installationId) {
@@ -216,6 +217,15 @@ export async function buildSetupRedirect(
     url.searchParams.set('setup_action', setupAction);
   }
   return url.toString();
+}
+
+// Verify a signed OAuth or installation state; a bad or expired state is the caller's error.
+async function verifyStateToken(stateToken: string, env: Env): Promise<Record<string, unknown>> {
+  try {
+    return await verifyState(stateToken, env.SESSION_JWT_SECRET);
+  } catch {
+    throw HttpError(400, 'invalid state');
+  }
 }
 
 export async function verifyBearerSession(token: string, env: Env): Promise<SessionClaims> {
