@@ -434,6 +434,13 @@ function gitShareEndpoints(app: express.Express) {
         throw HttpError(404, REPO_ACCESS_DENIED);
       }
 
+      // Another request may have registered this repoId while we were talking to GitHub. The check and
+      // the insert below run without an await in between, so the first registration wins.
+      if (repoIdStore.get(repoId) !== undefined) {
+        res.status(200).json({ ok: true });
+        return;
+      }
+
       await repoIdStore.set({
         repoId,
         owner,

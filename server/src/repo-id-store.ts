@@ -83,9 +83,21 @@ class RepoIdStore implements RepoIdStoreInstance {
   }
 
   async set(record: RepoIdRecord): Promise<void> {
+    let repoKey = `${record.owner}/${record.repo}`;
+    let previousRecord = this.#records.get(record.repoId);
+    let previousRepoId = this.#repos.get(repoKey);
     this.#records.set(record.repoId, record);
-    this.#repos.set(`${record.owner}/${record.repo}`, record.repoId);
-    await this.#persist();
+    this.#repos.set(repoKey, record.repoId);
+    try {
+      await this.#persist();
+    } catch (error) {
+      // A binding only counts once it is on disk; otherwise a retry would find it and skip persisting
+      if (previousRecord === undefined) this.#records.delete(record.repoId);
+      else this.#records.set(record.repoId, previousRecord);
+      if (previousRepoId === undefined) this.#repos.delete(repoKey);
+      else this.#repos.set(repoKey, previousRepoId);
+      throw error;
+    }
   }
 
   #hydrate(records: RepoIdRecord[]): void {

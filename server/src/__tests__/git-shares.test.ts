@@ -727,4 +727,40 @@ describe('Repository identity binding', () => {
     expect((await register(REPO_ID)).status).toBe(200);
     expect((await register(crypto.randomBytes(8).toString('base64url'))).status).toBe(201);
   });
+
+  it('29. concurrent registrations of one repoId keep the first binding', async () => {
+    const repoIdBytes = crypto.randomBytes(8);
+    const repoId = repoIdBytes.toString('base64url');
+    mockGetOwnerInstallationId.mockResolvedValue(INSTALLATION_ID);
+    // Both repositories carry the same .repo-id, e.g. one copied it from the other. A slow GitHub
+    // keeps both registrations in flight at the same time.
+    mockInstallationRequest.mockImplementation(async (_env: any, _id: number, urlPath: string) => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return urlPath.includes('.shares/.repo-id')
+        ? new Response(repoId, { status: 200 })
+        : new Response('not found', { status: 404 });
+    });
+    githubRepoIds.set('/repos/race-owner/repo-1', 101);
+    githubRepoIds.set('/repos/race-owner/repo-2', 102);
+    const register = (repo: string) =>
+      fetch(`${baseUrl}/v1/repo-id`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repoId, owner: 'race-owner', repo }),
+      });
+    const results = await Promise.all([register('repo-1'), register('repo-2')]);
+    expect(results.map((r) => r.status).sort()).toEqual([200, 201]);
+
+    // The repository whose registration created the binding is the one opaque links resolve to
+    const winner = results[0]?.status === 201 ? 'repo-1' : 'repo-2';
+    const shareIdBytes = crypto.randomBytes(16);
+    setupRepoMock('race-owner', winner, {
+      [`.shares/opaque/${shareIdBytes.toString('base64url')}`]: 'notes/hello.md',
+      'notes/hello.md': MARKDOWN_BODY,
+    });
+    const content = await fetch(
+      `${baseUrl}/v1/git-shares/${makeOpaqueSegment(repoIdBytes, shareIdBytes)}/content`,
+    );
+    expect(content.status).toBe(200);
+  });
 });
