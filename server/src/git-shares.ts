@@ -58,6 +58,7 @@ const MAX_ASSET_BYTES = 25 * 1024 * 1024;
 // .shares/.repo-id holds an 11-character id plus optional whitespace.
 const MAX_REPO_ID_FILE_BYTES = 64;
 const MAX_REPO_METADATA_BYTES = 256 * 1024;
+const MAX_ERROR_LOG_BYTES = 4 * 1024;
 
 // --- Repo ID store ---
 
@@ -83,7 +84,7 @@ async function fetchRepoFile(
   if (res.status === 404) throw HttpError(404, 'share not found');
   if (!res.ok) {
     // Log actual error server-side, return generic 404 to avoid leaking repo existence
-    const text = await res.text().catch(() => '');
+    const text = await readTextBounded(res, MAX_ERROR_LOG_BYTES).catch(() => '(error body too large)');
     console.error(`[vibenote] github fetch error: ${res.status} ${text}`);
     throw HttpError(404, 'share not found');
   }

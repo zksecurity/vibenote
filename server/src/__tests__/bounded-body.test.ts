@@ -49,6 +49,7 @@ describe('pipeBounded', () => {
   let server: Server;
   let baseUrl = '';
   let upstreamChunks: string[] = [];
+  let stalledUpstreamCancelled = false;
 
   beforeAll(async () => {
     let app = express();
@@ -57,6 +58,22 @@ describe('pipeBounded', () => {
       handleErrors(async (_req, res) => {
         res.status(200).set('Content-Type', 'application/octet-stream');
         await pipeBounded(chunkedResponse(upstreamChunks), res, 10);
+      })
+    );
+    // An upstream that sends one chunk and then stalls
+    app.get(
+      '/stalled',
+      handleErrors(async (_req, res) => {
+        let body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('hello'));
+          },
+          cancel() {
+            stalledUpstreamCancelled = true;
+          },
+        });
+        res.status(200).set('Content-Type', 'application/octet-stream');
+        await pipeBounded(new Response(body), res, 10);
       })
     );
     await new Promise<void>((resolve) => {
@@ -69,6 +86,25 @@ describe('pipeBounded', () => {
 
   afterAll(() => {
     server.close();
+  });
+
+  it('answers with an error status when the first chunk already exceeds the limit', async () => {
+    upstreamChunks = ['hello world!'];
+    let res = await realFetch(`${baseUrl}/asset`);
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: 'file too large' });
+  });
+
+  it('cancels a stalled upstream read when the client disconnects', async () => {
+    let controller = new AbortController();
+    let res = await realFetch(`${baseUrl}/stalled`, { signal: controller.signal });
+    let reader = res.body?.getReader();
+    await reader?.read();
+    controller.abort();
+    for (let i = 0; i < 50 && !stalledUpstreamCancelled; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(stalledUpstreamCancelled).toBe(true);
   });
 
   it('streams bodies within the limit', async () => {
