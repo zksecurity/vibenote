@@ -2,7 +2,7 @@ import express from 'express';
 import { env } from './env.ts';
 import { verifyBearerSession } from './api.ts';
 
-export { requireSession, handleErrors, HttpError };
+export { requireSession, handleErrors, HttpError, queryParam };
 
 function requireSession(req: express.Request, res: express.Response, next: express.NextFunction) {
   let header = req.header('authorization') || req.header('Authorization');
@@ -30,6 +30,13 @@ function handleErrors<T>(route: (req: express.Request, res: express.Response) =>
       }
     }
   };
+}
+
+// Read a query parameter as a plain string. Express's extended query parser turns inputs like
+// `a[b]=c` or `a=1&a=2` into objects and arrays, which must never reach string handling.
+function queryParam(req: express.Request, name: string): string {
+  let value = req.query[name];
+  return typeof value === 'string' ? value : '';
 }
 
 function getErrorMessage(error: unknown): string {

@@ -12,7 +12,7 @@ import {
   type SessionClaims,
 } from './api.ts';
 import { createSessionStore } from './session-store.ts';
-import { handleErrors, HttpError, requireSession } from './common.ts';
+import { handleErrors, HttpError, queryParam, requireSession } from './common.ts';
 import { gitShareEndpoints } from './git-shares.ts';
 
 declare module 'express-serve-static-core' {
@@ -51,21 +51,22 @@ app.use(
 
 app.get('/v1/healthz', (_req, res) => res.json({ ok: true }));
 
-app.get('/v1/auth/github/start', async (req, res) => {
-  let returnTo = String(req.query.returnTo ?? '');
-  let sanitizedReturnTo = normalizeReturnTo(returnTo, env.ALLOWED_ORIGINS);
-  if (sanitizedReturnTo === null) {
-    return res.status(400).json({ error: 'invalid returnTo origin' });
-  }
-  let redirect = await createAuthStartRedirect(env, sanitizedReturnTo, callbackURL(req));
-  res.redirect(redirect);
-});
+app.get(
+  '/v1/auth/github/start',
+  handleErrors(async (req, res) => {
+    let returnTo = queryParam(req, 'returnTo');
+    let sanitizedReturnTo = normalizeReturnTo(returnTo, env.ALLOWED_ORIGINS);
+    if (sanitizedReturnTo === null) throw HttpError(400, 'invalid returnTo origin');
+    let redirect = await createAuthStartRedirect(env, sanitizedReturnTo, callbackURL(req));
+    res.redirect(redirect);
+  })
+);
 
 app.get(
   '/v1/auth/github/callback',
   handleErrors(async (req, res) => {
-    let code = String(req.query.code ?? '');
-    let stateToken = String(req.query.state ?? '');
+    let code = queryParam(req, 'code');
+    let stateToken = queryParam(req, 'state');
     let { html } = await handleAuthCallback(
       env,
       sessionStore,
@@ -102,9 +103,9 @@ app.post(
 app.get(
   '/v1/app/install-url',
   handleErrors(async (req, res) => {
-    let owner = String(req.query.owner ?? '');
-    let repo = String(req.query.repo ?? '');
-    let returnTo = String(req.query.returnTo ?? '');
+    let owner = queryParam(req, 'owner');
+    let repo = queryParam(req, 'repo');
+    let returnTo = queryParam(req, 'returnTo');
     let sanitizedReturnTo = normalizeReturnTo(returnTo, env.ALLOWED_ORIGINS);
     if (sanitizedReturnTo === null && returnTo.trim().length > 0) throw Error('invalid returnTo origin');
     let url = await buildInstallUrl(env, owner, repo, sanitizedReturnTo ?? '');
@@ -115,10 +116,12 @@ app.get(
 app.get(
   '/v1/app/setup',
   handleErrors(async (req, res) => {
-    let installationId = req.query.installation_id ? String(req.query.installation_id) : null;
-    let setupAction = req.query.setup_action ? String(req.query.setup_action) : null;
-    let stateToken = String(req.query.state ?? '');
-    let returnTo = String(req.query.returnTo ?? '');
+    let installationIdParam = queryParam(req, 'installation_id');
+    let setupActionParam = queryParam(req, 'setup_action');
+    let installationId = installationIdParam === '' ? null : installationIdParam;
+    let setupAction = setupActionParam === '' ? null : setupActionParam;
+    let stateToken = queryParam(req, 'state');
+    let returnTo = queryParam(req, 'returnTo');
     let sanitizedReturnTo = normalizeReturnTo(returnTo, env.ALLOWED_ORIGINS);
     if (sanitizedReturnTo === null && returnTo.trim().length > 0) throw Error('invalid returnTo origin');
     let target = await buildSetupRedirect(
