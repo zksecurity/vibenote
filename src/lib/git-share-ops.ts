@@ -1,8 +1,12 @@
 // Git-native share operations — create, revoke, and look up shares stored as
 // plain-text files in .shares/ within the repo.
 //
-// .shares/.repo-id  →  random 11-char base64url string (one per repo)
-// .shares/<shareId> →  note path, e.g. "notes/foo.md"
+// .shares/.repo-id         →  random 11-char base64url string (one per repo)
+// .shares/opaque/<shareId>  →  note path, e.g. "notes/foo.md"
+//
+// Shares created here are opaque (Tier 2). Their descriptors live in .shares/opaque/ so that the
+// Tier 1 route (.shares/<shareId>) cannot serve them: the shareId can be decoded from an opaque
+// link, and must not let a link holder confirm a guessed repository name.
 //
 // Opaque share URLs: <origin>/s/<segment>
 //   segment = base64url(repoIdBytes[8] ∥ shareIdBytes[16]) = 32 chars
@@ -22,6 +26,12 @@ type GitShareLink = {
   shareId: string;
   url: string;
 };
+
+const OPAQUE_SHARES_DIR = '.shares/opaque/';
+
+function opaqueDescriptorPath(shareId: string): string {
+  return `${OPAQUE_SHARES_DIR}${shareId}`;
+}
 
 // --- Crypto helpers (browser-native, no Node.js) ---
 
@@ -59,7 +69,7 @@ function computeOpaqueSegment(repoId: string, shareId: string): string {
 }
 
 // --- Local store share lookup ---
-// Scans .shares/ files in the local store (populated and kept fresh by the
+// Scans .shares/opaque/ files in the local store (populated and kept fresh by the
 // regular git sync) to find an existing share for a given note path.
 // Entirely in-memory — no network call.
 
@@ -77,11 +87,12 @@ function lookupCachedShare(owner: string, repo: string, notePath: string): GitSh
 
   // Find the share file whose content matches the note path.
   for (const meta of files) {
-    if (!meta.path.startsWith('.shares/') || meta.path === '.shares/.repo-id') continue;
+    if (!meta.path.startsWith(OPAQUE_SHARES_DIR)) continue;
     const file = store.loadFileById(meta.id);
     if (!file) continue;
     if (normalizePath(file.content.trim()) !== normalized) continue;
-    const shareId = meta.path.slice('.shares/'.length);
+    const shareId = meta.path.slice(OPAQUE_SHARES_DIR.length);
+    if (shareId.includes('/')) continue;
     const url = `${window.location.origin}/s/${computeOpaqueSegment(repoId, shareId)}`;
     return { shareId, url };
   }
@@ -197,6 +208,22 @@ async function registerRepoId(repoId: string, owner: string, repo: string): Prom
   if (!res.ok) throw new Error(`repo-id registration failed (${res.status})`);
 }
 
+// Registration answers the same for every request once a repoId is registered, so it cannot tell
+// whether the repoId is bound to this repository (e.g. if another repository copied it and
+// registered first). Check that the new link resolves to this owner before handing it out.
+async function verifyShareResolves(segment: string, owner: string): Promise<void> {
+  const base = getApiBase();
+  const res = await fetch(`${base}/v1/git-shares/${segment}`);
+  const meta: unknown = res.ok ? await res.json() : undefined;
+  const resolvedOwner =
+    typeof meta === 'object' && meta !== null && 'owner' in meta && typeof meta.owner === 'string'
+      ? meta.owner
+      : undefined;
+  if (resolvedOwner === undefined || resolvedOwner.toLowerCase() !== owner.toLowerCase()) {
+    throw new Error('share link does not resolve to this repository');
+  }
+}
+
 // --- Ensure repoId ---
 // Read .shares/.repo-id from the local store (preferred, populated by sync) or
 // directly from the GitHub API. If absent, generate and commit a fresh one.
@@ -241,14 +268,32 @@ async function createGitShare(owner: string, repo: string, notePath: string): Pr
   const repoId = await ensureRepoId(token, owner, repo);
   await registerRepoId(repoId, owner, repo);
 
-  // Commit a new share file and mirror it to the local store immediately
+  // Commit a new share file, check that its link resolves to this repository, and only then
+  // mirror it to the local store. A share whose link does not work is removed again.
   const shareId = generateShareId();
-  const sha = await putRepoFile(token, owner, repo, `.shares/${shareId}`, notePath, `share: ${notePath}`);
+  const descriptorPath = opaqueDescriptorPath(shareId);
+  const sha = await putRepoFile(token, owner, repo, descriptorPath, notePath, `share: ${notePath}`);
+  const segment = computeOpaqueSegment(repoId, shareId);
+  try {
+    await verifyShareResolves(segment, owner);
+  } catch (error) {
+    await deleteRepoFile(
+      token,
+      owner,
+      repo,
+      descriptorPath,
+      sha,
+      `share: remove unusable link for ${notePath}`
+    );
+    throw error;
+  }
   const store = getRepoStore(slug);
-  const id = store.createFile(`.shares/${shareId}`, notePath, { kind: 'text' });
+  // A sync running during the check may already have imported the descriptor
+  const id =
+    store.findMetaByPath(descriptorPath)?.id ?? store.createFile(descriptorPath, notePath, { kind: 'text' });
   markSynced(slug, id, { remoteSha: sha, syncedHash: hashText(notePath) });
 
-  const url = `${window.location.origin}/s/${computeOpaqueSegment(repoId, shareId)}`;
+  const url = `${window.location.origin}/s/${segment}`;
   return { shareId, url };
 }
 
@@ -262,13 +307,13 @@ async function revokeGitShare(
   if (!token) throw new Error('Not authenticated.');
 
   // Read the share file to get its SHA — required by the GitHub delete API
-  const file = await readRepoFile(token, owner, repo, `.shares/${shareId}`);
+  const file = await readRepoFile(token, owner, repo, opaqueDescriptorPath(shareId));
   if (file) {
     await deleteRepoFile(
       token,
       owner,
       repo,
-      `.shares/${shareId}`,
+      opaqueDescriptorPath(shareId),
       file.sha,
       `share: revoke ${notePath}`
     );
@@ -277,5 +322,5 @@ async function revokeGitShare(
   // Remove from local store — sync tombstone will be a no-op since the file
   // is already gone from GitHub (the sync handles missing remote gracefully).
   const store = getRepoStore(`${owner}/${repo}`);
-  store.deleteFile(`.shares/${shareId}`);
+  store.deleteFile(opaqueDescriptorPath(shareId));
 }

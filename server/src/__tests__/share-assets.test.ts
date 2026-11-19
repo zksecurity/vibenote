@@ -73,4 +73,40 @@ describe('share asset helpers', () => {
     expect(paths.has('notes/media/intro.webm')).toBe(true);
     expect(paths.has('notes/media/captions.vtt')).toBe(true);
   });
+
+  it('ignores src lookalikes that are not asset attributes', () => {
+    const paths = collectAssetPaths('notes/shared.md', '<img data-src="img/a.png" alt="src=\'img/b.png\'">');
+    expect(paths.size).toBe(0);
+  });
+
+  it('scans adversarial markdown in linear time', () => {
+    // Each of these took minutes per MiB with the previous backtracking patterns.
+    const size = 1 << 20;
+    const inputs = [
+      '['.repeat(size),
+      '![x]('.repeat(size / 5),
+      '[a[b]'.repeat(size / 5),
+      '<a '.repeat(size / 3),
+      '<a ' + 'src="x" '.repeat(size / 8),
+      '<a x="'.repeat(size / 6),
+      '[x](' + '(a)'.repeat(size / 3),
+      '[a]:' + ' '.repeat(size) + '\n\n',
+      '<a x="' + 'a <a y="'.repeat(size / 8),
+      '<a x="' + '<a '.repeat(size / 3),
+      '```\n'.repeat(size / 4),
+      '> '.repeat(size / 2) + '```',
+      '\\`'.repeat(size / 2),
+      '`'.repeat(size) + '\u2028',
+      '[r]: ' + 'a'.repeat(size / 2) + '\n\n' + '[x][r]'.repeat(size / 12),
+      ('[a]: x' + '\u2028').repeat(size / 7),
+      '\n'.repeat(size),
+    ];
+    for (const input of inputs) {
+      let start = performance.now();
+      extractRelativeAssetRefs(input);
+      // Linear scans take well under a second; the quadratic variants take minutes per MiB. The bound
+      // leaves room for a loaded machine running the suite in parallel.
+      expect(performance.now() - start).toBeLessThan(3000);
+    }
+  });
 });

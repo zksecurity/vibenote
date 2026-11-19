@@ -44,33 +44,51 @@ function encodeAssetPath(pathValue: string): string {
     .join('/');
 }
 
-function extractRelativeAssetRefs(markdown: string): string[] {
+function extractRelativeAssetRefs(rawMarkdown: string): string[] {
+  // Line-based patterns below expect `\n` line endings
+  const markdown = stripCode(rawMarkdown.replace(/\r\n?/g, '\n'));
   const added = new Set<string>();
   const add = (raw: string | undefined) => {
     let target = normalizeLinkTarget(raw);
     if (target) added.add(target);
   };
 
-  const inlinePattern = /(!)?\[[^\]]*]\(([^)]+)\)/g;
-  for (const match of markdown.matchAll(inlinePattern)) {
-    add(captureUrl(match[2]));
+  // Every scanned span excludes its own opening delimiter, so a failed match stops at the next
+  // candidate instead of rescanning the rest of the note. This keeps extraction linear in the note
+  // size even for adversarial input (e.g. thousands of unmatched `[`).
+  // The flat pattern finds links whose text has no brackets; the nested pattern allows one level of
+  // balanced brackets in the text. Together they find both targets of `[![alt](a.png)](b.pdf)`.
+  // Destinations may likewise contain one level of balanced parentheses, e.g. in `"title (1)"`.
+  const destination = String.raw`\(((?:[^()]|\([^()]*\))+)\)`;
+  const inlinePatterns = [
+    new RegExp(String.raw`\[[^[\]]*\]` + destination, 'g'),
+    new RegExp(String.raw`\[(?:[^[\]]|\[[^[\]]*\])*\]` + destination, 'g'),
+  ];
+  for (const inlinePattern of inlinePatterns) {
+    for (const match of markdown.matchAll(inlinePattern)) {
+      add(captureUrl(match[1]));
+    }
   }
 
-  const htmlAssetPattern =
-    /<(img|a|audio|video|source|track)\b[^>]*?(?:src|href)=["']([^"']+)["'][^>]*>/gi;
-  for (const match of markdown.matchAll(htmlAssetPattern)) {
-    add(match[2]);
+  for (const ref of extractHtmlAssetRefs(markdown)) {
+    add(ref);
   }
 
   const definitions = extractReferenceDefinitions(markdown);
-  const referencePattern = /(!)?\[([^\]]*)]\[([^\]]*)]/g;
+  const referencePattern = /(!)?\[([^[\]]*)\]\[([^[\]]*)\]/g;
+  // Collect the labels first and resolve each once: adding a target costs its length, so resolving
+  // per use would let many uses of one long definition cost their product.
+  const usedLabels = new Set<string>();
   for (const match of markdown.matchAll(referencePattern)) {
     let label = match[3];
     if (label === undefined) continue;
     if (label.trim().length === 0) {
       label = match[2] ?? '';
     }
-    const target = definitions.get(label.trim().toLowerCase());
+    usedLabels.add(label.trim().toLowerCase());
+  }
+  for (const label of usedLabels) {
+    const target = definitions.get(label);
     if (target) {
       add(target);
     }
@@ -87,6 +105,107 @@ function extractRelativeAssetRefs(markdown: string): string[] {
       }
     })
     .filter((ref) => ref !== undefined);
+}
+
+// Blank out fenced code blocks and inline code spans, which the viewer renders as text: paths and
+// markup in them are not assets, and an unfinished HTML example in them must not swallow later tags.
+// Line breaks are kept for the line-based patterns.
+function stripCode(markdown: string): string {
+  // Fences may follow blockquote markers and list indentation. The info string takes the rest of the
+  // line unconditionally (`.` would stop at U+2028), so the marker run is never retried.
+  let opener = /^(?:[ \t]*>)*[ \t]*(`{3,}|~{3,})([^\n]*)/;
+  let closer = /^(?:[ \t]*>)*[ \t]*(`{3,}|~{3,})[ \t]*$/;
+  let lines = markdown.split('\n');
+  let fence: { char: string; length: number } | undefined;
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i] ?? '';
+    if (fence === undefined) {
+      let open = opener.exec(line);
+      let marker = open?.[1];
+      // A backtick fence's info string has no backticks: "```code``` text" is inline code instead
+      if (marker !== undefined && !(marker.startsWith('`') && (open?.[2] ?? '').includes('`'))) {
+        fence = { char: marker.charAt(0), length: marker.length };
+        lines[i] = '';
+      }
+      continue;
+    }
+    // A closing fence uses the same character, is at least as long, and has nothing after it
+    let closing = closer.exec(line)?.[1];
+    if (closing !== undefined && closing.charAt(0) === fence.char && closing.length >= fence.length) {
+      fence = undefined;
+    }
+    lines[i] = '';
+  }
+  // Inline code spans; an escaped backtick does not open one
+  return lines.join('\n').replace(/(?<!\\)`[^`\n]*`/g, '');
+}
+
+// Values of src/href attributes on asset-bearing HTML tags. Each tag is parsed once, left to right,
+// honoring quoted attribute values (which may contain `<`, `>` or line breaks), and the search resumes
+// after it, so the scan is linear in the note size. An unclosed quote makes the candidate not a tag,
+// and the search resumes after that quote: it was the last quote of its kind, so this happens at most
+// once per kind. A tag still open at the end of the note ends the search.
+function extractHtmlAssetRefs(markdown: string): string[] {
+  let refs: string[] = [];
+  let tagStart = /<(?:img|a|audio|video|source|track)\b/gi;
+  let match: RegExpExecArray | null;
+  while ((match = tagStart.exec(markdown)) !== null) {
+    let tag = parseTagAttributes(markdown, tagStart.lastIndex);
+    if (tag === undefined) break;
+    for (let attribute of tag.attributes) {
+      if (attribute.name === 'src' || attribute.name === 'href') refs.push(attribute.value);
+    }
+    tagStart.lastIndex = tag.end;
+  }
+  return refs;
+}
+
+// Parse attributes from `start` (just after the tag name) up to the closing `>`. Returns where
+// scanning should resume: after `>`, or at an unquoted `<`, which means this was not a tag.
+function parseTagAttributes(
+  text: string,
+  start: number
+): { attributes: { name: string; value: string }[]; end: number } | undefined {
+  let attributes: { name: string; value: string }[] = [];
+  let i = start;
+  while (i < text.length) {
+    let ch = text.charAt(i);
+    if (ch === '>') return { attributes, end: i + 1 };
+    if (ch === '<') return { attributes: [], end: i };
+    if (/[\s/]/.test(ch)) {
+      i++;
+      continue;
+    }
+    let nameEnd = i;
+    while (nameEnd < text.length && !/[\s=>/<"']/.test(text.charAt(nameEnd))) nameEnd++;
+    if (nameEnd === i) {
+      // A stray quote where a name should be; skip it
+      i++;
+      continue;
+    }
+    let name = text.slice(i, nameEnd).toLowerCase();
+    i = nameEnd;
+    while (i < text.length && /\s/.test(text.charAt(i))) i++;
+    if (text.charAt(i) !== '=') {
+      attributes.push({ name, value: '' });
+      continue;
+    }
+    i++;
+    while (i < text.length && /\s/.test(text.charAt(i))) i++;
+    let quote = text.charAt(i);
+    if (quote === '"' || quote === "'") {
+      let close = text.indexOf(quote, i + 1);
+      if (close === -1) return { attributes: [], end: i + 1 };
+      attributes.push({ name, value: text.slice(i + 1, close) });
+      i = close + 1;
+    } else {
+      let valueEnd = i;
+      while (valueEnd < text.length && !/[\s>"'<`=]/.test(text.charAt(valueEnd))) valueEnd++;
+      attributes.push({ name, value: text.slice(i, valueEnd) });
+      i = valueEnd;
+    }
+  }
+  return undefined;
 }
 
 function collectAssetPaths(notePath: string, markdown: string): Set<string> {
@@ -136,7 +255,11 @@ function captureUrl(raw: string | undefined): string | undefined {
 
 function extractReferenceDefinitions(markdown: string): Map<string, string> {
   const map = new Map<string, string>();
-  const definitionPattern = /^\s*\[([^\]]+)\]:\s*(<[^>]+>|[^\s]+)(?:\s+["'(][^"'()]*["')])?\s*$/gim;
+  // The destination and the title may each start on the next line. Each gap allows at most one line
+  // break, and its alternatives start with different characters, so no span of whitespace can be
+  // split in several ways: an attempt stays linear in its few lines.
+  const definitionPattern =
+    /^[ \t]*\[([^[\]]+)\]:[ \t]*(?:\n[ \t]*)?(<[^<>\n]+>|\S+)(?:(?:[ \t]+(?:\n[ \t]*)?|\n[ \t]*)(?:"[^"\n]*"|'[^'\n]*'|\([^()\n]*\)))?[ \t]*$/gim;
   let match: RegExpExecArray | null;
   while ((match = definitionPattern.exec(markdown)) !== null) {
     const labelRaw = match[1];

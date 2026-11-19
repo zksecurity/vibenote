@@ -5,6 +5,9 @@ export type RepoIdRecord = {
   repoId: string;
   owner: string;
   repo: string;
+  // GitHub's immutable numeric repository id. Names can be reused by a different repository after a
+  // rename, transfer or deletion, so resolution checks that the name still belongs to this repository.
+  githubRepoId: number;
   registeredAt: string;
 };
 
@@ -80,16 +83,28 @@ class RepoIdStore implements RepoIdStoreInstance {
   }
 
   async set(record: RepoIdRecord): Promise<void> {
+    let repoKey = `${record.owner}/${record.repo}`;
+    let previousRecord = this.#records.get(record.repoId);
+    let previousRepoId = this.#repos.get(repoKey);
     this.#records.set(record.repoId, record);
-    this.#repos.set(`${record.owner}/${record.repo}`, record.repoId);
-    await this.#persist();
+    this.#repos.set(repoKey, record.repoId);
+    try {
+      await this.#persist();
+    } catch (error) {
+      // A binding only counts once it is on disk; otherwise a retry would find it and skip persisting
+      if (previousRecord === undefined) this.#records.delete(record.repoId);
+      else this.#records.set(record.repoId, previousRecord);
+      if (previousRepoId === undefined) this.#repos.delete(repoKey);
+      else this.#repos.set(repoKey, previousRepoId);
+      throw error;
+    }
   }
 
   #hydrate(records: RepoIdRecord[]): void {
     this.#records.clear();
     this.#repos.clear();
     for (let record of records) {
-      if (!record || typeof record.repoId !== 'string') continue;
+      if (!record || typeof record.repoId !== 'string' || typeof record.githubRepoId !== 'number') continue;
       this.#records.set(record.repoId, record);
       this.#repos.set(`${record.owner}/${record.repo}`, record.repoId);
     }
@@ -98,11 +113,13 @@ class RepoIdStore implements RepoIdStoreInstance {
   async #persist(): Promise<void> {
     let serialized: RepoIdRecord[] = Array.from(this.#records.values());
     let payload: RepoIdStoreData = { records: serialized };
-    this.#persistQueue = this.#persistQueue.then(async () => {
+    let write = async () => {
       let tmpPath = `${this.#filePath}.tmp`;
       await fs.writeFile(tmpPath, JSON.stringify(payload, null, 2), { mode: FILE_MODE });
       await fs.rename(tmpPath, this.#filePath);
-    });
+    };
+    // Writes run in order, each after the previous one settles; a failed write must not skip later ones
+    this.#persistQueue = this.#persistQueue.then(write, write);
     await this.#persistQueue;
   }
 }

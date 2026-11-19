@@ -157,7 +157,7 @@ class SessionStore {
       }
     }
     if (removed) {
-      void this.#persist();
+      this.#persist().catch((error) => console.error('[vibenote] session prune persist failed', error));
     }
   }
 
@@ -190,12 +190,16 @@ class SessionStore {
   }
 
   async #persist(): Promise<void> {
-    this.#persistQueue = this.#persistQueue.then(async () => {
+    let write = async () => {
       let tmpPath = `${this.#filePath}.tmp`;
       let payload = JSON.stringify(Array.from(this.#sessions.values()), null, 2);
       await fs.writeFile(tmpPath, payload, { mode: FILE_MODE });
       await fs.rename(tmpPath, this.#filePath);
-    });
+    };
+    // Writes run in order, each after the previous one settles. A failed write must not skip later
+    // ones: each snapshot holds the full current state, so the next success also persists changes
+    // whose own write failed.
+    this.#persistQueue = this.#persistQueue.then(write, write);
     await this.#persistQueue;
   }
 }

@@ -2,7 +2,9 @@ import express from 'express';
 import { env } from './env.ts';
 import { verifyBearerSession } from './api.ts';
 
-export { requireSession, handleErrors, HttpError };
+import { HttpErrorClass } from './http-error.ts';
+
+export { requireSession, handleErrors, queryParam };
 
 function requireSession(req: express.Request, res: express.Response, next: express.NextFunction) {
   let header = req.header('authorization') || req.header('Authorization');
@@ -23,28 +25,25 @@ function handleErrors<T>(route: (req: express.Request, res: express.Response) =>
     try {
       return await route(req, res);
     } catch (error) {
+      // A streamed response can fail after its headers went out; all we can do is cut the connection
+      if (res.headersSent) {
+        res.destroy();
+        return;
+      }
       if (error instanceof HttpErrorClass) {
         res.status(error.status).json({ error: error.message });
       } else {
-        res.status(400).json({ error: getErrorMessage(error) });
+        // Unexpected errors can carry upstream responses or server paths; log them, answer generically
+        console.error('[vibenote] request failed', error);
+        res.status(500).json({ error: 'internal error' });
       }
     }
   };
 }
 
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message) return error.message;
-  return String(error);
-}
-
-function HttpError(status: number, message: string): HttpErrorClass {
-  return new HttpErrorClass(status, message);
-}
-
-class HttpErrorClass extends Error {
-  status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-  }
+// Read a query parameter as a plain string. Express's extended query parser turns inputs like
+// `a[b]=c` or `a=1&a=2` into objects and arrays, which must never reach string handling.
+function queryParam(req: express.Request, name: string): string {
+  let value = req.query[name];
+  return typeof value === 'string' ? value : '';
 }

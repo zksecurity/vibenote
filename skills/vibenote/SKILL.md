@@ -54,7 +54,7 @@ web_fetch https://api.vibenote.dev/v1/git-shares/BR6IvcSC4zqhpdi7QE4gw5L-1n3N3m-
 Shares are plain-text files committed to the `.shares/` folder of the repo. No server interaction required — just a git commit.
 
 ```bash
-# Content is just the note path (plain text, no JSON)
+# Tier 1 share. Content is just the note path (plain text, no JSON)
 echo "notes/my-note.md" > .shares/<shareId>
 git add .shares/<shareId> && git commit -m "share: notes/my-note.md" && git push
 ```
@@ -102,5 +102,13 @@ curl -X POST https://api.vibenote.dev/v1/repo-id \
   -d '{"repoId":"BR6IvcSC4zo","owner":"zksecurity","repo":"vibenote"}'
 ```
 
-The opaque URL segment is then `base64url(repoId_bytes[8] || shareId_bytes[16])`, constructable locally without further server calls.
+Opaque shares use descriptors in `.shares/opaque/` instead of `.shares/`, so the Tier 1 URL cannot serve them:
+
+```bash
+mkdir -p .shares/opaque
+echo "notes/my-note.md" > .shares/opaque/<shareId>
+git add .shares/opaque/<shareId> && git commit -m "share: notes/my-note.md" && git push
+```
+
+The opaque URL segment is then `base64url(repoId_bytes[8] || shareId_bytes[16])`, constructable locally without further server calls. Revoke an opaque share by deleting `.shares/opaque/<shareId>`.
 

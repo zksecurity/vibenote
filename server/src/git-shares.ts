@@ -1,9 +1,11 @@
 import type express from 'express';
 import { env } from './env.ts';
-import { getRepoInstallationId, installationRequest } from './github-app.ts';
+import { getOwnerInstallationId, installationRequest } from './github-app.ts';
 import { resolveAssetPath, encodeAssetPath, collectAssetPaths } from './share-assets.ts';
 import { createRepoIdStore } from './repo-id-store.ts';
-import { handleErrors, HttpError } from './common.ts';
+import { handleErrors } from './common.ts';
+import { HttpError } from './http-error.ts';
+import { readTextBounded, pipeBounded } from './bounded-body.ts';
 
 export { gitShareEndpoints };
 
@@ -33,7 +35,10 @@ function isValidOwnerRepo(owner: string, repo: string): boolean {
 const REPO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
 
 function isValidRepoId(repoId: string): boolean {
-  return REPO_ID_PATTERN.test(repoId);
+  if (!REPO_ID_PATTERN.test(repoId)) return false;
+  // Opaque segments decode to bytes and look up their canonical encoding. A noncanonical spelling
+  // (the last character carries 2 unused bits) would register fine but never resolve.
+  return Buffer.from(repoId, 'base64url').toString('base64url') === repoId;
 }
 
 // --- Asset cache (same pattern as sharing.ts) ---
@@ -44,6 +49,16 @@ function isValidRepoId(repoId: string): boolean {
 type AssetCacheEntry = { paths: Set<string>; cachedAt: number; notePath: string };
 const assetCache = new Map<string, AssetCacheEntry>();
 const ASSET_CACHE_TTL_MS = 5 * 60 * 1000;
+
+// --- Upstream size limits ---
+// A share descriptor holds just a note path.
+const MAX_DESCRIPTOR_BYTES = 4 * 1024;
+const MAX_NOTE_BYTES = 2 * 1024 * 1024;
+const MAX_ASSET_BYTES = 25 * 1024 * 1024;
+// .shares/.repo-id holds an 11-character id plus optional whitespace.
+const MAX_REPO_ID_FILE_BYTES = 64;
+const MAX_REPO_METADATA_BYTES = 256 * 1024;
+const MAX_ERROR_LOG_BYTES = 4 * 1024;
 
 // --- Repo ID store ---
 
@@ -60,7 +75,7 @@ async function fetchRepoFile(
 ): Promise<Response> {
   let installationId: number;
   try {
-    installationId = await getRepoInstallationId(env, owner, repo);
+    installationId = await getOwnerInstallationId(env, owner);
   } catch {
     throw HttpError(404, 'share not found');
   }
@@ -69,19 +84,57 @@ async function fetchRepoFile(
   if (res.status === 404) throw HttpError(404, 'share not found');
   if (!res.ok) {
     // Log actual error server-side, return generic 404 to avoid leaking repo existence
-    const text = await res.text().catch(() => '');
+    const text = await readTextBounded(res, MAX_ERROR_LOG_BYTES).catch(() => '(error body too large)');
     console.error(`[vibenote] github fetch error: ${res.status} ${text}`);
     throw HttpError(404, 'share not found');
   }
   return res;
 }
 
-// Fetch .shares/<shareId> and return the note path it contains.
-// Share files are plain text — the entire content is just the note path.
-async function fetchSharePath(owner: string, repo: string, shareId: string): Promise<string> {
+// Read GitHub's numeric id of the repository currently at owner/repo. Renames redirect to the same
+// repository; a reused name resolves to a different id.
+async function fetchGitHubRepoId(owner: string, repo: string): Promise<number> {
+  let installationId: number;
+  try {
+    installationId = await getOwnerInstallationId(env, owner);
+  } catch {
+    throw HttpError(404, 'share not found');
+  }
+  const url = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+  const res = await installationRequest(env, installationId, url, {
+    headers: { Accept: 'application/vnd.github+json' },
+  });
+  if (!res.ok) throw HttpError(404, 'share not found');
+  let json: unknown;
+  try {
+    json = JSON.parse(await readTextBounded(res, MAX_REPO_METADATA_BYTES));
+  } catch {
+    throw HttpError(404, 'share not found');
+  }
+  if (typeof json !== 'object' || json === null || !('id' in json) || typeof json.id !== 'number') {
+    throw HttpError(404, 'share not found');
+  }
+  return json.id;
+}
+
+// Share descriptors are plain-text files whose entire content is the note path.
+// Tier 1 descriptors live at .shares/<shareId>, Tier 2 descriptors at .shares/opaque/<shareId>.
+// Share ids cannot contain `/`, so the Tier 1 route can never read a Tier 2 descriptor: a shareId
+// decoded from an opaque link resolves exactly like a nonexistent share there, and does not let a
+// link holder confirm a guessed repository name.
+function openDescriptorPath(shareId: string): string {
+  return `.shares/${shareId}`;
+}
+
+function opaqueDescriptorPath(shareId: string): string {
+  return `.shares/opaque/${shareId}`;
+}
+
+// Fetch a share descriptor and return the note path it contains.
+async function fetchSharePath(owner: string, repo: string, descriptorPath: string): Promise<string> {
   const GENERIC = 'share not found';
-  const ghRes = await fetchRepoFile(owner, repo, `.shares/${shareId}`, 'application/vnd.github.raw');
-  const raw = (await ghRes.text()).trim();
+  const ghRes = await fetchRepoFile(owner, repo, descriptorPath, 'application/vnd.github.raw');
+  const raw = (await readTextBounded(ghRes, MAX_DESCRIPTOR_BYTES)).trim();
   if (!raw || !raw.toLowerCase().endsWith('.md')) throw HttpError(404, GENERIC);
   let sanitized = raw.replace(/\\/g, '/').replace(/^\/+/, '');
   if (sanitized.includes('..')) throw HttpError(404, GENERIC);
@@ -91,8 +144,9 @@ async function fetchSharePath(owner: string, repo: string, shareId: string): Pro
 // --- Opaque segment helpers (Tier 2) ---
 
 // A Tier 2 URL segment is base64url(repoId_bytes[8] || shareId_bytes[16]) = exactly 32 chars.
-// The repoId (8 bytes) maps to owner/repo server-side; the shareId (16 bytes) is the
-// .shares/<shareId>.json filename. Neither is visible in the URL.
+// The repoId (8 bytes) maps to owner/repo server-side; the shareId (16 bytes) names the
+// .shares/opaque/<shareId> descriptor. The URL hides the repository, not the shareId: anyone can
+// decode the segment, which is why Tier 2 descriptors live outside the Tier 1 namespace.
 const OPAQUE_SEGMENT_BYTE_LENGTH = 24; // 8 (repoId) + 16 (shareId)
 const REPO_ID_BYTE_LENGTH = 8;
 // Exactly 32 base64url characters (no padding, no standard base64 +/ chars).
@@ -129,7 +183,7 @@ async function ensureAssetsLoaded(
     return cached.paths;
   }
   const ghRes = await fetchRepoFile(owner, repo, notePath, 'application/vnd.github.raw');
-  const markdown = await ghRes.text();
+  const markdown = await readTextBounded(ghRes, MAX_NOTE_BYTES);
   return cacheAssets(cacheKey, notePath, markdown);
 }
 
@@ -141,7 +195,7 @@ async function serveContent(
   cacheKey: string
 ): Promise<void> {
   const ghRes = await fetchRepoFile(owner, repo, notePath, 'application/vnd.github.raw');
-  const text = await ghRes.text();
+  const text = await readTextBounded(ghRes, MAX_NOTE_BYTES);
   cacheAssets(cacheKey, notePath, text);
   res
     .status(200)
@@ -166,7 +220,6 @@ async function serveAsset(
   if (!allowedPaths.has(pathCandidate)) throw HttpError(404, 'asset not found');
 
   const ghRes = await fetchRepoFile(owner, repo, pathCandidate, 'application/vnd.github.raw');
-  const buffer = Buffer.from(await ghRes.arrayBuffer());
   const contentType = ghRes.headers.get('Content-Type') ?? 'application/octet-stream';
   const headers: Record<string, string> = {
     'Content-Type': contentType,
@@ -178,7 +231,8 @@ async function serveAsset(
   if (etag) headers.ETag = etag;
   const lastModified = ghRes.headers.get('Last-Modified');
   if (lastModified) headers['Last-Modified'] = lastModified;
-  res.status(200).set(headers).send(buffer);
+  // Stream instead of buffering, so memory use does not grow with asset size or concurrent viewers
+  await pipeBounded(ghRes, res, MAX_ASSET_BYTES, headers);
 }
 
 function asTrimmedString(input: unknown): string {
@@ -204,7 +258,9 @@ function openCacheKey(owner: string, repo: string, shareId: string): string {
 
 // --- Tier 2 param extraction ---
 
-function getOpaqueShareParams(req: express.Request): { owner: string; repo: string; shareId: string } {
+async function getOpaqueShareParams(
+  req: express.Request
+): Promise<{ owner: string; repo: string; descriptorPath: string }> {
   const GENERIC = 'share not found';
   const params = req.params as Record<string, string | undefined>;
   const segment = (params.segment ?? '').trim();
@@ -215,8 +271,12 @@ function getOpaqueShareParams(req: express.Request): { owner: string; repo: stri
   const { repoId, shareId } = decoded;
   const record = repoIdStore.get(repoId);
   if (!record) throw HttpError(404, GENERIC);
+  // The stored name must still belong to the repository the repoId was registered for
+  if ((await fetchGitHubRepoId(record.owner, record.repo)) !== record.githubRepoId) {
+    throw HttpError(404, GENERIC);
+  }
 
-  return { owner: record.owner, repo: record.repo, shareId };
+  return { owner: record.owner, repo: record.repo, descriptorPath: opaqueDescriptorPath(shareId) };
 }
 
 function opaqueCacheKey(segment: string): string {
@@ -236,8 +296,8 @@ function gitShareEndpoints(app: express.Express) {
     handleErrors(async (req, res) => {
       const params = req.params as Record<string, string | undefined>;
       const segment = (params.segment ?? '').trim();
-      const { owner, repo, shareId } = getOpaqueShareParams(req);
-      const notePath = await fetchSharePath(owner, repo, shareId);
+      const { owner, repo, descriptorPath } = await getOpaqueShareParams(req);
+      const notePath = await fetchSharePath(owner, repo, descriptorPath);
       await serveContent(res, owner, repo, notePath, opaqueCacheKey(segment));
     })
   );
@@ -245,8 +305,8 @@ function gitShareEndpoints(app: express.Express) {
   app.get(
     '/v1/git-shares/:segment',
     handleErrors(async (req, res) => {
-      const { owner, repo, shareId } = getOpaqueShareParams(req);
-      await fetchSharePath(owner, repo, shareId); // validate share exists
+      const { owner, repo, descriptorPath } = await getOpaqueShareParams(req);
+      await fetchSharePath(owner, repo, descriptorPath); // validate share exists
       // Return owner (repo owner name) but not repo or shareId — URL stays opaque.
       res.json({ owner });
     })
@@ -257,8 +317,8 @@ function gitShareEndpoints(app: express.Express) {
     handleErrors(async (req, res) => {
       const params = req.params as Record<string, string | undefined>;
       const segment = (params.segment ?? '').trim();
-      const { owner, repo, shareId } = getOpaqueShareParams(req);
-      const notePath = await fetchSharePath(owner, repo, shareId);
+      const { owner, repo, descriptorPath } = await getOpaqueShareParams(req);
+      const notePath = await fetchSharePath(owner, repo, descriptorPath);
       await serveAsset(req, res, owner, repo, notePath, opaqueCacheKey(segment));
     })
   );
@@ -271,7 +331,7 @@ function gitShareEndpoints(app: express.Express) {
     '/v1/git-shares/:owner/:repo/:shareId/content',
     handleErrors(async (req, res) => {
       const { owner, repo, shareId } = getOpenShareParams(req);
-      const notePath = await fetchSharePath(owner, repo, shareId);
+      const notePath = await fetchSharePath(owner, repo, openDescriptorPath(shareId));
       await serveContent(res, owner, repo, notePath, openCacheKey(owner, repo, shareId));
     })
   );
@@ -280,7 +340,7 @@ function gitShareEndpoints(app: express.Express) {
     '/v1/git-shares/:owner/:repo/:shareId',
     handleErrors(async (req, res) => {
       const { owner, repo, shareId } = getOpenShareParams(req);
-      await fetchSharePath(owner, repo, shareId); // validate share exists
+      await fetchSharePath(owner, repo, openDescriptorPath(shareId)); // validate share exists
       res.json({ owner, repo, shareId });
     })
   );
@@ -289,7 +349,7 @@ function gitShareEndpoints(app: express.Express) {
     '/v1/git-shares/:owner/:repo/:shareId/assets',
     handleErrors(async (req, res) => {
       const { owner, repo, shareId } = getOpenShareParams(req);
-      const notePath = await fetchSharePath(owner, repo, shareId);
+      const notePath = await fetchSharePath(owner, repo, openDescriptorPath(shareId));
       await serveAsset(req, res, owner, repo, notePath, openCacheKey(owner, repo, shareId));
     })
   );
@@ -314,10 +374,18 @@ function gitShareEndpoints(app: express.Express) {
 
       const REPO_ACCESS_DENIED = 'repository not found or insufficient permissions';
 
+      // A registered repoId gets the same answer for every request, without contacting GitHub.
+      // Anyone holding an opaque link knows its repoId, so an answer that depended on owner/repo
+      // would confirm a guessed repository name. Clients check where a new link resolves instead.
+      if (repoIdStore.get(repoId) !== undefined) {
+        res.status(200).json({ ok: true });
+        return;
+      }
+
       // Resolve the GitHub App installation for this repo.
       let installationId: number;
       try {
-        installationId = await getRepoInstallationId(env, owner, repo);
+        installationId = await getOwnerInstallationId(env, owner);
       } catch {
         throw HttpError(404, REPO_ACCESS_DENIED);
       }
@@ -337,27 +405,47 @@ function gitShareEndpoints(app: express.Express) {
       if (!repoIdFileRes.ok) throw HttpError(404, REPO_ACCESS_DENIED);
 
       // File contains just the raw repoId string, no JSON wrapper
-      const storedRepoId = (await repoIdFileRes.text()).trim();
+      let repoIdFileText: string;
+      try {
+        repoIdFileText = await readTextBounded(repoIdFileRes, MAX_REPO_ID_FILE_BYTES);
+      } catch {
+        throw HttpError(404, REPO_ACCESS_DENIED);
+      }
+      const storedRepoId = repoIdFileText.trim();
       if (storedRepoId !== repoId) {
         throw HttpError(404, REPO_ACCESS_DENIED);
       }
 
-      // Reject if repoId already registered for a different repo (prevent collision DoS)
-      const existing = repoIdStore.get(repoId);
-      if (existing && (existing.owner !== owner || existing.repo !== repo)) {
+      let githubRepoId: number;
+      try {
+        githubRepoId = await fetchGitHubRepoId(owner, repo);
+      } catch {
         throw HttpError(404, REPO_ACCESS_DENIED);
       }
 
-      // Enforce one repoId per repo — reject if this repo already has a different repoId
+      // Enforce one repoId per repo — reject if this repo already has a different repoId.
+      // A binding of the same name to an older repository does not count: that name was reused.
       const existingByRepo = repoIdStore.getByRepo(owner, repo);
-      if (existingByRepo && existingByRepo.repoId !== repoId) {
+      if (
+        existingByRepo &&
+        existingByRepo.repoId !== repoId &&
+        existingByRepo.githubRepoId === githubRepoId
+      ) {
         throw HttpError(404, REPO_ACCESS_DENIED);
+      }
+
+      // Another request may have registered this repoId while we were talking to GitHub. The check and
+      // the insert below run without an await in between, so the first registration wins.
+      if (repoIdStore.get(repoId) !== undefined) {
+        res.status(200).json({ ok: true });
+        return;
       }
 
       await repoIdStore.set({
         repoId,
         owner,
         repo,
+        githubRepoId,
         registeredAt: new Date().toISOString(),
       });
 

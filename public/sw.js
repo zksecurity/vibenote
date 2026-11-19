@@ -4,6 +4,10 @@
 
 const APP_SHELL_CACHE = 'vibenote-app-shell-v1';
 const ASSET_CACHE = 'vibenote-asset-v1';
+
+function isOwnCache(name) {
+  return name.startsWith('vibenote-app-shell-') || name.startsWith('vibenote-asset-');
+}
 // Also reject flushes from older pages and stop replaying queued writes.
 // Offline app-shell caching remains enabled.
 const ENABLE_BACKGROUND_FLUSH = false;
@@ -37,10 +41,12 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
+      // Delete only outdated versions of this worker's own caches. Other caches on the origin, like
+      // the app's persistent blob cache, belong to the page and must survive worker updates.
       let cacheNames = await caches.keys();
       await Promise.all(
         cacheNames
-          .filter((name) => name !== APP_SHELL_CACHE && name !== ASSET_CACHE)
+          .filter((name) => isOwnCache(name) && name !== APP_SHELL_CACHE && name !== ASSET_CACHE)
           .map((name) => caches.delete(name))
       );
       await self.clients.claim();

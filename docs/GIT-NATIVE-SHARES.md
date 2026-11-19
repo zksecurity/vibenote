@@ -44,7 +44,7 @@ Example: `vibenote.dev/s/acme-org/team-notes/weekly-update`
    - `.shares/.repo-id` exists in the repo and contains matching `repoId`
 5. Server stores: `repoId → {owner, repo}` (one entry per repo, not per note)
 
-**Creating an opaque share**: Same as tier 1 — add `.shares/<shareId>`. Generate a random shareId: `crypto.randomBytes(16).toString('base64url')` (22 chars, 128 bits).
+**Creating an opaque share**: Add `.shares/opaque/<shareId>`, with the note path as content like a tier 1 descriptor. Generate a random shareId: `crypto.randomBytes(16).toString('base64url')` (22 chars, 128 bits). Tier 2 descriptors live outside the tier 1 namespace so the tier 1 endpoint can never serve them (see Security Model).
 
 **Share URL**: `vibenote.dev/s/<segment>`
 Where `segment = base64url(repoId_bytes[8] || shareId_bytes[16])` — a single 32-char opaque string.
@@ -53,7 +53,7 @@ Where `segment = base64url(repoId_bytes[8] || shareId_bytes[16])` — a single 3
 
 1. Decode segment (24 bytes): first 8 bytes → repoId, last 16 bytes → shareId
 2. Look up repoId → get owner/repo
-3. Fetch `.shares/<shareId>.json` from repo
+3. Fetch `.shares/opaque/<shareId>` from repo
 4. Serve content
 
 **Constructing links locally**: The client has the repoId (from `.shares/.repo-id`) and generates a random shareId. The opaque URL segment can be computed without any server round-trip.
@@ -73,9 +73,15 @@ Same as current: relative asset paths in markdown are resolved and served via an
 
 ### Security Model
 
-**What Tier 2 protects:** The opaque URL hides `owner`, `repo`, and `shareId` from anyone who sees the link. This is purely _URL privacy_ — it does not add access control beyond what the shareId entropy already provides.
+**What Tier 2 protects:** The opaque URL hides the repository name from anyone who sees the link. This is purely _URL privacy_ — it does not add access control beyond what the shareId entropy already provides. The owner is disclosed on purpose: the metadata endpoint returns it and the viewer shows who shared the note.
 
-**What Tier 2 does NOT protect:** The Tier 1 endpoint is always available to anyone who knows `owner/repo/shareId`. The shareId is a plaintext filename inside `.shares/` in the repo, visible to anyone with repo read access.
+The shareId is not hidden: anyone can decode it from the segment. A link holder must still be unable to confirm a guessed repository name, so:
+
+- Tier 2 descriptors live at `.shares/opaque/<shareId>`, which the tier 1 endpoint cannot address (share ids contain no `/`). A decoded shareId sent to the tier 1 endpoint resolves exactly like a nonexistent share, for a correct and a wrong repository guess alike.
+- The server looks up GitHub App installations per owner, never per repository, so a wrong repository name takes the same path as a right one: a single contents request, which GitHub answers with 404 for an inaccessible repository just as for a missing file.
+- `POST /v1/repo-id` answers the same `200` for every request with an already registered repoId, without contacting GitHub, since the repoId is part of every link. The client therefore checks that a new link resolves to its own owner before handing it out.
+
+**What Tier 2 does NOT protect:** The Tier 1 endpoint is always available to anyone who knows `owner/repo/shareId` of a tier 1 share. Descriptor filenames inside `.shares/` are visible to anyone with repo read access.
 
 **Why shareId entropy matters even with Tier 2:** If the shareId is guessable (e.g. `weekly-update`) and the repo name is known or guessable, an attacker can brute-force the Tier 1 endpoint and:
 

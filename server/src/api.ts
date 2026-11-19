@@ -3,8 +3,32 @@ import crypto from 'node:crypto';
 import type { Env } from './env.ts';
 import { signSession, verifySession, signState, verifyState, type SessionClaims } from './jwt.ts';
 import type { SessionStoreInstance, SessionRecord } from './session-store.ts';
+import { githubFetch } from './github-app.ts';
+import { HttpError } from './http-error.ts';
 
 export type { SessionClaims };
+export { CALLBACK_PAGE_CSP };
+
+// Inline script of the OAuth callback page. It reads its data from a JSON element, so the script
+// itself is static and the page's CSP can allow exactly this script by hash.
+const CALLBACK_SCRIPT = `(function(){
+  try {
+    const data = JSON.parse(document.getElementById('vibenote-auth').textContent);
+    if (window.opener) { window.opener.postMessage(data.message, data.targetOrigin); }
+  } catch (e) {}
+  setTimeout(function(){ window.close(); }, 50);
+})();`;
+const CALLBACK_SCRIPT_HASH = crypto.createHash('sha256').update(CALLBACK_SCRIPT).digest('base64');
+
+// CSP for HTML pages rendered by the OAuth callback: no resources, only the callback script.
+const CALLBACK_PAGE_CSP = [
+  "default-src 'none'",
+  `script-src 'sha256-${CALLBACK_SCRIPT_HASH}'`,
+  "style-src 'unsafe-inline'",
+  "base-uri 'none'",
+  "form-action 'none'",
+  "frame-ancestors 'none'",
+].join('; ');
 
 export type OAuthTokenResult = {
   accessToken: string;
@@ -60,12 +84,14 @@ export async function handleAuthCallback(
   stateToken: string,
   callbackUrl: string
 ): Promise<{ html: string }> {
-  let state = await verifyState(stateToken, env.SESSION_JWT_SECRET);
+  let state = await verifyStateToken(stateToken, env);
   let returnTo = getOptionalString(state, 'returnTo');
   if (returnTo === null || !returnTo.startsWith('http')) {
-    throw Error('invalid returnTo origin');
+    throw HttpError(400, 'invalid returnTo origin');
   }
   let returnToUrl = new URL(returnTo);
+  // GitHub redirects without a code when the user cancels authorization
+  if (code === '') throw HttpError(400, 'missing authorization code');
   let tokens = await exchangeCode(env, code, callbackUrl, stateToken);
   let user = await fetchGitHubUser(tokens.accessToken);
   let accessOrigin = returnToUrl.origin;
@@ -76,11 +102,11 @@ export async function handleAuthCallback(
     let errorHtml = `<!doctype html><meta charset="utf-8"><title>VibeNote - Unauthorized</title>
       <style>body{font-family:system-ui;max-width:600px;margin:100px auto;padding:20px;text-align:center}</style>
       <h1>Unauthorized</h1>
-      <p>Your GitHub user <strong>@${user.login}</strong> is not authorized to use ${
+      <p>Your GitHub user <strong>@${escapeHtml(user.login)}</strong> is not authorized to use ${
       isPreview ? 'preview deployments' : 'this environment'
     }.</p>
       <p>Please contact the VibeNote development team if you believe this is an error.</p>
-      <p><a href="${returnToUrl.toString()}">Return to app</a></p>`;
+      <p><a href="${escapeHtml(returnToUrl.toString())}">Return to app</a></p>`;
     return { html: errorHtml };
   }
 
@@ -122,16 +148,12 @@ export async function handleAuthCallback(
     },
     tokens: accessPayload,
   };
-  let html = `<!doctype html><meta charset="utf-8"><title>VibeNote Login</title><script>
-      (function(){
-        try {
-          const msg = ${JSON.stringify(message)};
-          if (window.opener && '${origin}') { window.opener.postMessage(msg, '${origin}'); }
-        } catch (e) {}
-        setTimeout(function(){ window.close(); }, 50);
-      })();
-    </script>
-    <p>Signed in. You can close this window. <a href="${returnToUrl.toString()}">Continue</a></p>`;
+  // GitHub profile fields like `name` are user-controlled, so the data is escaped for embedding in HTML
+  let data = jsonForHtml({ message, targetOrigin: origin });
+  let html = `<!doctype html><meta charset="utf-8"><title>VibeNote Login</title>
+    <script type="application/json" id="vibenote-auth">${data}</script>
+    <script>${CALLBACK_SCRIPT}</script>
+    <p>Signed in. You can close this window. <a href="${escapeHtml(returnToUrl.toString())}">Continue</a></p>`;
   return { html };
 }
 
@@ -143,13 +165,13 @@ export async function refreshAccessToken(
 ): Promise<OAuthTokenResult> {
   let record = store.get(sessionId);
   if (!record) {
-    throw new Error('session expired');
+    throw HttpError(401, 'session expired');
   }
 
   // Validate user is still allowed (enforced for preview deployments only)
   if (!isUserAllowed(env, record.login, requestOrigin)) {
     await store.delete(sessionId);
-    throw new Error('user not authorized');
+    throw HttpError(403, 'user not authorized');
   }
 
   let refreshPlain = store.decryptRefreshToken(record.refreshTokenCiphertext);
@@ -187,7 +209,7 @@ export async function buildSetupRedirect(
   installationId: string | null,
   origin: string
 ): Promise<string> {
-  let state = await verifyState(stateToken, env.SESSION_JWT_SECRET);
+  let state = await verifyStateToken(stateToken, env);
   let fallback = getOptionalString(state, 'returnTo') ?? '/';
   let url = new URL(returnTo || fallback, returnTo.startsWith('http') ? undefined : origin);
   if (installationId) {
@@ -197,6 +219,15 @@ export async function buildSetupRedirect(
     url.searchParams.set('setup_action', setupAction);
   }
   return url.toString();
+}
+
+// Verify a signed OAuth or installation state; a bad or expired state is the caller's error.
+async function verifyStateToken(stateToken: string, env: Env): Promise<Record<string, unknown>> {
+  try {
+    return await verifyState(stateToken, env.SESSION_JWT_SECRET);
+  } catch {
+    throw HttpError(400, 'invalid state');
+  }
 }
 
 export async function verifyBearerSession(token: string, env: Env): Promise<SessionClaims> {
@@ -209,7 +240,7 @@ async function fetchGitHubUser(accessToken: string): Promise<{
   name: string | null;
   avatarUrl: string | null;
 }> {
-  let ures = await fetch('https://api.github.com/user', {
+  let ures = await githubFetch('https://api.github.com/user', {
     headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/vnd.github+json' },
   });
   if (!ures.ok) {
@@ -232,7 +263,7 @@ async function exchangeCode(
     redirect_uri: callbackUrl,
     state: stateToken,
   };
-  let response = await fetch('https://github.com/login/oauth/access_token', {
+  let response = await githubFetch('https://github.com/login/oauth/access_token', {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -240,7 +271,13 @@ async function exchangeCode(
   if (!response.ok) {
     throw new Error(`token exchange failed: ${response.status}`);
   }
-  let json = await response.json();
+  let json: unknown = await response.json();
+  // GitHub answers 200 with an `error` field. An invalid, expired or reused code is the caller's
+  // error; anything else (e.g. incorrect_client_credentials) is a server misconfiguration.
+  if (typeof json === 'object' && json !== null && 'error' in json) {
+    if (json.error === 'bad_verification_code') throw HttpError(400, 'authorization code rejected');
+    throw new Error(`token exchange failed: ${String(json.error)}`);
+  }
   return parseOAuthTokenResponse(json);
 }
 
@@ -251,7 +288,7 @@ async function refreshWithToken(env: Env, refreshToken: string): Promise<OAuthTo
     grant_type: 'refresh_token',
     refresh_token: refreshToken,
   };
-  let response = await fetch('https://github.com/login/oauth/access_token', {
+  let response = await githubFetch('https://github.com/login/oauth/access_token', {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -343,4 +380,24 @@ function asNumber(value: unknown, field: string): number {
     }
   }
   throw new Error(`missing ${field}`);
+}
+
+// Serialize a value as JSON that can sit inside an HTML <script> element: escaping `<`, `>` and `&`
+// means no string value can close the element or open a comment, and the result still parses as JSON.
+function jsonForHtml(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
