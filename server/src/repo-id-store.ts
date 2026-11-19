@@ -101,11 +101,13 @@ class RepoIdStore implements RepoIdStoreInstance {
   async #persist(): Promise<void> {
     let serialized: RepoIdRecord[] = Array.from(this.#records.values());
     let payload: RepoIdStoreData = { records: serialized };
-    this.#persistQueue = this.#persistQueue.then(async () => {
+    let write = async () => {
       let tmpPath = `${this.#filePath}.tmp`;
       await fs.writeFile(tmpPath, JSON.stringify(payload, null, 2), { mode: FILE_MODE });
       await fs.rename(tmpPath, this.#filePath);
-    });
+    };
+    // Writes run in order, each after the previous one settles; a failed write must not skip later ones
+    this.#persistQueue = this.#persistQueue.then(write, write);
     await this.#persistQueue;
   }
 }
