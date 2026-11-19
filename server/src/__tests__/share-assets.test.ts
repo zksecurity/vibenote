@@ -164,6 +164,8 @@ describe('share asset helpers', () => {
       '```\n'.repeat(size / 4),
       '> '.repeat(size / 2) + '```',
       '\\`'.repeat(size / 2),
+      '`'.repeat(size) + '\u2028',
+      ('[a]: x' + '\u2028').repeat(size / 7),
       '\n'.repeat(size),
     ];
     for (const input of inputs) {

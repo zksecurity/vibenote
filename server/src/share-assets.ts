@@ -105,8 +105,9 @@ function extractRelativeAssetRefs(rawMarkdown: string): string[] {
 // markup in them are not assets, and an unfinished HTML example in them must not swallow later tags.
 // Line breaks are kept for the line-based patterns.
 function stripCode(markdown: string): string {
-  // Fences may follow blockquote markers and list indentation
-  let opener = /^(?:[ \t]*>)*[ \t]*(`{3,}|~{3,})(.*)$/;
+  // Fences may follow blockquote markers and list indentation. The info string takes the rest of the
+  // line unconditionally (`.` would stop at U+2028), so the marker run is never retried.
+  let opener = /^(?:[ \t]*>)*[ \t]*(`{3,}|~{3,})([^\n]*)/;
   let closer = /^(?:[ \t]*>)*[ \t]*(`{3,}|~{3,})[ \t]*$/;
   let lines = markdown.split('\n');
   let fence: { char: string; length: number } | undefined;
