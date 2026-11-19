@@ -76,13 +76,19 @@ function extractRelativeAssetRefs(rawMarkdown: string): string[] {
 
   const definitions = extractReferenceDefinitions(markdown);
   const referencePattern = /(!)?\[([^[\]]*)\]\[([^[\]]*)\]/g;
+  // Collect the labels first and resolve each once: adding a target costs its length, so resolving
+  // per use would let many uses of one long definition cost their product.
+  const usedLabels = new Set<string>();
   for (const match of markdown.matchAll(referencePattern)) {
     let label = match[3];
     if (label === undefined) continue;
     if (label.trim().length === 0) {
       label = match[2] ?? '';
     }
-    const target = definitions.get(label.trim().toLowerCase());
+    usedLabels.add(label.trim().toLowerCase());
+  }
+  for (const label of usedLabels) {
+    const target = definitions.get(label);
     if (target) {
       add(target);
     }

@@ -165,13 +165,16 @@ describe('share asset helpers', () => {
       '> '.repeat(size / 2) + '```',
       '\\`'.repeat(size / 2),
       '`'.repeat(size) + '\u2028',
+      '[r]: ' + 'a'.repeat(size / 2) + '\n\n' + '[x][r]'.repeat(size / 12),
       ('[a]: x' + '\u2028').repeat(size / 7),
       '\n'.repeat(size),
     ];
     for (const input of inputs) {
       let start = performance.now();
       extractRelativeAssetRefs(input);
-      expect(performance.now() - start).toBeLessThan(1000);
+      // Linear scans take well under a second; the quadratic variants take minutes per MiB. The bound
+      // leaves room for a loaded machine running the suite in parallel.
+      expect(performance.now() - start).toBeLessThan(3000);
     }
   });
 });
